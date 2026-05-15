@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1170 2532">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fff5f0"/>
+      <stop offset="100%" style="stop-color:#fff0e6"/>
+    </linearGradient>
+    <linearGradient id="iconBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff6a00"/>
+      <stop offset="100%" style="stop-color:#ee0000"/>
+    </linearGradient>
+  </defs>
+  <rect width="1170" height="2532" fill="url(#bg)"/>
+  <!-- Icon -->
+  <g transform="translate(585,1100)">
+    <rect x="-80" y="-80" width="160" height="160" rx="36" fill="url(#iconBg)"/>
+    <g transform="translate(0,-10)" fill="none" stroke="white" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M-35,12 Q-35,38 0,38 Q35,38 35,12" fill="rgba(255,255,255,0.2)" stroke="white"/>
+      <line x1="-42" y1="12" x2="42" y2="12"/>
+      <path d="M-16,-8 Q-16,-22 -8,-26 Q0,-30 0,-40" stroke="rgba(255,255,255,0.7)" stroke-width="4"/>
+      <path d="M0,-4 Q0,-18 8,-22 Q16,-26 16,-36" stroke="rgba(255,255,255,0.7)" stroke-width="4"/>
+      <path d="M16,-8 Q16,-22 24,-26 Q32,-30 32,-40" stroke="rgba(255,255,255,0.7)" stroke-width="4"/>
+    </g>
+  </g>
+  <!-- App name -->
+  <text x="585" y="1310" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-weight="300" font-size="48" fill="#333" letter-spacing="2">Space<tspan font-weight="700">Food</tspan></text>
+  <text x="585" y="1360" text-anchor="middle" font-family="system-ui,-apple-system,sans-serif" font-weight="400" font-size="24" fill="#999" letter-spacing="1">Uma experiencia gastronomica de outro mundo</text>
+</svg>
