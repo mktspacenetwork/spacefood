@@ -151,6 +151,7 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
   const [editDietaryRestrictions, setEditDietaryRestrictions] = useState("");
   const [editAge, setEditAge] = useState("");
   const [editPhone, setEditPhone] = useState("");
+  const [editCanOrderMeal, setEditCanOrderMeal] = useState(true);
   const [resettingPassword, setResettingPassword] = useState(false);
 
   const { register, handleSubmit, reset, unregister, formState: { errors } } = useForm();
@@ -236,6 +237,7 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
       setEditDietaryRestrictions(editingUser.user_metadata.dietary_restrictions || "");
       setEditAge(editingUser.user_metadata.age || "");
       setEditPhone(editingUser.user_metadata.phone || "");
+      setEditCanOrderMeal((editingUser.user_metadata as any).can_order_meal !== false);
     } else {
       reset({ name: "", email: "", password: "", role: "user", department: "" });
       setEditingCustomRoleId("");
@@ -243,6 +245,7 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
       setEditDietaryRestrictions("");
       setEditAge("");
       setEditPhone("");
+      setEditCanOrderMeal(true);
     }
   }, [editingUser, reset, unregister, userRoleMap]);
 
@@ -268,6 +271,7 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
         payload.dietaryRestrictions = editDietaryRestrictions;
         payload.age = editAge;
         payload.phone = editPhone;
+        payload.canOrderMeal = editCanOrderMeal;
         const updated = await api.authPut(`/admin/users/${editingUser.id}`, payload);
         // Save custom role assignment
         await api.authPut(`/admin/user-roles/${editingUser.id}`, { roleId: editingCustomRoleId || null });
@@ -628,6 +632,39 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
                 placeholder="Ex: Intolerância a Lactose, Sem Glúten..."
               />
             </div>
+
+            {/* Meal Order Permission */}
+            {editingUser && (
+              <div className={cn(
+                "flex items-center justify-between p-3 rounded-lg border transition-colors",
+                editCanOrderMeal
+                  ? "border-green-200 dark:border-green-800 bg-green-50/40 dark:bg-green-900/10"
+                  : "border-red-200 dark:border-red-800 bg-red-50/40 dark:bg-red-900/10"
+              )}>
+                <div className="flex items-center gap-2.5">
+                  <UtensilsCrossed size={15} className={editCanOrderMeal ? "text-green-600 dark:text-green-400" : "text-red-500"} />
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Permissão para pedir marmita</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {editCanOrderMeal ? "Usuário pode fazer pedidos normalmente." : "Usuário bloqueado de fazer pedidos."}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditCanOrderMeal(v => !v)}
+                  className={cn(
+                    "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-300",
+                    editCanOrderMeal ? "bg-green-500 dark:bg-green-600" : "bg-red-400 dark:bg-red-500"
+                  )}
+                >
+                  <span className={cn(
+                    "inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-300",
+                    editCanOrderMeal ? "translate-x-6" : "translate-x-1"
+                  )} />
+                </button>
+              </div>
+            )}
 
             <DialogFooter className="pt-2">
               <Button type="button" variant="ghost" onClick={() => setIsUserModalOpen(false)}>Cancelar</Button>

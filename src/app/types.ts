@@ -15,6 +15,8 @@ export interface MenuItem {
   fat?: number;
   fiber?: number;
   tip?: string;
+  recipe?: string; // Receita / modo de preparo
+  unitRestrictions?: string[]; // Vazio = aparece em todas as unidades; preenchido = só nas unidades listadas
   isPreviousDay?: boolean; // Flag para indicar que é do dia anterior
   isNotOnMenu?: boolean; // Flag para indicar que o item existe mas não está no cardápio de hoje
 }
@@ -35,6 +37,7 @@ export interface User {
   customRoleId?: string;
   lunchLocation?: string;
   dietaryRestrictions?: string;
+  canOrderMeal?: boolean; // true por padrão; false = usuário não pode fazer pedido
 }
 
 export interface Order {

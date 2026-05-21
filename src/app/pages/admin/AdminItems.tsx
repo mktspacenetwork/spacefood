@@ -46,6 +46,8 @@ export function AdminItems() {
 
   const [notifyChange, setNotifyChange] = useState(false);
   const [measurementUnits, setMeasurementUnits] = useState<string[]>(DEFAULT_UNITS);
+  const [availableUnits, setAvailableUnits] = useState<string[]>([]);
+  const [editUnitRestrictions, setEditUnitRestrictions] = useState<string[]>([]);
   const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<MenuItem>();
   const watchedImage = watch("image");
   const watchedName = watch("name");
@@ -74,6 +76,13 @@ export function AdminItems() {
       if (settingsData?.measurementUnits && Array.isArray(settingsData.measurementUnits)) {
         setMeasurementUnits(settingsData.measurementUnits);
       }
+      // Load available units for restriction selector
+      const rawUnits = settingsData?.units;
+      if (Array.isArray(rawUnits) && rawUnits.length > 0) {
+        setAvailableUnits(rawUnits.map((u: any) => typeof u === "string" ? u : u.name));
+      } else {
+        setAvailableUnits(["Sede Damasceno", "Sede Taipas", "Externo (Marmita)"]);
+      }
     } catch (e) {
       console.error(e);
       toast.error("Erro ao carregar dados.");
@@ -90,17 +99,19 @@ export function AdminItems() {
       setPreviewLoadFailed(false);
       setAiImageLoading(false);
       setImageLoadError(false);
+      setEditUnitRestrictions(editingItem.unitRestrictions || []);
     } else {
       reset({
         name: "", description: "", category: categories[0] || "Principal",
         calories: 0, image: "", available: 100, limit: 1, unit: "unidade",
         portionWeight: 0, kitchenUnit: "kg",
-        protein: 0, carbs: 0, fat: 0, fiber: 0, tip: ""
+        protein: 0, carbs: 0, fat: 0, fiber: 0, tip: "", recipe: ""
       });
       setImagePreview("");
       setPreviewLoadFailed(false);
       setAiImageLoading(false);
       setImageLoadError(false);
+      setEditUnitRestrictions([]);
     }
   // ⚠️ categories removido das deps: ter categories aqui causava reset
   // do formulário toda vez que uma categoria era adicionada/removida,
@@ -163,9 +174,10 @@ export function AdminItems() {
   const onSubmit = async (data: MenuItem) => {
     setSaving(true);
     try {
+      const payload = { ...data, unitRestrictions: editUnitRestrictions };
       if (editingItem) {
-        await api.authPut(`/menu/${editingItem.id}`, data);
-        setItems(items.map(i => i.id === editingItem.id ? { ...i, ...data } : i));
+        await api.authPut(`/menu/${editingItem.id}`, payload);
+        setItems(items.map(i => i.id === editingItem.id ? { ...i, ...payload } : i));
         
         if (notifyChange) {
             await api.authPost("/notifications", {
@@ -178,7 +190,7 @@ export function AdminItems() {
         
         toast.success("Item atualizado!");
       } else {
-        const newItem = await api.authPost("/menu", data);
+        const newItem = await api.authPost("/menu", payload);
         setItems([...items, newItem]);
         toast.success("Item criado!");
       }
@@ -648,6 +660,65 @@ export function AdminItems() {
               <div className="col-span-2 space-y-1.5">
                 <Label className="text-xs font-semibold flex items-center gap-2"><Info size={14} /> Dica</Label>
                 <textarea className="flex min-h-[50px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" placeholder="Ex: Combina bem com arroz integral..." {...register("tip")} />
+              </div>
+
+              {/* Receita */}
+              <div className="col-span-2 border-t pt-3 mt-1 space-y-1.5">
+                <Label className="text-xs font-semibold flex items-center gap-2">
+                  <Sparkles size={14} className="text-amber-500" /> Receita / Modo de Preparo
+                </Label>
+                <textarea
+                  className="flex min-h-[90px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  placeholder="Descreva os ingredientes e o modo de preparo..."
+                  {...register("recipe")}
+                />
+              </div>
+
+              {/* Restrição por Unidade */}
+              <div className="col-span-2 border-t pt-3 mt-1 space-y-2">
+                <Label className="text-xs font-semibold flex items-center gap-2">
+                  <Tag size={14} className="text-blue-500" /> Visibilidade por Unidade
+                </Label>
+                <p className="text-[10px] text-muted-foreground">
+                  Selecione as unidades onde este item será exibido. Sem seleção = aparece em <strong>todas</strong> as unidades.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {availableUnits.map(unit => {
+                    const isSelected = editUnitRestrictions.includes(unit);
+                    return (
+                      <button
+                        key={unit}
+                        type="button"
+                        onClick={() => setEditUnitRestrictions(prev =>
+                          isSelected ? prev.filter(u => u !== unit) : [...prev, unit]
+                        )}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-medium border transition-all",
+                          isSelected
+                            ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                            : "bg-card text-muted-foreground border-border hover:bg-accent"
+                        )}
+                      >
+                        {isSelected ? <Check size={10} className="inline mr-1" /> : null}
+                        {unit}
+                      </button>
+                    );
+                  })}
+                  {editUnitRestrictions.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setEditUnitRestrictions([])}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium border border-dashed border-muted-foreground/40 text-muted-foreground hover:text-destructive hover:border-destructive transition-all"
+                    >
+                      <X size={10} className="inline mr-1" /> Limpar (todas)
+                    </button>
+                  )}
+                </div>
+                {editUnitRestrictions.length > 0 && (
+                  <p className="text-[10px] text-primary font-medium">
+                    Restrito a: {editUnitRestrictions.join(", ")}
+                  </p>
+                )}
               </div>
             </div>
 

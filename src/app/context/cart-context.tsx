@@ -160,14 +160,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
         return [...prev, { ...item, quantity: 1 }];
       }
 
-      // ── Other categories: use item.limit per category ──
-      const categoryTotal = prev
-        .filter((i) => i.category === item.category)
-        .reduce((acc, curr) => acc + curr.quantity, 0);
-
-      if (categoryTotal >= item.limit) {
+      // ── Other categories: respect per-item authorized portion count ──
+      const currentQty = existing ? existing.quantity : 0;
+      if (currentQty + 1 > item.limit) {
         toast.warning(
-          `Limite de ${item.limit} ${item.limit === 1 ? "item" : "itens"} para a categoria ${item.category} atingido.`
+          `Limite de ${item.limit} porção(ões) de "${item.name}" atingido.`
         );
         return prev;
       }
@@ -210,13 +207,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
           return prev;
         }
       } else {
-        const categoryTotal = prev
-          .filter((i) => i.category === itemToUpdate.category)
-          .reduce((acc, curr) => acc + curr.quantity, 0);
-
-        if (categoryTotal + delta > itemToUpdate.limit) {
+        // Per-item limit check: each item has its own authorized portion count
+        if (itemToUpdate.quantity + delta > itemToUpdate.limit) {
           toast.warning(
-            `Limite de ${itemToUpdate.limit} para ${itemToUpdate.category} atingido.`
+            `Limite de ${itemToUpdate.limit} porção(ões) de "${itemToUpdate.name}" atingido.`
           );
           return prev;
         }

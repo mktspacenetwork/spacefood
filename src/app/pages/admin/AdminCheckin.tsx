@@ -52,6 +52,7 @@ const MODE_TO_UNIT: Record<string, string> = {
 export function AdminCheckin() {
   const [orders, setOrders] = useState<OrderForCheckin[]>([]);
   const [checkins, setCheckins] = useState<CheckInEntry[]>([]);
+  const [abstentions, setAbstentions] = useState<{ userId: string; userName: string; unit?: string }[]>([]);
   const [allUsers, setAllUsers] = useState<UserInfo[]>([]);
   const [units, setUnits] = useState<CompanyUnit[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<string>("");
@@ -67,11 +68,12 @@ export function AdminCheckin() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [ordersData, checkinsData, usersData, settingsData] = await Promise.all([
+      const [ordersData, checkinsData, usersData, settingsData, abstentionData] = await Promise.all([
         api.authGet(`/admin/orders?date=${today}`),
         api.authGet(`/admin/checkins?date=${today}`),
         api.authGet("/admin/users"),
         api.get("/admin/settings"),
+        api.authGet(`/admin/abstentions?date=${today}`).catch(() => []),
       ]);
 
       const todayOrders = (Array.isArray(ordersData) ? ordersData : [])
@@ -79,6 +81,7 @@ export function AdminCheckin() {
       setOrders(todayOrders);
       setCheckins(Array.isArray(checkinsData) ? checkinsData : []);
       setAllUsers(Array.isArray(usersData) ? usersData : []);
+      setAbstentions(Array.isArray(abstentionData) ? abstentionData : []);
 
       // Parse units
       const rawUnits = settingsData?.units;
@@ -567,7 +570,43 @@ export function AdminCheckin() {
             </motion.div>
           ))}
 
-        {filteredList.length === 0 && (
+        {/* Abstentions — "Não vou almoçar" entries */}
+        {abstentions
+          .filter(abs => {
+            // Show abstentions that belong to this unit (matched by user's lunch_location)
+            const user = allUsers.find(u => u.id === abs.userId);
+            const userUnit = user?.user_metadata?.lunch_location || abs.unit || "";
+            return userUnit === selectedUnit || (!userUnit && selectedUnit === units[0]?.name);
+          })
+          .map(abs => (
+            <motion.div
+              key={`abs-${abs.userId}`}
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-card rounded-xl border border-orange-200 dark:border-orange-800 bg-orange-50/30 dark:bg-orange-900/10 p-4 flex flex-col sm:flex-row sm:items-center gap-4 shadow-sm"
+            >
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400">
+                  {(abs.userName || "U").charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-foreground truncate">{abs.userName}</p>
+                  <p className="text-[10px] text-muted-foreground">Registrou ausência voluntária</p>
+                </div>
+              </div>
+              <Badge className="px-3 py-1 text-sm border bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800 flex items-center gap-1.5">
+                <XCircle size={14} />
+                Não vai almoçar
+              </Badge>
+            </motion.div>
+          ))
+        }
+
+        {filteredList.length === 0 && abstentions.filter(abs => {
+          const user = allUsers.find(u => u.id === abs.userId);
+          const userUnit = user?.user_metadata?.lunch_location || abs.unit || "";
+          return userUnit === selectedUnit || (!userUnit && selectedUnit === units[0]?.name);
+        }).length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
             <UserCheck size={40} className="mx-auto mb-3 opacity-30" />
             <p>

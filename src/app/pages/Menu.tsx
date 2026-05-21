@@ -52,6 +52,8 @@ export function Menu() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   // Whether user's unit allows placing orders
   const [ordersAllowed, setOrdersAllowed] = useState(true);
+  // Whether this specific user has meal ordering permission
+  const userCanOrderMeal = user?.canOrderMeal !== false;
 
   // Orders & Ratings
   const [todayOrder, setTodayOrder] = useState<Order | null>(null);
@@ -457,14 +459,18 @@ export function Menu() {
 
   const filteredItems = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
+    const userUnit = selectedUnit || user?.lunchLocation || "";
 
-    // 1. Filter daily items
+    // 1. Filter daily items (also filter by unit restrictions)
     const dailyMatches = menuItems.filter((item) => {
       const matchesCategory = selectedCategory === "Todos" || item.category === selectedCategory;
       const matchesSearch = query === "" ||
         item.name.toLowerCase().includes(query) ||
         item.description.toLowerCase().includes(query);
-      return matchesCategory && matchesSearch;
+      // Unit restriction: if item has restrictions, only show for matching units
+      const matchesUnit = !item.unitRestrictions || item.unitRestrictions.length === 0 ||
+        (userUnit && item.unitRestrictions.includes(userUnit));
+      return matchesCategory && matchesSearch && matchesUnit;
     });
 
     // 2. If searching, also look in fullCatalog for items NOT in menuItems
@@ -581,6 +587,26 @@ export function Menu() {
           {/* Orders NOT allowed for this unit */}
           {!ordersAllowed && (
             <UnitNoOrdersBanner unitName={selectedUnit} />
+          )}
+
+          {/* User does not have meal ordering permission */}
+          {ordersAllowed && !userCanOrderMeal && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-red-500 to-red-700 p-4 text-white shadow-lg"
+            >
+              <div className="relative z-10 flex items-start gap-3">
+                <Lock size={20} className="shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-bold">Pedidos bloqueados para sua conta</p>
+                  <p className="text-xs opacity-90 mt-0.5">
+                    Sua conta não tem permissão para realizar pedidos. Entre em contato com o administrador.
+                  </p>
+                </div>
+              </div>
+              <div className="absolute -right-10 -bottom-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
+            </motion.div>
           )}
 
           {/* Subtle Rating Banner (instead of auto-opening sheet) */}
@@ -795,7 +821,7 @@ export function Menu() {
 
           {/* Bottom Actions */}
           <div className="pt-6 space-y-4">
-            {isToday && !todayOrder && ordersAllowed && (
+            {isToday && !todayOrder && ordersAllowed && userCanOrderMeal && (
               <AbstentionButton
                 hasAbstained={hasAbstained}
                 absLoading={absLoading}
@@ -861,9 +887,9 @@ export function Menu() {
           <div className="h-2" />
         </div>
 
-        {/* Floating Cart Bar - hide if orders not allowed */}
+        {/* Floating Cart Bar - hide if orders not allowed or user has no permission */}
         <AnimatePresence>
-          {totalItems > 0 && !todayOrder && ordersAllowed && (
+          {totalItems > 0 && !todayOrder && ordersAllowed && userCanOrderMeal && (
             <motion.div
               initial={{ opacity: 0, y: 80 }}
               animate={{ opacity: 1, y: 0 }}

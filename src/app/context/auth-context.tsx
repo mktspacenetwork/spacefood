@@ -76,6 +76,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       onboardingCompleted: authUser.user_metadata?.onboarding_completed === true,
       lunchLocation: authUser.user_metadata?.lunch_location || "",
       dietaryRestrictions: authUser.user_metadata?.dietary_restrictions || "",
+      // can_order_meal defaults to true when not set
+      canOrderMeal: authUser.user_metadata?.can_order_meal !== false,
     };
     setUser(userData);
     setIsLoading(false);

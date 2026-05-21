@@ -126,16 +126,30 @@ export function AdminMenu() {
       const affectedDate = new Date(affectedDateKey);
       const affectedStartDate = startOfWeek(affectedDate, { weekStartsOn: 1 });
       const affectedWeekKey = format(affectedStartDate, "yyyy-MM-dd");
-      
+
       const weekData: Record<string, MenuItem[]> = {};
       const weekDaysToSave = Array.from({ length: 6 }).map((_, i) => addDays(affectedStartDate, i));
-      
+
       weekDaysToSave.forEach(day => {
         const dk = format(day, "yyyy-MM-dd");
         if (data[dk]?.length) weekData[dk] = data[dk];
       });
-      
+
       await api.authPost("/admin/weekly-menu", { weekKey: affectedWeekKey, data: weekData });
+
+      // Se o dia já está publicado, atualiza também o cardápio diário publicado
+      // para que a Home reflita as mudanças imediatamente sem precisar republicar.
+      if (publishedDays.has(affectedDateKey)) {
+        const dayItems = data[affectedDateKey] || [];
+        const recurringItems = allItems.filter(i => recurringItemIds.has(i.id));
+        const merged = [...dayItems];
+        recurringItems.forEach(ri => {
+          if (!merged.find(m => m.id === ri.id)) merged.push(ri);
+        });
+        const itemIds = merged.map(item => item.id);
+        await api.authPost("/admin/daily-menu", { date: affectedDateKey, itemIds });
+      }
+
       // Toast mais discreto para salvamento automático
       toast.success("✓ Salvo", { duration: 1500 });
     } catch (e) {
