@@ -54,7 +54,17 @@ function canAddPratoPrincipal(
       return {
         allowed: false,
         message:
-          "Ovo e Omelete sao exclusivos — remova os outros pratos principais primeiro.",
+          "Ovo e Omelete são exclusivos — remova os outros pratos principais primeiro.",
+      };
+    }
+    // Cannot add a DIFFERENT egg/omelete item if one is already in the cart
+    // (ovo frito, omelete etc. are mutually exclusive — only one allowed per order)
+    const hasDifferentEgg = ppItems.some((i) => isEggItem(i) && i.id !== item.id);
+    if (hasDifferentEgg) {
+      return {
+        allowed: false,
+        message:
+          "Ovo e Omelete são exclusivos entre si — remova o item de ovo atual antes de escolher outro.",
       };
     }
     // Each egg item is limited to 1 portion
@@ -63,7 +73,7 @@ function canAddPratoPrincipal(
     if (currentQty + delta > 1) {
       return {
         allowed: false,
-        message: "Maximo de 1 porcao de Ovo ou Omelete por pedido.",
+        message: "Máximo de 1 porção de Ovo ou Omelete por pedido.",
       };
     }
   } else {
@@ -72,7 +82,7 @@ function canAddPratoPrincipal(
       return {
         allowed: false,
         message:
-          "Nao e possivel adicionar pratos principais quando Ovo ou Omelete ja esta selecionado.",
+          "Não é possível adicionar outros pratos principais quando Ovo ou Omelete já está selecionado.",
       };
     }
     // Non-egg total must not exceed 2
@@ -83,7 +93,7 @@ function canAddPratoPrincipal(
       return {
         allowed: false,
         message:
-          "Limite de 2 porcoes de Prato Principal por pedido (1 de cada ou 2 do mesmo).",
+          "Limite de 2 porções de Prato Principal por pedido (1 de cada ou 2 do mesmo).",
       };
     }
   }
