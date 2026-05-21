@@ -30,7 +30,8 @@ import {
   Trash2,
   ShieldCheck,
   Lock,
-  ScrollText
+  ScrollText,
+  BookMarked,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Button } from "../components/ui/Button";
@@ -81,6 +82,7 @@ const MENU_GROUPS = [
       { icon: CalendarDays, label: "Cardápio", path: "/admin/menu-planner", permKey: "menu" },
       { icon: UtensilsCrossed, label: "Gestão de Pratos", path: "/admin/items", permKey: "items" },
       { icon: MessageSquare, label: "Avaliações", path: "/admin/reviews", permKey: "reviews" },
+      { icon: BookMarked, label: "Sugestões de Receita", path: "/admin/recipe-suggestions", permKey: "recipe-suggestions" },
       { icon: Users, label: "Usuários & Permissões", path: "/admin/users", permKey: "users" },
     ]
   },
@@ -222,6 +224,8 @@ export function AdminLayout() {
     if (!user) return false;
     // Master has access to everything always
     if (user.role === 'master') return true;
+    // Kitchen role always sees recipe suggestions (primary audience)
+    if (user.role === 'kitchen' && permKey === 'recipe-suggestions') return true;
     // While permissions are loading, show everything to avoid flicker
     if (myPermissions === null) return true;
     return myPermissions[permKey] === true;

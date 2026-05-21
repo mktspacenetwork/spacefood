@@ -3,7 +3,7 @@ import { useCart } from "../../context/Store";
 import { Button } from "../ui/Button";
 import { Badge } from "../ui/Badge";
 import { Card } from "../ui/Card";
-import { Plus, Minus, Flame, Dumbbell, Wheat, Droplets, Leaf } from "lucide-react";
+import { Plus, Minus, Flame, Dumbbell, Wheat, Droplets, Leaf, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "../../lib/utils";
 import { motion, AnimatePresence } from "motion/react";
@@ -118,7 +118,15 @@ export function MenuItemCard({ item, ordersAllowed = true, isFirstCard = false }
       {/* Content Section */}
       <div className="flex flex-col gap-2 p-3 sm:gap-3 sm:p-5">
         <div className="space-y-1">
-          <h3 className="font-bold text-sm sm:text-lg text-foreground line-clamp-1 group-hover:text-primary transition-colors">{item.name}</h3>
+          <div className="flex items-start justify-between gap-1">
+            <h3 className="font-bold text-sm sm:text-lg text-foreground line-clamp-1 group-hover:text-primary transition-colors flex-1">{item.name}</h3>
+            {item.recipe && item.recipe.trim() && (
+              <span className="shrink-0 flex items-center gap-0.5 text-[9px] sm:text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 px-1.5 py-0.5 rounded-full leading-none">
+                <BookOpen size={9} className="sm:w-2.5 sm:h-2.5" />
+                Receita
+              </span>
+            )}
+          </div>
           <p className="text-xs sm:text-sm text-muted-foreground line-clamp-2 leading-relaxed">{item.description}</p>
         </div>
 

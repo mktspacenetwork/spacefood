@@ -19,7 +19,7 @@ import { Button } from "../components/ui/Button";
 import { SkeletonCard } from "../components/ui/SkeletonCard";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { PullToRefresh } from "../components/ui/PullToRefresh";
-import { ShoppingBag, ChevronRight, Clock, Search, XCircle, X, Star, Lock, UtensilsCrossed, Salad, Coffee, IceCream, LayoutGrid, Soup, Leaf, CookingPot, Apple, CupSoda, Flame, Circle, CheckCircle, Scale, Users, ShoppingCart } from "lucide-react";
+import { ShoppingBag, ChevronRight, Clock, Search, XCircle, X, Star, Lock, UtensilsCrossed, Salad, Coffee, IceCream, LayoutGrid, Soup, Leaf, CookingPot, Apple, CupSoda, Flame, Circle, CheckCircle, Scale, Users, ShoppingCart, BookOpen } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 import { api } from "../lib/api";
@@ -829,6 +829,17 @@ export function Menu() {
                 onToggle={toggleAbstention}
               />
             )}
+
+            {/* Link discreto para receitas */}
+            <div className="flex justify-center">
+              <Link
+                to="/receitas"
+                className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground underline-offset-4 hover:underline transition-all"
+              >
+                <BookOpen size={13} />
+                Ver receitas disponíveis
+              </Link>
+            </div>
 
             <div className="flex items-center justify-center gap-4 py-2 opacity-60">
               <Link

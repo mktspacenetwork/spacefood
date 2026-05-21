@@ -1570,6 +1570,88 @@ app.get("/make-server-c3078087/admin/ratings", async (c) => {
   }
 });
 
+// ── Recipe Suggestions ────────────────────────────────────────────────────
+
+// User submits a recipe suggestion
+app.post("/make-server-c3078087/recipe-suggestions", async (c) => {
+  const auth = await requireAuth(c);
+  if (auth instanceof Response) return auth;
+  try {
+    const { title, description, recipe } = await c.req.json();
+    if (!title?.trim()) return c.json({ error: "Nome do prato é obrigatório." }, 400);
+    if (!recipe?.trim()) return c.json({ error: "Receita é obrigatória." }, 400);
+
+    const newSuggestion = {
+      id: crypto.randomUUID(),
+      userId: auth.userId,
+      userName: auth.userName,
+      title: title.trim(),
+      description: (description || "").trim(),
+      recipe: recipe.trim(),
+      submittedAt: new Date().toISOString(),
+      status: "pending",
+    };
+
+    const list = await kv.get("recipe-suggestions") || [];
+    list.unshift(newSuggestion); // newest first
+    await kv.set("recipe-suggestions", list);
+
+    return c.json(newSuggestion);
+  } catch (e) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// Admin/Kitchen: list all suggestions
+app.get("/make-server-c3078087/admin/recipe-suggestions", async (c) => {
+  const auth = await requireAdminOrKitchen(c);
+  if (auth instanceof Response) return auth;
+  try {
+    const list = await kv.get("recipe-suggestions") || [];
+    return c.json(list);
+  } catch (e) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// Admin: update suggestion status
+app.put("/make-server-c3078087/admin/recipe-suggestions/:id", async (c) => {
+  const auth = await requireAdmin(c);
+  if (auth instanceof Response) return auth;
+  try {
+    const id = c.req.param("id");
+    const { status } = await c.req.json();
+    const allowed = ["pending", "reviewed", "approved"];
+    if (!allowed.includes(status)) return c.json({ error: "Status inválido." }, 400);
+
+    let list = await kv.get("recipe-suggestions") || [];
+    const idx = list.findIndex((s: any) => s.id === id);
+    if (idx === -1) return c.json({ error: "Sugestão não encontrada." }, 404);
+    list[idx].status = status;
+    await kv.set("recipe-suggestions", list);
+    return c.json(list[idx]);
+  } catch (e) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// Admin: delete suggestion
+app.delete("/make-server-c3078087/admin/recipe-suggestions/:id", async (c) => {
+  const auth = await requireAdmin(c);
+  if (auth instanceof Response) return auth;
+  try {
+    const id = c.req.param("id");
+    let list = await kv.get("recipe-suggestions") || [];
+    list = list.filter((s: any) => s.id !== id);
+    await kv.set("recipe-suggestions", list);
+    return c.json({ success: true });
+  } catch (e) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+
 // --- User Profile Update ---
 app.put("/make-server-c3078087/users/me", async (c) => {
   const auth = await requireAuth(c);
