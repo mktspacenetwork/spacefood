@@ -16,17 +16,12 @@ interface MenuItemCardProps {
 }
 
 export function MenuItemCard({ item, ordersAllowed = true, isFirstCard = false }: MenuItemCardProps) {
-  const { addToCart, getItemQuantity, updateQuantity, removeFromCart, items } = useCart();
+  const { addToCart, getItemQuantity, updateQuantity, removeFromCart } = useCart();
   const quantity = getItemQuantity(item.id);
 
-  const categoryTotal = items
-    .filter((i) => i.category === item.category)
-    .reduce((acc, curr) => acc + curr.quantity, 0);
-
   const isSoldOut = item.available <= 0;
-  // Limit applies to the category total, but we also check if this specific item has reached a limit (though logic says limit is per category)
-  // If item.limit is category limit, then:
-  const isLimitReached = categoryTotal >= item.limit;
+  // Each item has its own authorized portion count — compare only this item's quantity against its own limit
+  const isLimitReached = quantity >= item.limit;
   const isPreviousDay = item.isPreviousDay || false;
   const isNotOnMenu = item.isNotOnMenu || false;
 
