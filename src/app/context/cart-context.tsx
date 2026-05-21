@@ -26,17 +26,9 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 const CART_STORAGE_KEY = "space-food-cart";
 
 // ── Prato Principal rules ──────────────────────────────────────────────────
-// Rule 1: OVO or OMELETE (identified by name) is EXCLUSIVE with any other
-//         Prato Principal. Once one of them is in the cart, no other main
-//         dish can be added, and vice-versa.
-// Rule 2: For non-egg main dishes the total across all selected Prato
-//         Principal items must not exceed 2 (can be 1+1 or 2 of the same).
+// Rule: only ONE Prato Principal option is allowed per order.
+// Selecting any option blocks all others until it is removed.
 const PRATO_PRINCIPAL = "Prato Principal";
-
-function isEggItem(item: { name: string }): boolean {
-  const n = item.name.toLowerCase();
-  return n.includes("ovo") || n.includes("omelete");
-}
 
 function canAddPratoPrincipal(
   prev: CartItem[],
@@ -44,59 +36,28 @@ function canAddPratoPrincipal(
   delta = 1
 ): { allowed: boolean; message?: string } {
   const ppItems = prev.filter((i) => i.category === PRATO_PRINCIPAL);
-  const addingEgg = isEggItem(item);
-  const hasEgg = ppItems.some((i) => isEggItem(i));
-  const hasNonEgg = ppItems.some((i) => !isEggItem(i));
 
-  if (addingEgg) {
-    // Cannot mix egg with non-egg
-    if (hasNonEgg) {
-      return {
-        allowed: false,
-        message:
-          "Ovo e Omelete são exclusivos — remova os outros pratos principais primeiro.",
-      };
-    }
-    // Cannot add a DIFFERENT egg/omelete item if one is already in the cart
-    // (ovo frito, omelete etc. are mutually exclusive — only one allowed per order)
-    const hasDifferentEgg = ppItems.some((i) => isEggItem(i) && i.id !== item.id);
-    if (hasDifferentEgg) {
-      return {
-        allowed: false,
-        message:
-          "Ovo e Omelete são exclusivos entre si — remova o item de ovo atual antes de escolher outro.",
-      };
-    }
-    // Each egg item is limited to 1 portion
+  if (ppItems.length > 0) {
     const existing = ppItems.find((i) => i.id === item.id);
-    const currentQty = existing ? existing.quantity : 0;
-    if (currentQty + delta > 1) {
-      return {
-        allowed: false,
-        message: "Máximo de 1 porção de Ovo ou Omelete por pedido.",
-      };
-    }
-  } else {
-    // Cannot add non-egg when egg already in cart
-    if (hasEgg) {
+
+    if (!existing) {
+      // A different Prato Principal is already in the cart — blocked
       return {
         allowed: false,
         message:
-          "Não é possível adicionar outros pratos principais quando Ovo ou Omelete já está selecionado.",
+          "Apenas 1 opção de Prato Principal por pedido. Remova o atual para escolher outro.",
       };
     }
-    // Non-egg total must not exceed 2
-    const nonEggTotal = ppItems
-      .filter((i) => !isEggItem(i))
-      .reduce((acc, cur) => acc + cur.quantity, 0);
-    if (nonEggTotal + delta > 2) {
+
+    // Same item — respect its own portion limit
+    if (existing.quantity + delta > item.limit) {
       return {
         allowed: false,
-        message:
-          "Limite de 2 porções de Prato Principal por pedido (1 de cada ou 2 do mesmo).",
+        message: `Limite de ${item.limit} porção(ões) de "${item.name}" atingido.`,
       };
     }
   }
+
   return { allowed: true };
 }
 // ──────────────────────────────────────────────────────────────────────────

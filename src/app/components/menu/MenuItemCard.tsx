@@ -15,23 +15,17 @@ interface MenuItemCardProps {
   isFirstCard?: boolean;
 }
 
-function isEggItem(name: string): boolean {
-  const n = name.toLowerCase();
-  return n.includes("ovo") || n.includes("omelete");
-}
-
 export function MenuItemCard({ item, ordersAllowed = true, isFirstCard = false }: MenuItemCardProps) {
   const { addToCart, getItemQuantity, updateQuantity, removeFromCart, items } = useCart();
   const quantity = getItemQuantity(item.id);
 
   const isSoldOut = item.available <= 0;
-  // Each item has its own authorized portion count — compare only this item's quantity against its own limit
-  // For egg/omelete Prato Principal items: also blocked when a DIFFERENT egg item is already in the cart
-  const hasDifferentEggInCart =
+  // Per-item portion limit check
+  // For Prato Principal: also blocked when any OTHER Prato Principal is already in the cart
+  const hasDifferentPPInCart =
     item.category === "Prato Principal" &&
-    isEggItem(item.name) &&
-    items.some((i) => i.category === "Prato Principal" && isEggItem(i.name) && i.id !== item.id);
-  const isLimitReached = quantity >= item.limit || hasDifferentEggInCart;
+    items.some((i) => i.category === "Prato Principal" && i.id !== item.id);
+  const isLimitReached = quantity >= item.limit || hasDifferentPPInCart;
   const isPreviousDay = item.isPreviousDay || false;
   const isNotOnMenu = item.isNotOnMenu || false;
 
