@@ -246,6 +246,7 @@ export function AdminLayout() {
     myPermissions !== null &&
     user?.role !== 'master' &&
     currentPagePermKey !== null &&
+    currentPagePermKey in myPermissions &&   // only block when permission is explicitly configured
     myPermissions[currentPagePermKey] !== true;
 
   const handleSignOut = () => {
