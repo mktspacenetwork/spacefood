@@ -224,10 +224,11 @@ export function AdminLayout() {
     if (!user) return false;
     // Master has access to everything always
     if (user.role === 'master') return true;
-    // Kitchen role always sees recipe suggestions (primary audience)
-    if (user.role === 'kitchen' && permKey === 'recipe-suggestions') return true;
     // While permissions are loading, show everything to avoid flicker
     if (myPermissions === null) return true;
+    // If the permKey is not explicitly set in the permissions object (e.g. a new feature),
+    // default to allowed so new menu items appear without requiring a permissions migration
+    if (!(permKey in myPermissions)) return true;
     return myPermissions[permKey] === true;
   };
 
