@@ -427,20 +427,17 @@ app.get("/make-server-c3078087/menu", async (c) => {
     }
 
     if (date) {
-      // Get the published daily menu for this specific date
+      // Get the published daily menu for this specific date.
+      // Recurring items alone do NOT constitute an active menu — only show them
+      // when there is a specifically configured daily menu for this date.
       const dailyMenu = await kv.get(`daily-menu:${date}`);
+      if (!dailyMenu || !Array.isArray(dailyMenu) || dailyMenu.length === 0) {
+        return c.json([]);
+      }
       const recurringIds = await kv.get("menu:recurring-items") || [];
-      
-      const itemIds = new Set(recurringIds);
-      if (dailyMenu && Array.isArray(dailyMenu)) {
-        dailyMenu.forEach((i: any) => itemIds.add(i.id));
-      }
-
-      if (itemIds.size > 0) {
-        return c.json(items.filter((i: any) => itemIds.has(i.id)));
-      }
-      // If no daily menu for this date, return empty
-      return c.json([]);
+      const itemIds = new Set<string>(recurringIds);
+      dailyMenu.forEach((i: any) => itemIds.add(i.id));
+      return c.json(items.filter((i: any) => itemIds.has(i.id)));
     }
 
     return c.json(items);
@@ -450,48 +447,33 @@ app.get("/make-server-c3078087/menu", async (c) => {
   }
 });
 
-// Get today's menu - shows today's menu or yesterday's in grayscale
+// Get today's menu — only when a specific daily menu is configured (no recurring-only fallback,
+// no yesterday fallback). Returns [] when no menu is active for today.
 app.get("/make-server-c3078087/menu/today", async (c) => {
   try {
     // Better date handling for Brazil (UTC-3)
     const now = new Date();
     const brazilDate = new Date(now.getTime() - 3 * 60 * 60 * 1000);
     const todayKey = brazilDate.toISOString().split('T')[0];
-    
+
     console.log(`[Menu] Fetching today's menu for: ${todayKey} (UTC: ${now.toISOString()})`);
 
-    // Check if there's a daily menu for today
+    // Only show items when there's a specifically configured menu for today.
+    // Recurring items alone do NOT constitute an active menu for the day.
     const todayMenu = await kv.get(`daily-menu:${todayKey}`);
+    if (!todayMenu || !Array.isArray(todayMenu) || todayMenu.length === 0) {
+      return c.json([]);
+    }
+
     const recurringIds = await kv.get("menu:recurring-items") || [];
     const allItems = await kv.get("menu:items") || [];
 
-    const todayItemIds = new Set(recurringIds);
-    if (todayMenu && Array.isArray(todayMenu)) {
-      todayMenu.forEach((i: any) => todayItemIds.add(i.id));
-    }
-
-    if (todayItemIds.size > 0) {
-      const todayItems = allItems
-        .filter((i: any) => todayItemIds.has(i.id))
-        .map((i: any) => ({ ...i, isPreviousDay: false }));
-      return c.json(todayItems);
-    }
-
-    // No menu for today - try yesterday (show in grayscale)
-    const yesterdayDate = new Date(brazilDate);
-    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-    const yesterdayKey = yesterdayDate.toISOString().split('T')[0];
-    
-    const yesterdayMenu = await kv.get(`daily-menu:${yesterdayKey}`);
-    if (yesterdayMenu && Array.isArray(yesterdayMenu) && yesterdayMenu.length > 0) {
-      const yesterdayItemIds = new Set(yesterdayMenu.map((i: any) => i.id));
-      const yesterdayItems = allItems
-        .filter((i: any) => yesterdayItemIds.has(i.id))
-        .map((i: any) => ({ ...i, isPreviousDay: true }));
-      return c.json(yesterdayItems);
-    }
-
-    return c.json([]);
+    const todayItemIds = new Set<string>(recurringIds);
+    todayMenu.forEach((i: any) => todayItemIds.add(i.id));
+    const todayItems = allItems
+      .filter((i: any) => todayItemIds.has(i.id))
+      .map((i: any) => ({ ...i, isPreviousDay: false }));
+    return c.json(todayItems);
   } catch (e) {
     console.log("Today menu error:", e);
     return c.json({ error: e.message }, 500);
@@ -2696,28 +2678,16 @@ app.get("/make-server-c3078087/bootstrap", async (c) => {
     const isToday = menuDateKey === today;
 
     const todayDailyMenu = await kv.get(`daily-menu:${menuDateKey}`).catch(() => null);
-    const itemIds = new Set(recurringIds);
-    if (todayDailyMenu && Array.isArray(todayDailyMenu)) {
-      todayDailyMenu.forEach((i: any) => itemIds.add(i.id));
-    }
 
+    // Only show items when there's a specifically configured menu for this date.
+    // Recurring items alone do NOT constitute an active menu. No yesterday fallback.
     let menuItems: any[] = [];
-    if (itemIds.size > 0) {
+    if (todayDailyMenu && Array.isArray(todayDailyMenu) && todayDailyMenu.length > 0) {
+      const itemIds = new Set<string>(recurringIds);
+      todayDailyMenu.forEach((i: any) => itemIds.add(i.id));
       menuItems = allItems
         .filter((i: any) => itemIds.has(i.id))
         .map((i: any) => ({ ...i, isPreviousDay: false }));
-    } else if (isToday) {
-      // Fallback: show yesterday's menu greyed out
-      const yesterdayDate = new Date(Date.now() - 3 * 60 * 60 * 1000);
-      yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
-      const yesterdayKey = yesterdayDate.toISOString().split("T")[0];
-      const yesterdayDailyMenu = await kv.get(`daily-menu:${yesterdayKey}`).catch(() => null);
-      if (yesterdayDailyMenu && Array.isArray(yesterdayDailyMenu) && yesterdayDailyMenu.length > 0) {
-        const yIds = new Set(yesterdayDailyMenu.map((i: any) => i.id));
-        menuItems = allItems
-          .filter((i: any) => yIds.has(i.id))
-          .map((i: any) => ({ ...i, isPreviousDay: true }));
-      }
     }
 
     return c.json({

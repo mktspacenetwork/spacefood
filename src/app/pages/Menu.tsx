@@ -19,7 +19,7 @@ import { Button } from "../components/ui/Button";
 import { SkeletonCard } from "../components/ui/SkeletonCard";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { PullToRefresh } from "../components/ui/PullToRefresh";
-import { ShoppingBag, ChevronRight, Clock, Search, XCircle, X, Star, Lock, UtensilsCrossed, Salad, Coffee, IceCream, LayoutGrid, Soup, Leaf, CookingPot, Apple, CupSoda, Flame, Circle, CheckCircle, Scale, Users, ShoppingCart, BookOpen, ClipboardList } from "lucide-react";
+import { ShoppingBag, ChevronRight, Clock, Search, XCircle, X, Star, Lock, UtensilsCrossed, Salad, Coffee, IceCream, LayoutGrid, Soup, Leaf, CookingPot, Apple, CupSoda, Flame, Circle, CheckCircle, Scale, Users, ShoppingCart, BookOpen, ClipboardList, CalendarOff } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 import { api } from "../lib/api";
@@ -332,6 +332,16 @@ export function Menu() {
     checkTime();
     return () => clearInterval(interval);
   }, [settings.cutoffTime, settings.openingTime, orderDate, liveOrderStatus, todayOrder?.status]);
+
+  // Auto-advance to next available date when today's cutoff passes (Damasceno only).
+  // Taipas users (ordersAllowed=false) register any time — no auto-advance for them.
+  useEffect(() => {
+    if (!isCutoffPassed || !ordersAllowed || !isToday) return;
+    if (availableDates.length === 0) return;
+    const todayStart = startOfDay(new Date());
+    const nextDate = availableDates.find(d => startOfDay(d) > todayStart);
+    if (nextDate) setOrderDate(nextDate);
+  }, [isCutoffPassed, isToday, ordersAllowed, availableDates]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleAbstention = async () => {
     setAbsLoading(true);
@@ -689,7 +699,26 @@ export function Menu() {
           {/* Menu Content (hidden if order placed) */}
           {todayOrder ? null : (
             <>
-              {/* Categories Filter with Search */}
+              {/* Empty menu state: no specific menu configured for this day */}
+              {!loading && menuItems.length === 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex flex-col items-center justify-center py-16 text-center bg-accent/30 rounded-3xl border border-dashed border-border gap-3"
+                >
+                  <div className="w-16 h-16 rounded-full bg-accent flex items-center justify-center">
+                    <CalendarOff size={28} className="text-muted-foreground" />
+                  </div>
+                  <div>
+                    <p className="text-base font-semibold text-foreground">Não há cardápio disponível ainda para esse dia.</p>
+                    <p className="text-sm text-muted-foreground mt-1">Volte em breve.</p>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Categories Filter with Search — only when menu has items (or loading) */}
+              {(loading || menuItems.length > 0) && (
+              <>
               <div className="sticky top-16 md:top-0 z-10 -mx-4 md:-mx-8 -mt-10 bg-background/80 px-4 md:px-8 py-3 backdrop-blur-xl md:static md:mx-0 md:mt-0 md:bg-transparent md:px-0 md:py-0 border-b border-border/50 md:border-none transition-all">
                 <div className="no-scrollbar flex gap-3 overflow-x-auto pb-1 md:pb-0 scroll-smooth px-1 py-1 items-center">
                   
@@ -819,7 +848,7 @@ export function Menu() {
                   </motion.div>
                 )}
 
-                {!loading && filteredItems.length === 0 && (
+                {!loading && filteredItems.length === 0 && menuItems.length > 0 && (
                   <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -836,6 +865,8 @@ export function Menu() {
                 )}
               </div>
             </>
+            )}
+          </>
           )}
 
           {/* Bottom Actions */}
