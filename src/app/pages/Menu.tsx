@@ -661,8 +661,11 @@ export function Menu() {
             />
           )}
 
-          {/* Banner Carousel - Controlled by settings.showBannerCarousel (default true) */}
-          {isToday && !todayOrder && (settings.showBannerCarousel !== false) && (
+          {/* Banner Carousel - Controlled by settings.showBannerCarousel (default true).
+               Show when there is no real order (hide only when OrderBanner is active).
+               Manual logs (Taipas diary) do NOT count as "ordered", so banners still show.
+               Not gated by isToday — banners are campaign content, not date-specific. */}
+          {(!todayOrder || todayOrder.isManualLog) && (settings.showBannerCarousel !== false) && (
             <BannerCarousel userUnit={selectedUnit} />
           )}
 

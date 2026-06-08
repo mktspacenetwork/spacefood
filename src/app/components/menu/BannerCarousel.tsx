@@ -95,10 +95,12 @@ export function BannerCarousel({ userUnit }: { userUnit?: string }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let stale = false;
     setLoading(true);
     const unitParam = userUnit ? `?unit=${encodeURIComponent(userUnit)}` : "";
     api.get(`/banners${unitParam}`)
       .then((data) => {
+        if (stale) return;
         if (Array.isArray(data)) {
           // Client-side fallback filter for unit restrictions
           const filtered = data.filter((b: Banner) =>
@@ -108,10 +110,12 @@ export function BannerCarousel({ userUnit }: { userUnit?: string }) {
         }
       })
       .catch((err) => {
+        if (stale) return;
         console.error("Failed to load banners", err);
         setBanners([]);
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!stale) setLoading(false); });
+    return () => { stale = true; };
   }, [userUnit]);
 
   const defaultBanner: Banner = {
