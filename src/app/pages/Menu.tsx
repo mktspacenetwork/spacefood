@@ -718,6 +718,25 @@ export function Menu() {
                 </motion.div>
               )}
 
+              {/* Cutoff passed notice — items stay visible (greyed out) so user can browse */}
+              {isCutoffPassed && isToday && ordersAllowed && !loading && menuItems.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-start gap-3 p-4 rounded-2xl bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800"
+                >
+                  <div className="p-1.5 bg-orange-100 dark:bg-orange-900/50 rounded-full shrink-0 mt-0.5">
+                    <Clock size={16} className="text-orange-500" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-orange-900 dark:text-orange-200">Pedidos encerrados por hoje</p>
+                    <p className="text-xs text-orange-600 dark:text-orange-400 mt-0.5">
+                      Os pedidos de hoje já encerraram, mas você pode fazer o seu pedido para amanhã, caso esteja liberado.
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+
               {/* Categories Filter with Search — only when menu has items (or loading) */}
               {(loading || menuItems.length > 0) && (
               <>
