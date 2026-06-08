@@ -46,6 +46,8 @@ export interface Order {
   userName?: string;
   userAvatar?: string;
   date: string;
+  /** Target menu day this order is for (YYYY-MM-DD). May differ from `date` (creation time). */
+  menuDate?: string;
   totalCalories: number;
   totalItems?: number;
   status: string;

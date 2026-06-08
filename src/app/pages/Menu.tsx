@@ -28,6 +28,16 @@ import { toast } from "sonner";
 import { addDays } from "date-fns";
 import { getBrazilTime, getBrazilDateString, getBrazilTimeString, isBrazilToday, isBrazilTomorrow, getBrazilHour, getBrazilMinute } from "../lib/date-utils";
 
+/** "HH:MM" minus 30 minutes, returned as "HH:MM" (clamped at 00:00). */
+function minusThirty(time: string): string {
+  const [h, m] = time.split(":").map(Number);
+  let total = h * 60 + m - 30;
+  if (total < 0) total = 0;
+  const hh = Math.floor(total / 60);
+  const mm = total % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
 export function Menu() {
   const { user } = useAuth();
   const { totalItems, totalCalories, orderDate, setOrderDate, addToCart, clearCart, selectedUnit, setSelectedUnit, consumptionMode, setConsumptionMode, isManualLog, setIsManualLog } = useCart();
@@ -56,6 +66,7 @@ export function Menu() {
   const userCanOrderMeal = user?.canOrderMeal !== false;
 
   // Orders & Ratings
+  const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [todayOrder, setTodayOrder] = useState<Order | null>(null);
   const [lastOrder, setLastOrder] = useState<Order | null>(null);
   const [isRatingOpen, setIsRatingOpen] = useState(false);
@@ -114,9 +125,10 @@ export function Menu() {
         // Orders
         const ordersRes = data.orders || [];
         if (Array.isArray(ordersRes)) {
+          setAllOrders(ordersRes);
           const todayStr = getBrazilDateString();
           const yesterdayStr = getBrazilDateString(addDays(new Date(), -1));
-          const tOrder = ordersRes.find((o: any) => o.date?.startsWith(todayStr) && o.status !== "Cancelado");
+          const tOrder = ordersRes.find((o: any) => o.date?.startsWith(todayStr) && o.status !== "Cancelado" && !o.isManualLog);
           setTodayOrder(tOrder || null);
           const lOrder = ordersRes.find((o: any) => o.date?.startsWith(yesterdayStr) && !o.rating && o.status !== "Cancelado");
           if (lOrder) {
@@ -167,9 +179,10 @@ export function Menu() {
           if (dates.length > 0 && !dates.some((d: Date) => isSameDay(d, orderDate))) setOrderDate(dates[0]);
           setDatesLoading(false);
           if (Array.isArray(ordersRes)) {
+            setAllOrders(ordersRes);
             const todayStr = getBrazilDateString();
             const yesterdayStr = getBrazilDateString(addDays(new Date(), -1));
-            setTodayOrder(ordersRes.find((o: any) => o.date?.startsWith(todayStr) && o.status !== "Cancelado") || null);
+            setTodayOrder(ordersRes.find((o: any) => o.date?.startsWith(todayStr) && o.status !== "Cancelado" && !o.isManualLog) || null);
             const lOrder = ordersRes.find((o: any) => o.date?.startsWith(yesterdayStr) && !o.rating && o.status !== "Cancelado");
             if (lOrder) { setLastOrder(lOrder); setShowRatingBanner(true); }
           }
@@ -336,6 +349,49 @@ export function Menu() {
   // Derived: is the currently selected order date today?
   const isToday = isSameDay(orderDate, new Date());
 
+  // The real order (if any) placed for the currently-viewed date. Matched by the
+  // order's target menuDate (falls back to creation date for legacy orders).
+  // This is what drives the "order placed" banner — for today AND future dates.
+  const orderForDate = useMemo(() => {
+    const dateStr = format(orderDate, "yyyy-MM-dd");
+    return allOrders.find((o: any) => {
+      if (o.isManualLog || o.status === "Cancelado") return false;
+      const target = o.menuDate || (o.date ? o.date.split("T")[0] : "");
+      return target === dateStr;
+    }) || null;
+  }, [allOrders, orderDate]);
+
+  // Whether the given order can still be edited/deleted.
+  // Future-dated orders: always editable. Today: until 30 min before cutoff. Past: no.
+  const isOrderEditable = (order: Order | null): boolean => {
+    if (!order) return false;
+    const target = (order as any).menuDate || (order.date ? order.date.split("T")[0] : "");
+    const todayStr = getBrazilDateString();
+    if (target > todayStr) return true;       // future order — always editable
+    if (target < todayStr) return false;      // past order — locked
+    if (!settings.cutoffTime) return true;    // today, no cutoff configured
+    const [h, m] = settings.cutoffTime.split(":").map(Number);
+    const cutoffMinutes = h * 60 + m;
+    const nowMinutes = getBrazilHour() * 60 + getBrazilMinute();
+    return nowMinutes < cutoffMinutes - 30;   // today — 30-min buffer before cutoff
+  };
+
+  // Human-readable edit deadline label for the order banner.
+  const getEditDeadlineLabel = (order: Order | null): string => {
+    if (!order) return "";
+    const target = (order as any).menuDate || (order.date ? order.date.split("T")[0] : "");
+    const todayStr = getBrazilDateString();
+    if (target > todayStr) {
+      // Future order: deadline is 30 min before that day's cutoff
+      if (!settings.cutoffTime) return "o dia do pedido";
+      const dayLabel = format(new Date(target + "T00:00:00"), "dd/MM", { locale: ptBR });
+      return `${dayLabel} às ${minusThirty(settings.cutoffTime)}`;
+    }
+    // Today: 30 min before cutoff
+    if (!settings.cutoffTime) return "";
+    return minusThirty(settings.cutoffTime);
+  };
+
   // Auto-advance fires at most once per session. After the first advance the user
   // is free to navigate back to today and see today's menu greyed-out with a notice.
   const hasAutoAdvanced = useRef(false);
@@ -404,10 +460,10 @@ export function Menu() {
   };
 
   const handleEditOrder = () => {
-    if (!todayOrder) return;
+    if (!orderForDate) return;
 
-    if (!cancelAllowed) {
-      toast.error(`O prazo para editar já passou (limite: ${getCancelDeadlineLabel()}).`);
+    if (!isOrderEditable(orderForDate)) {
+      toast.error(`O prazo para editar já passou (limite: ${getEditDeadlineLabel(orderForDate)}).`);
       return;
     }
     setEditDialogOpen(true);
@@ -415,18 +471,21 @@ export function Menu() {
 
   const confirmEditOrder = async () => {
     setEditDialogOpen(false);
+    if (!orderForDate) return;
+    const editingOrder = orderForDate;
     const toastId = toast.loading("Preparando edição...");
     try {
-      await api.authDel(`/orders/${todayOrder!.id}`);
+      await api.authDel(`/orders/${editingOrder.id}`);
       clearCart();
-      todayOrder!.items.forEach((orderItem: any) => {
+      editingOrder.items.forEach((orderItem: any) => {
         const fullItem = menuItems.find(i => i.id === orderItem.id) || orderItem;
         for (let i = 0; i < (orderItem.quantity || 1); i++) {
           addToCart(fullItem);
         }
       });
       toast.dismiss(toastId);
-      setTodayOrder(null);
+      setAllOrders(prev => prev.filter(o => o.id !== editingOrder.id));
+      if (todayOrder?.id === editingOrder.id) setTodayOrder(null);
       navigate("/cart");
     } catch (e: any) {
       toast.error(e.message || "Erro ao editar pedido.");
@@ -435,10 +494,10 @@ export function Menu() {
   };
 
   const handleDeleteOrder = () => {
-    if (!todayOrder) return;
+    if (!orderForDate) return;
 
-    if (!cancelAllowed) {
-      toast.error(`O prazo para excluir já passou (limite: ${getCancelDeadlineLabel()}).`);
+    if (!isOrderEditable(orderForDate)) {
+      toast.error(`O prazo para excluir já passou (limite: ${getEditDeadlineLabel(orderForDate)}).`);
       return;
     }
     setDeleteDialogOpen(true);
@@ -446,11 +505,14 @@ export function Menu() {
 
   const confirmDeleteOrder = async () => {
     setDeleteDialogOpen(false);
+    if (!orderForDate) return;
+    const deletingOrder = orderForDate;
     const toastId = toast.loading("Excluindo pedido...");
     try {
-      await api.authDel(`/orders/${todayOrder!.id}`);
+      await api.authDel(`/orders/${deletingOrder.id}`);
       toast.success("Pedido excluído com sucesso.");
-      setTodayOrder(null);
+      setAllOrders(prev => prev.filter(o => o.id !== deletingOrder.id));
+      if (todayOrder?.id === deletingOrder.id) setTodayOrder(null);
     } catch (e: any) {
       toast.error(e.message || "Erro ao excluir pedido.");
     } finally {
@@ -668,29 +730,30 @@ export function Menu() {
             </motion.button>
           )}
 
-          {/* Today's Order Status Banner */}
-          {isToday && todayOrder && (
+          {/* Order Status Banner — shows for the order placed for the currently-viewed
+               date (today OR a future pre-order). Only shows the live status for today. */}
+          {orderForDate && (
             <OrderBanner
-              order={todayOrder}
+              order={orderForDate}
               cutoffTime={settings.cutoffTime}
-              isCancelAllowed={cancelAllowed}
-              cancelDeadlineLabel={getCancelDeadlineLabel()}
+              isCancelAllowed={isOrderEditable(orderForDate)}
+              cancelDeadlineLabel={getEditDeadlineLabel(orderForDate)}
               onEdit={handleEditOrder}
               onDelete={handleDeleteOrder}
-              liveStatus={liveOrderStatus}
+              liveStatus={isToday ? liveOrderStatus : undefined}
+              targetDateLabel={isToday ? undefined : format(orderDate, "EEEE, dd/MM", { locale: ptBR })}
             />
           )}
 
           {/* Banner Carousel - Controlled by settings.showBannerCarousel (default true).
-               Hide only when the OrderBanner is active (today + real order).
-               When viewing a future date the carousel stays visible regardless of todayOrder.
+               Hidden only when an order banner is active for the viewed date.
                Manual logs (Taipas diary) do NOT count as "ordered", so banners always show. */}
-          {(!isToday || !todayOrder || todayOrder.isManualLog) && (settings.showBannerCarousel !== false) && (
+          {!orderForDate && (settings.showBannerCarousel !== false) && (
             <BannerCarousel userUnit={selectedUnit} />
           )}
 
           {/* Previous Day Menu Banner */}
-          {hasAnyPreviousDay && isToday && !todayOrder && (
+          {hasAnyPreviousDay && isToday && !orderForDate && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -706,9 +769,9 @@ export function Menu() {
             </motion.div>
           )}
 
-          {/* Menu Content — hidden only when viewing today AND a real order already exists.
-               Navigating to other dates always shows the menu, even after ordering today. */}
-          {(isToday && todayOrder && !todayOrder.isManualLog) ? null : (
+          {/* Menu Content — hidden when an order already exists for the viewed date.
+               Navigating to a date without an order always shows that day's menu. */}
+          {orderForDate ? null : (
             <>
               {/* Empty menu state: no specific menu configured for this day */}
               {!loading && menuItems.length === 0 && (
@@ -901,7 +964,7 @@ export function Menu() {
 
           {/* Bottom Actions */}
           <div className="pt-6 space-y-4">
-            {isToday && !todayOrder && ordersAllowed && userCanOrderMeal && (
+            {isToday && !orderForDate && ordersAllowed && userCanOrderMeal && (
               <AbstentionButton
                 hasAbstained={hasAbstained}
                 absLoading={absLoading}
@@ -981,7 +1044,7 @@ export function Menu() {
 
         {/* Floating Cart Bar — visible for Damasceno (order) and Taipas (manual log) */}
         <AnimatePresence>
-          {totalItems > 0 && !todayOrder && (ordersAllowed ? userCanOrderMeal : true) && (
+          {totalItems > 0 && !orderForDate && (ordersAllowed ? userCanOrderMeal : true) && (
             <motion.div
               initial={{ opacity: 0, y: 80 }}
               animate={{ opacity: 1, y: 0 }}

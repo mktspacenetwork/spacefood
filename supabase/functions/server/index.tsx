@@ -638,6 +638,11 @@ app.post("/make-server-c3078087/orders", async (c) => {
 
     const isManualLog = orderData.isManualLog === true;
     const today = brasiliaToday();
+    // The date the order is FOR (target menu day). Real orders may be placed
+    // today for a future date (e.g. tomorrow); manual logs may be retroactive.
+    const menuDate = orderData.date
+      ? new Date(orderData.date).toISOString().split('T')[0]
+      : today;
     // For manual logs, use the submitted date as the log date (retroactive support)
     const logDate = isManualLog && orderData.date
       ? new Date(orderData.date).toISOString().split('T')[0]
@@ -653,10 +658,15 @@ app.post("/make-server-c3078087/orders", async (c) => {
         return c.json({ error: "Você já registrou uma refeição para esta data." }, 400);
       }
     } else {
-      // Check if user already ordered today (only for real orders, not manual logs)
-      const todayOrder = existingOrders.find((o: any) => o.date?.startsWith(today) && o.status !== 'Cancelado' && !o.isManualLog);
-      if (todayOrder) {
-        return c.json({ error: "Você já realizou um pedido hoje. Limite de 1 pedido por dia." }, 400);
+      // Check if user already has an order for this target date (1 order per menu day).
+      // Match by menuDate, falling back to creation date for legacy orders.
+      const existingForDate = existingOrders.find((o: any) => {
+        if (o.isManualLog || o.status === 'Cancelado') return false;
+        const oDate = o.menuDate || (o.date ? o.date.split('T')[0] : '');
+        return oDate === menuDate;
+      });
+      if (existingForDate) {
+        return c.json({ error: "Você já realizou um pedido para esta data. Limite de 1 pedido por dia." }, 400);
       }
 
       // Check abstention (only for real orders)
@@ -714,6 +724,8 @@ app.post("/make-server-c3078087/orders", async (c) => {
       id: crypto.randomUUID(),
       // For manual logs, preserve the submitted date (retroactive support); real orders use now
       date: isManualLog && orderData.date ? orderData.date : new Date().toISOString(),
+      // The target menu day this order is for (YYYY-MM-DD) — drives the home banner & edit window
+      menuDate,
       userId: auth.userId,
       userName: auth.userName,
       userDietaryRestrictions: auth.dietaryRestrictions || '',
@@ -749,10 +761,20 @@ app.delete("/make-server-c3078087/orders/:id", async (c) => {
     if (orderIndex === -1) return c.json({ error: "Pedido não encontrado." }, 404);
 
     const order = userOrders[orderIndex];
-    
-    // Check cutoff AND 30-minute buffer before cutoff (Brasília timezone)
+
+    // The 30-min-before-cutoff rule only applies on the order's own target day.
+    // Orders placed for a FUTURE date stay freely editable until that day arrives.
+    const todayStr = brasiliaToday();
+    const orderMenuDate = order.menuDate || (order.date ? order.date.split('T')[0] : todayStr);
+
+    // Past real orders can no longer be edited/deleted
+    if (!order.isManualLog && orderMenuDate < todayStr) {
+      return c.json({ error: "Este pedido não pode mais ser editado." }, 400);
+    }
+
+    // Check cutoff AND 30-minute buffer — only when the order is for TODAY
     const settings = await kv.get("settings") || {};
-    if (settings.cutoffTime) {
+    if (!order.isManualLog && orderMenuDate === todayStr && settings.cutoffTime) {
       const nowBrasilia = brasiliaDateNow();
       const [h, m] = settings.cutoffTime.split(':').map(Number);
       const nowMinutes = nowBrasilia.getUTCHours() * 60 + nowBrasilia.getUTCMinutes();
