@@ -2278,7 +2278,21 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
         itemCount[item.id] = { name: item.name, count: qty, category: item.category || '' };
       }
     });
-    const topItems = Object.values(itemCount).sort((a, b) => b.count - a.count);
+
+    // Enrich with current menu item names/categories so renames are always reflected.
+    // Orders store a snapshot at creation time; cross-referencing keeps the display fresh.
+    const currentMenuItems: any[] = await kv.get("menu:items") || [];
+    const menuItemMap = new Map(currentMenuItems.map((mi: any) => [mi.id, mi]));
+    const topItems = Object.entries(itemCount)
+      .map(([id, data]) => {
+        const live = menuItemMap.get(id);
+        return {
+          name: live?.name ?? data.name,
+          category: live?.category ?? data.category,
+          count: data.count,
+        };
+      })
+      .sort((a, b) => b.count - a.count);
 
     // Weekly data (last 7 days) using daily indexes - batched read
     const weekDates: { dateStr: string; dayName: string }[] = [];

@@ -75,9 +75,17 @@ export function KitchenDashboard() {
     const targetDate = viewDateStr ?? dateStr;
     const viewingToday = targetDate === format(new Date(), "yyyy-MM-dd");
     try {
-      const orders = await api.authGet(`/admin/orders?date=${targetDate}`);
+      const [orders, menuData] = await Promise.all([
+        api.authGet(`/admin/orders?date=${targetDate}`),
+        api.get("/menu/items").catch(() => []),
+      ]);
       // Filter out manual logs (Taipas food diary entries) — cozinha não precisa ver
       const filteredOrders = (Array.isArray(orders) ? orders : []).filter((o: any) => !o.isManualLog);
+
+      // Build a live name/category map so renames in the menu are immediately reflected
+      const liveMenuMap = new Map<string, any>(
+        (Array.isArray(menuData) ? menuData : []).map((mi: any) => [mi.id, mi])
+      );
 
       // Only fire sound notification when watching today's orders live
       if (viewingToday && prevOrderCount.current > 0 && filteredOrders.length > prevOrderCount.current) {
@@ -93,25 +101,27 @@ export function KitchenDashboard() {
         .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
       setRecentOrders(sorted);
 
-      // Aggregate items from ALL orders for the date (including delivered, excluding manual logs)
+      // Aggregate items — prefer live menu data for name/category/weight so renames are always shown
       const allItems = filteredOrders.flatMap((o: any) => o.items || []);
       const aggregated = allItems.reduce((acc: KitchenItemSummary[], item: any) => {
+        const live = liveMenuMap.get(item.id);
         const existing = acc.find(i => i.itemId === item.id);
         const qty = item.quantity || 1;
-        const weight = (item.portionWeight || 0) * qty;
+        const portionW = live?.portionWeight ?? item.portionWeight ?? 0;
+        const weight = portionW * qty;
         if (existing) {
           existing.totalQuantity += qty;
           existing.totalWeight += weight;
         } else {
           acc.push({
             itemId: item.id,
-            name: item.name,
-            category: item.category || "",
+            name: live?.name ?? item.name,
+            category: live?.category ?? item.category ?? "",
             totalQuantity: qty,
             totalWeight: weight,
-            unit: item.unit || "un",
-            portionWeight: item.portionWeight || 0,
-            kitchenUnit: item.kitchenUnit || (item.unit === "ml" ? "l" : item.unit === "un" ? "un" : "kg"),
+            unit: live?.unit ?? item.unit ?? "un",
+            portionWeight: portionW,
+            kitchenUnit: live?.kitchenUnit ?? item.kitchenUnit ?? (item.unit === "ml" ? "l" : item.unit === "un" ? "un" : "kg"),
           });
         }
         return acc;
