@@ -525,7 +525,7 @@ export function Menu() {
           <div className="flex items-start justify-between">
             <div className="flex flex-col gap-2">
               <h1 className="text-2xl md:text-3xl font-extrabold text-foreground tracking-tight flex items-center gap-2 font-space-grotesk">
-                <span className="italic text-xl md:text-[26px]">
+                <span className="text-xl md:text-[26px]">
                   Olá, <span className="text-orange-500">{user?.name.split(" ")[0]}</span>
                 </span>
               </h1>
