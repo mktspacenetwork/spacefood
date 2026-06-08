@@ -65,17 +65,9 @@ export function KitchenDashboard() {
   const playNotification = () => {
     if (!soundEnabled) return;
     try {
-      const ctx = new AudioContext();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = 880;
-      osc.type = "sine";
-      gain.gain.value = 0.3;
-      osc.start();
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-      osc.stop(ctx.currentTime + 0.5);
+      const audio = new Audio("/novopedido.mp3");
+      audio.volume = 1;
+      audio.play().catch(() => {});
     } catch (_) {}
   };
 
