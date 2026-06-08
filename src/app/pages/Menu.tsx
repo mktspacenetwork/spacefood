@@ -336,14 +336,22 @@ export function Menu() {
   // Derived: is the currently selected order date today?
   const isToday = isSameDay(orderDate, new Date());
 
+  // Auto-advance fires at most once per session. After the first advance the user
+  // is free to navigate back to today and see today's menu greyed-out with a notice.
+  const hasAutoAdvanced = useRef(false);
+
   // Auto-advance to next available date when today's cutoff passes (Damasceno only).
   // Taipas users (ordersAllowed=false) register any time — no auto-advance for them.
   useEffect(() => {
     if (!isCutoffPassed || !ordersAllowed || !isToday) return;
+    if (hasAutoAdvanced.current) return; // already advanced once — don't override manual navigation
     if (availableDates.length === 0) return;
     const todayStart = startOfDay(new Date());
     const nextDate = availableDates.find(d => startOfDay(d) > todayStart);
-    if (nextDate) setOrderDate(nextDate);
+    if (nextDate) {
+      hasAutoAdvanced.current = true;
+      setOrderDate(nextDate);
+    }
   }, [isCutoffPassed, isToday, ordersAllowed, availableDates]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleAbstention = async () => {
