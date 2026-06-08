@@ -74,7 +74,8 @@ export function KitchenDashboard() {
     try {
       const today = getBrazilDateString();
       const orders = await api.authGet(`/admin/orders?date=${today}`);
-      const todayOrders = Array.isArray(orders) ? orders : [];
+      // Filter out manual logs (Taipas food diary entries) — cozinha não precisa ver
+      const todayOrders = (Array.isArray(orders) ? orders : []).filter((o: any) => !o.isManualLog);
 
       if (prevOrderCount.current > 0 && todayOrders.length > prevOrderCount.current) {
         playNotification();
@@ -87,7 +88,7 @@ export function KitchenDashboard() {
         .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
       setRecentOrders(sorted);
 
-      // Aggregate items from ALL today orders (including delivered)
+      // Aggregate items from ALL today orders (including delivered, excluding manual logs)
       const allItems = todayOrders.flatMap((o: any) => o.items || []);
       const aggregated = allItems.reduce((acc: KitchenItemSummary[], item: any) => {
         const existing = acc.find(i => i.itemId === item.id);

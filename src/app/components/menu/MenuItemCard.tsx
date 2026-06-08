@@ -3,7 +3,7 @@ import { useCart } from "../../context/Store";
 import { Button } from "../ui/Button";
 import { Badge } from "../ui/Badge";
 import { Card } from "../ui/Card";
-import { Plus, Minus, Flame, Dumbbell, Wheat, Droplets, Leaf, BookOpen } from "lucide-react";
+import { Plus, Minus, Flame, Dumbbell, Wheat, Droplets, Leaf, BookOpen, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "../../lib/utils";
 import { motion, AnimatePresence } from "motion/react";
@@ -30,10 +30,6 @@ export function MenuItemCard({ item, ordersAllowed = true, isFirstCard = false }
   const isNotOnMenu = item.isNotOnMenu || false;
 
   const handleAdd = () => {
-    if (!ordersAllowed) {
-      toast.info("Pedidos desabilitados para sua unidade.");
-      return;
-    }
     if (isNotOnMenu) {
       toast.info("Este item não está no cardápio de hoje.");
       return;
@@ -130,87 +126,138 @@ export function MenuItemCard({ item, ordersAllowed = true, isFirstCard = false }
           <p className="text-xs sm:text-sm text-muted-foreground line-clamp-2 leading-relaxed">{item.description}</p>
         </div>
 
-        {/* Bottom: nutritional info (view-only) OR add button (orders allowed) */}
-        {!ordersAllowed ? (
-          /* Nutritional Info Row — compact, icon-only */
-          <div className="pt-2 border-t border-border border-dashed mt-1">
-            <div className="flex items-center justify-between gap-1">
-              <NutriStat icon={<Flame size={10} className="text-orange-500 fill-orange-400" />} value={item.calories} unit="kcal" />
-              {item.protein != null && (
-                <NutriStat icon={<Dumbbell size={10} className="text-blue-500" />} value={item.protein} unit="g" />
-              )}
-              {item.carbs != null && (
-                <NutriStat icon={<Wheat size={10} className="text-amber-500" />} value={item.carbs} unit="g" />
-              )}
-              {item.fat != null && (
-                <NutriStat icon={<Droplets size={10} className="text-cyan-500" />} value={item.fat} unit="g" />
-              )}
-              {item.fiber != null && (
-                <NutriStat icon={<Leaf size={10} className="text-green-500" />} value={item.fiber} unit="g" />
-              )}
-            </div>
+        {/* Bottom: nutritional info + add/register button */}
+        <div className="pt-2 border-t border-border border-dashed mt-1 space-y-2">
+          {/* Nutritional Info Row — always visible */}
+          <div className="flex items-center gap-1 flex-wrap">
+            <NutriStat icon={<Flame size={10} className="text-orange-500 fill-orange-400" />} value={item.calories} unit="kcal" />
+            {item.protein != null && (
+              <NutriStat icon={<Dumbbell size={10} className="text-blue-500" />} value={item.protein} unit="g" />
+            )}
+            {item.carbs != null && (
+              <NutriStat icon={<Wheat size={10} className="text-amber-500" />} value={item.carbs} unit="g" />
+            )}
+            {item.fat != null && (
+              <NutriStat icon={<Droplets size={10} className="text-cyan-500" />} value={item.fat} unit="g" />
+            )}
+            {item.fiber != null && (
+              <NutriStat icon={<Leaf size={10} className="text-green-500" />} value={item.fiber} unit="g" />
+            )}
           </div>
-        ) : (
-          <div className="flex items-center justify-between pt-2 border-t border-border border-dashed mt-1">
-            <div className="flex flex-col">
-              <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider leading-tight">
-                {item.unit === "un" ? "Porção" : item.unit}
-              </span>
-              <span className="text-[13px] font-bold text-foreground">
-                {item.limit} un.
-              </span>
+
+          {/* Action Row */}
+          {ordersAllowed ? (
+            /* Damasceno: portion info + add-to-cart button */
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col">
+                <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider leading-tight">
+                  {item.unit === "un" ? "Porção" : item.unit}
+                </span>
+                <span className="text-[13px] font-bold text-foreground">
+                  {item.limit} un.
+                </span>
+              </div>
+
+              <AnimatePresence mode="wait">
+                {quantity === 0 ? (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    key="add-button"
+                  >
+                    <Button
+                      size="icon"
+                      disabled={isSoldOut || isNotOnMenu}
+                      onClick={handleAdd}
+                      className="rounded-full bg-primary hover:bg-primary/90 text-primary-foreground h-9 w-9 shadow-lg shadow-primary/20"
+                      {...(isFirstCard ? { "data-tutorial": "order" } : {})}
+                    >
+                      <Plus size={18} strokeWidth={2.5} />
+                    </Button>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    initial={{ opacity: 0, width: 0 }}
+                    animate={{ opacity: 1, width: "auto" }}
+                    exit={{ opacity: 0, width: 0 }}
+                    className="flex items-center gap-1 sm:gap-2 bg-secondary rounded-full p-0.5"
+                    key="controls"
+                  >
+                    <motion.button
+                      whileTap={{ scale: 0.9 }}
+                      onClick={handleDecrement}
+                      className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full bg-background text-foreground shadow-sm hover:bg-muted transition-colors touch-manipulation"
+                    >
+                      <Minus size={16} strokeWidth={3} />
+                    </motion.button>
+                    <span className="text-xs font-bold w-5 text-center tabular-nums text-foreground">{quantity}</span>
+                    <motion.button
+                      whileTap={{ scale: 0.9 }}
+                      onClick={handleIncrement}
+                      disabled={isLimitReached}
+                      className={cn(
+                        "flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors touch-manipulation",
+                        isLimitReached && "opacity-50 cursor-not-allowed bg-muted text-muted-foreground"
+                      )}
+                    >
+                      <Plus size={16} strokeWidth={3} />
+                    </motion.button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
-            
+          ) : (
+            /* Taipas: "Registrar" button — marca o que comeu */
             <AnimatePresence mode="wait">
               {quantity === 0 ? (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.8 }}
+                <motion.button
+                  key="register-button"
+                  initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  key="add-button"
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  onClick={handleAdd}
+                  disabled={isSoldOut || isNotOnMenu}
+                  className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-blue-100 dark:bg-blue-950/50 hover:bg-blue-200 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 py-1.5 text-xs font-semibold transition-colors touch-manipulation disabled:opacity-50"
                 >
-                  <Button
-                    size="icon"
-                    disabled={isSoldOut || isNotOnMenu}
-                    onClick={handleAdd}
-                    className="rounded-full bg-primary hover:bg-primary/90 text-primary-foreground h-9 w-9 shadow-lg shadow-primary/20"
-                    {...(isFirstCard ? { "data-tutorial": "order" } : {})}
-                  >
-                    <Plus size={18} strokeWidth={2.5} />
-                  </Button>
-                </motion.div>
+                  <ClipboardList size={13} />
+                  Registrar
+                </motion.button>
               ) : (
-                <motion.div 
-                  initial={{ opacity: 0, width: 0 }}
-                  animate={{ opacity: 1, width: "auto" }}
-                  exit={{ opacity: 0, width: 0 }}
-                  className="flex items-center gap-1 sm:gap-2 bg-secondary rounded-full p-0.5"
-                  key="controls"
+                <motion.div
+                  key="register-controls"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="flex items-center justify-between gap-2"
                 >
-                  <motion.button
-                    whileTap={{ scale: 0.9 }}
-                    onClick={handleDecrement}
-                    className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full bg-background text-foreground shadow-sm hover:bg-muted transition-colors touch-manipulation"
-                  >
-                    <Minus size={16} strokeWidth={3} />
-                  </motion.button>
-                  <span className="text-xs font-bold w-5 text-center tabular-nums text-foreground">{quantity}</span>
-                  <motion.button
-                    whileTap={{ scale: 0.9 }}
-                    onClick={handleIncrement}
-                    disabled={isLimitReached}
-                    className={cn(
-                      "flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors touch-manipulation",
-                      isLimitReached && "opacity-50 cursor-not-allowed bg-muted text-muted-foreground"
-                    )}
-                  >
-                    <Plus size={16} strokeWidth={3} />
-                  </motion.button>
+                  <span className="text-[11px] text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1">
+                    <ClipboardList size={11} />
+                    Registrado
+                  </span>
+                  <div className="flex items-center gap-1 bg-blue-50 dark:bg-blue-950/40 rounded-full p-0.5 border border-blue-200 dark:border-blue-800">
+                    <motion.button
+                      whileTap={{ scale: 0.9 }}
+                      onClick={handleDecrement}
+                      className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full bg-background text-foreground shadow-sm hover:bg-muted transition-colors touch-manipulation"
+                    >
+                      <Minus size={14} strokeWidth={3} />
+                    </motion.button>
+                    <span className="text-xs font-bold w-5 text-center tabular-nums text-blue-700 dark:text-blue-300">{quantity}</span>
+                    <motion.button
+                      whileTap={{ scale: 0.9 }}
+                      onClick={handleIncrement}
+                      disabled={isLimitReached}
+                      className="flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-full bg-blue-600 text-white shadow-sm hover:bg-blue-700 transition-colors touch-manipulation disabled:opacity-50"
+                    >
+                      <Plus size={14} strokeWidth={3} />
+                    </motion.button>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </Card>
   );

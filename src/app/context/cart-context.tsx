@@ -19,6 +19,8 @@ interface CartContextType {
   setSelectedUnit: (unit: string) => void;
   consumptionMode: string;
   setConsumptionMode: (mode: string) => void;
+  isManualLog: boolean;
+  setIsManualLog: (v: boolean) => void;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -95,6 +97,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
     return storedMode || "dine_in_damasceno";
   });
 
+  const [isManualLog, setIsManualLog] = useState<boolean>(() => {
+    return localStorage.getItem(CART_STORAGE_KEY + "-manual-log") === "true";
+  });
+
   useEffect(() => {
     localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items));
     localStorage.setItem(CART_STORAGE_KEY + "-date", new Date().toISOString().split('T')[0]);
@@ -111,6 +117,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     localStorage.setItem(CART_STORAGE_KEY + "-mode", consumptionMode);
   }, [consumptionMode]);
+
+  useEffect(() => {
+    localStorage.setItem(CART_STORAGE_KEY + "-manual-log", String(isManualLog));
+  }, [isManualLog]);
 
   const addToCart = (item: MenuItem) => {
     setItems((prev) => {
@@ -213,13 +223,18 @@ export function CartProvider({ children }: { children: ReactNode }) {
         deliveryAddress,
         contactPhone,
         date: orderDate.toISOString(),
+        isManualLog,
       });
-      toast.success("Pedido realizado com sucesso!");
+      if (isManualLog) {
+        toast.success("Refeição registrada com sucesso!");
+      } else {
+        toast.success("Pedido realizado com sucesso!");
+      }
       clearCart();
       return true;
     } catch (error: any) {
       console.error("Order error:", error);
-      toast.error(error.message || "Erro ao enviar pedido. Tente novamente.");
+      toast.error(error.message || "Erro ao enviar. Tente novamente.");
       return false;
     }
   };
@@ -247,6 +262,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
         setSelectedUnit,
         consumptionMode,
         setConsumptionMode,
+        isManualLog,
+        setIsManualLog,
       }}
     >
       {children}

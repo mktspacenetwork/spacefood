@@ -19,7 +19,7 @@ import { Button } from "../components/ui/Button";
 import { SkeletonCard } from "../components/ui/SkeletonCard";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { PullToRefresh } from "../components/ui/PullToRefresh";
-import { ShoppingBag, ChevronRight, Clock, Search, XCircle, X, Star, Lock, UtensilsCrossed, Salad, Coffee, IceCream, LayoutGrid, Soup, Leaf, CookingPot, Apple, CupSoda, Flame, Circle, CheckCircle, Scale, Users, ShoppingCart, BookOpen } from "lucide-react";
+import { ShoppingBag, ChevronRight, Clock, Search, XCircle, X, Star, Lock, UtensilsCrossed, Salad, Coffee, IceCream, LayoutGrid, Soup, Leaf, CookingPot, Apple, CupSoda, Flame, Circle, CheckCircle, Scale, Users, ShoppingCart, BookOpen, ClipboardList } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 import { api } from "../lib/api";
@@ -30,7 +30,7 @@ import { getBrazilTime, getBrazilDateString, getBrazilTimeString, isBrazilToday,
 
 export function Menu() {
   const { user } = useAuth();
-  const { totalItems, totalCalories, orderDate, setOrderDate, addToCart, clearCart, selectedUnit, setSelectedUnit, consumptionMode, setConsumptionMode } = useCart();
+  const { totalItems, totalCalories, orderDate, setOrderDate, addToCart, clearCart, selectedUnit, setSelectedUnit, consumptionMode, setConsumptionMode, isManualLog, setIsManualLog } = useCart();
   const [selectedCategory, setSelectedCategory] = useState("Todos");
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,6 +79,11 @@ export function Menu() {
     setSelectedUnit(user.lunchLocation);
     setConsumptionMode(mode);
   }, [user?.lunchLocation]);
+
+  // Sync isManualLog flag whenever ordersAllowed changes
+  useEffect(() => {
+    setIsManualLog(!ordersAllowed);
+  }, [ordersAllowed]);
 
   // ── Single consolidated bootstrap: ONE request returns everything ──
   useEffect(() => {
@@ -334,7 +339,7 @@ export function Menu() {
       if (hasAbstained) {
         await api.authDel("/abstention");
         setHasAbstained(false);
-        toast.success("Abstenção cancelada. Você pode fazer pedido.");
+        toast.success(ordersAllowed ? "Abstenção cancelada. Você pode fazer pedido." : "Abstenção cancelada.");
       } else {
         await api.authPost("/abstention", {});
         setHasAbstained(true);
@@ -763,7 +768,7 @@ export function Menu() {
                 <div data-tutorial="food-grid" className="flex items-center justify-between">
                   <h2 className="font-bold text-foreground text-[15px]">
                     {selectedCategory === "Todos"
-                      ? (ordersAllowed ? "Vamos escolher seu almoço?" : "Veja o cardápio do dia.")
+                      ? (ordersAllowed ? "Vamos escolher seu almoço?" : "O que você comeu hoje?")
                       : selectedCategory}
                   </h2>
                   <span className="text-xs text-muted-foreground">
@@ -898,9 +903,9 @@ export function Menu() {
           <div className="h-2" />
         </div>
 
-        {/* Floating Cart Bar - hide if orders not allowed or user has no permission */}
+        {/* Floating Cart Bar — visible for Damasceno (order) and Taipas (manual log) */}
         <AnimatePresence>
-          {totalItems > 0 && !todayOrder && ordersAllowed && userCanOrderMeal && (
+          {totalItems > 0 && !todayOrder && (ordersAllowed ? userCanOrderMeal : true) && (
             <motion.div
               initial={{ opacity: 0, y: 80 }}
               animate={{ opacity: 1, y: 0 }}
@@ -910,11 +915,18 @@ export function Menu() {
             >
               <button
                 onClick={() => navigate("/cart")}
-                className="w-full flex items-center justify-between gap-4 bg-primary text-primary-foreground rounded-2xl px-5 py-3.5 shadow-xl shadow-primary/30 hover:shadow-2xl hover:shadow-primary/40 active:scale-[0.98] transition-all"
+                className={`w-full flex items-center justify-between gap-4 rounded-2xl px-5 py-3.5 shadow-xl active:scale-[0.98] transition-all ${
+                  isManualLog
+                    ? "bg-blue-600 text-white shadow-blue-500/30 hover:shadow-blue-500/40"
+                    : "bg-primary text-primary-foreground shadow-primary/30 hover:shadow-primary/40"
+                }`}
               >
                 <div className="flex items-center gap-3">
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20">
-                    <ShoppingBag size={16} className="text-white" />
+                    {isManualLog
+                      ? <ClipboardList size={16} className="text-white" />
+                      : <ShoppingBag size={16} className="text-white" />
+                    }
                   </div>
                   <div className="flex flex-col items-start">
                     <span className="text-xs font-bold">
@@ -924,7 +936,9 @@ export function Menu() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold">Ver Sacola</span>
+                  <span className="text-sm font-bold">
+                    {isManualLog ? "Meu Registro" : "Ver Sacola"}
+                  </span>
                   <ChevronRight size={16} />
                 </div>
               </button>

@@ -654,61 +654,64 @@ app.post("/make-server-c3078087/orders", async (c) => {
       return c.json({ error: "Pedido deve conter pelo menos um item." }, 400);
     }
 
-    // Check if user already ordered today (using Brasília date)
+    const isManualLog = orderData.isManualLog === true;
     const today = brasiliaToday();
     const existingOrders = await kv.get(`orders:${auth.userId}`) || [];
-    const todayOrder = existingOrders.find((o: any) => o.date?.startsWith(today) && o.status !== 'Cancelado');
-    if (todayOrder) {
-      return c.json({ error: "Você já realizou um pedido hoje. Limite de 1 pedido por dia." }, 400);
-    }
 
-    // Check abstention (using same Brasília date key)
-    const abstentions = await kv.get(`abstentions:${today}`) || [];
-    if (abstentions.find((a: any) => a.userId === auth.userId)) {
-      return c.json({ error: "Você registrou abstenção hoje. Cancele a abstenção primeiro." }, 400);
-    }
-
-    // Check cutoff time (compare in Brasília timezone, not UTC)
-    const settings = await kv.get("settings") || {};
-    if (settings.cutoffTime) {
-      const nowBrasilia = brasiliaDateNow();
-      const [h, m] = settings.cutoffTime.split(':').map(Number);
-      const brasiliaHour = nowBrasilia.getUTCHours();
-      const brasiliaMinute = nowBrasilia.getUTCMinutes();
-      const pastCutoff = brasiliaHour > h || (brasiliaHour === h && brasiliaMinute >= m);
-
-      // For future dates, don't apply today's cutoff
-      const orderDateStr = orderData.date ? new Date(orderData.date).toISOString().split('T')[0] : today;
-      if (orderDateStr === today && pastCutoff) {
-        return c.json({ error: `Horário de pedido encerrado. O limite era ${settings.cutoffTime}.` }, 400);
+    if (!isManualLog) {
+      // Check if user already ordered today (only for real orders, not manual logs)
+      const todayOrder = existingOrders.find((o: any) => o.date?.startsWith(today) && o.status !== 'Cancelado' && !o.isManualLog);
+      if (todayOrder) {
+        return c.json({ error: "Você já realizou um pedido hoje. Limite de 1 pedido por dia." }, 400);
       }
-    }
 
-    // Decrement stock with optimistic retry to mitigate race conditions
-    const MAX_STOCK_RETRIES = 3;
-    for (let attempt = 0; attempt < MAX_STOCK_RETRIES; attempt++) {
-      let menuItemsData = await kv.get("menu:items") || [];
-      let stockOk = true;
-      for (const orderItem of orderData.items) {
-        const menuItem = menuItemsData.find((mi: any) => mi.id === orderItem.id);
-        if (menuItem) {
-          const qty = orderItem.quantity || 1;
-          if (menuItem.available < qty) {
-            return c.json({ error: `"${menuItem.name}" não tem estoque suficiente (disponível: ${menuItem.available}).` }, 400);
+      // Check abstention (only for real orders)
+      const abstentions = await kv.get(`abstentions:${today}`) || [];
+      if (abstentions.find((a: any) => a.userId === auth.userId)) {
+        return c.json({ error: "Você registrou abstenção hoje. Cancele a abstenção primeiro." }, 400);
+      }
+
+      // Check cutoff time (only for real orders)
+      const settings = await kv.get("settings") || {};
+      if (settings.cutoffTime) {
+        const nowBrasilia = brasiliaDateNow();
+        const [h, m] = settings.cutoffTime.split(':').map(Number);
+        const brasiliaHour = nowBrasilia.getUTCHours();
+        const brasiliaMinute = nowBrasilia.getUTCMinutes();
+        const pastCutoff = brasiliaHour > h || (brasiliaHour === h && brasiliaMinute >= m);
+
+        // For future dates, don't apply today's cutoff
+        const orderDateStr = orderData.date ? new Date(orderData.date).toISOString().split('T')[0] : today;
+        if (orderDateStr === today && pastCutoff) {
+          return c.json({ error: `Horário de pedido encerrado. O limite era ${settings.cutoffTime}.` }, 400);
+        }
+      }
+
+      // Decrement stock with optimistic retry to mitigate race conditions (only for real orders)
+      const MAX_STOCK_RETRIES = 3;
+      for (let attempt = 0; attempt < MAX_STOCK_RETRIES; attempt++) {
+        let menuItemsData = await kv.get("menu:items") || [];
+        for (const orderItem of orderData.items) {
+          const menuItem = menuItemsData.find((mi: any) => mi.id === orderItem.id);
+          if (menuItem) {
+            const qty = orderItem.quantity || 1;
+            if (menuItem.available < qty) {
+              return c.json({ error: `"${menuItem.name}" não tem estoque suficiente (disponível: ${menuItem.available}).` }, 400);
+            }
+            menuItem.available -= qty;
           }
-          menuItem.available -= qty;
         }
-      }
-      try {
-        await kv.set("menu:items", menuItemsData);
-        break; // success
-      } catch (stockErr: any) {
-        if (attempt === MAX_STOCK_RETRIES - 1) {
-          console.log("Stock update failed after retries:", stockErr);
-          return c.json({ error: "Erro ao atualizar estoque. Tente novamente." }, 500);
+        try {
+          await kv.set("menu:items", menuItemsData);
+          break; // success
+        } catch (stockErr: any) {
+          if (attempt === MAX_STOCK_RETRIES - 1) {
+            console.log("Stock update failed after retries:", stockErr);
+            return c.json({ error: "Erro ao atualizar estoque. Tente novamente." }, 500);
+          }
+          // Small delay before retry
+          await new Promise(r => setTimeout(r, 50 * (attempt + 1)));
         }
-        // Small delay before retry
-        await new Promise(r => setTimeout(r, 50 * (attempt + 1)));
       }
     }
 
@@ -719,10 +722,11 @@ app.post("/make-server-c3078087/orders", async (c) => {
       userId: auth.userId,
       userName: auth.userName,
       userDietaryRestrictions: auth.dietaryRestrictions || '',
-      status: "Confirmado",
+      status: isManualLog ? "Registrado" : "Confirmado",
       consumptionMode: orderData.consumptionMode || 'dine_in_damasceno',
       deliveryAddress: orderData.deliveryAddress,
-      contactPhone: orderData.contactPhone
+      contactPhone: orderData.contactPhone,
+      isManualLog,
     };
 
     await kv.set(`orders:${auth.userId}`, [newOrder, ...existingOrders]);

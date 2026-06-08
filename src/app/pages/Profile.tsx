@@ -412,6 +412,7 @@ export function Profile() {
                               <Badge
                                 className={cn(
                                   "border-0 px-2.5 py-1 font-bold text-[10px] uppercase tracking-wider shadow-sm",
+                                  (order as any).isManualLog ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
                                   order.status === "Confirmado" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
                                   order.status === "Em Preparo" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
                                   order.status === "Pronto" ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400" :
@@ -420,7 +421,7 @@ export function Profile() {
                                   "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
                                 )}
                               >
-                                {order.status}
+                                {(order as any).isManualLog ? "Registro" : order.status}
                               </Badge>
                             </div>
                           </div>

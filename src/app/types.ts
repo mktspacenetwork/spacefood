@@ -56,6 +56,7 @@ export interface Order {
   rating?: number;
   ratingComment?: string;
   ratingDate?: string;
+  isManualLog?: boolean; // true = registro diário (Taipas), não envia para cozinha nem decrementa estoque
 }
 
 export interface Rating {
