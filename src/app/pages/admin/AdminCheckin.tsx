@@ -1,14 +1,15 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   CheckCircle2, XCircle, Loader2, RefreshCw, UserCheck, UserX,
-  Search, Clock, CheckCheck, MapPin, Plus, Users, X, UserPlus
+  Search, Clock, CheckCheck, MapPin, Plus, Users, X, UserPlus,
+  ChevronLeft, ChevronRight, CalendarDays, Lock
 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Badge } from "../../components/ui/Badge";
 import { api } from "../../lib/api";
 import { toast } from "sonner";
-import { format } from "date-fns";
+import { format, addDays, isSameDay, startOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "../../lib/utils";
 import { motion, AnimatePresence } from "motion/react";
@@ -61,19 +62,24 @@ export function AdminCheckin() {
   const [batchLoading, setBatchLoading] = useState(false);
   const [manualName, setManualName] = useState("");
   const [showManualInput, setShowManualInput] = useState(false);
+  // The date being viewed/checked-in. Defaults to today.
+  const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
 
-  const today = format(new Date(), "yyyy-MM-dd");
-  const todayLabel = format(new Date(), "EEEE, d 'de' MMMM", { locale: ptBR });
+  const dateStr = format(selectedDate, "yyyy-MM-dd");
+  const dateLabel = format(selectedDate, "EEEE, d 'de' MMMM", { locale: ptBR });
+  // Check-in can only be performed on the actual day — viewing other days is read-only.
+  const isCheckinDay = isSameDay(selectedDate, new Date());
+  const isFutureDate = startOfDay(selectedDate) > startOfDay(new Date());
 
   const fetchData = async () => {
     setLoading(true);
     try {
       const [ordersData, checkinsData, usersData, settingsData, abstentionData] = await Promise.all([
-        api.authGet(`/admin/orders?date=${today}`),
-        api.authGet(`/admin/checkins?date=${today}`),
+        api.authGet(`/admin/orders?date=${dateStr}`),
+        api.authGet(`/admin/checkins?date=${dateStr}`),
         api.authGet("/admin/users"),
         api.get("/admin/settings"),
-        api.authGet(`/admin/abstentions?date=${today}`).catch(() => []),
+        api.authGet(`/admin/abstentions?date=${dateStr}`).catch(() => []),
       ]);
 
       const todayOrders = (Array.isArray(ordersData) ? ordersData : [])
@@ -111,7 +117,11 @@ export function AdminCheckin() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [selectedDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const goToPrevDay = () => setSelectedDate((d) => addDays(d, -1));
+  const goToNextDay = () => setSelectedDate((d) => addDays(d, 1));
+  const goToToday = () => setSelectedDate(new Date());
 
   const currentUnit = units.find((u) => u.name === selectedUnit);
   const allowOrders = currentUnit ? currentUnit.allowOrders !== false : true;
@@ -143,6 +153,10 @@ export function AdminCheckin() {
   }, [checkins, unitOrders, allowOrders, selectedUnit]);
 
   const handleCheckin = async (entry: { orderId?: string; userId: string; userName: string }, confirmed: boolean) => {
+    if (!isCheckinDay) {
+      toast.error("O check-in só pode ser feito no dia do almoço.");
+      return;
+    }
     try {
       await api.authPost("/admin/checkins", {
         orderId: entry.orderId || null,
@@ -187,6 +201,10 @@ export function AdminCheckin() {
   };
 
   const handleBatchConfirm = async () => {
+    if (!isCheckinDay) {
+      toast.error("O check-in só pode ser feito no dia do almoço.");
+      return;
+    }
     if (!allowOrders) {
       // Batch confirm all unit users who haven't been checked
       const unchecked = unitUsers.filter((u) => {
@@ -277,19 +295,60 @@ export function AdminCheckin() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Check-in de Almoco</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Check-in de Almoço</h1>
           <p className="text-muted-foreground text-sm flex items-center gap-2">
-            <Clock size={14} /> {todayLabel.charAt(0).toUpperCase() + todayLabel.slice(1)}
+            <Clock size={14} /> {dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1)}
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handleBatchConfirm} disabled={batchLoading || uncheckedCount <= 0} className="gap-2">
+          <Button
+            variant="outline"
+            onClick={handleBatchConfirm}
+            disabled={batchLoading || uncheckedCount <= 0 || !isCheckinDay}
+            className="gap-2"
+          >
             {batchLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCheck size={16} />}
             Confirmar Todos ({Math.max(0, uncheckedCount)})
           </Button>
           <Button variant="outline" onClick={fetchData} className="gap-2"><RefreshCw size={16} /> Atualizar</Button>
         </div>
       </div>
+
+      {/* Date Navigator */}
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-2 sm:p-3">
+        <Button variant="ghost" size="icon" onClick={goToPrevDay} className="shrink-0">
+          <ChevronLeft size={18} />
+        </Button>
+        <div className="flex items-center gap-2 min-w-0">
+          <CalendarDays size={16} className="text-primary shrink-0" />
+          <span className="text-sm font-bold text-foreground truncate capitalize">{dateLabel}</span>
+          {!isCheckinDay && (
+            <Button variant="outline" size="sm" onClick={goToToday} className="ml-1 h-7 px-2 text-xs shrink-0">
+              Hoje
+            </Button>
+          )}
+        </div>
+        <Button variant="ghost" size="icon" onClick={goToNextDay} className="shrink-0">
+          <ChevronRight size={18} />
+        </Button>
+      </div>
+
+      {/* Read-only notice when not viewing today */}
+      {!isCheckinDay && (
+        <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20 p-4 flex items-start gap-3">
+          <Lock size={20} className="text-blue-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-bold text-blue-800 dark:text-blue-300">
+              Visualização apenas — check-in indisponível
+            </p>
+            <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
+              {isFutureDate
+                ? `Você está vendo os pedidos de ${dateLabel}. O check-in poderá ser feito apenas neste dia.`
+                : `Você está vendo os pedidos de ${dateLabel}. O check-in deste dia já encerrou.`}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Unit Tabs */}
       <div className="flex gap-2 overflow-x-auto pb-1 px-1">
@@ -370,7 +429,7 @@ export function AdminCheckin() {
             className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-lg focus:ring-2 focus:ring-primary/20 outline-none text-foreground"
           />
         </div>
-        <Button variant="outline" onClick={() => setShowManualInput(!showManualInput)} className="gap-2">
+        <Button variant="outline" onClick={() => setShowManualInput(!showManualInput)} disabled={!isCheckinDay} className="gap-2">
           <UserPlus size={16} />
           <span className="hidden sm:inline">Adicionar Manual</span>
         </Button>
@@ -455,6 +514,7 @@ export function AdminCheckin() {
                     <Button
                       size="sm"
                       variant={status === true ? "default" : "outline"}
+                      disabled={!isCheckinDay}
                       onClick={() => handleCheckin({ orderId: order.id, userId: order.userId, userName: order.userName || "Usuario" }, true)}
                       className={cn("gap-1", status === true && "bg-green-600 hover:bg-green-700")}
                     >
@@ -463,6 +523,7 @@ export function AdminCheckin() {
                     <Button
                       size="sm"
                       variant={status === false ? "destructive" : "outline"}
+                      disabled={!isCheckinDay}
                       onClick={() => handleCheckin({ orderId: order.id, userId: order.userId, userName: order.userName || "Usuario" }, false)}
                       className="gap-1"
                     >
@@ -516,6 +577,7 @@ export function AdminCheckin() {
                     <Button
                       size="sm"
                       variant={status === true ? "default" : "outline"}
+                      disabled={!isCheckinDay}
                       onClick={() => handleCheckin({ userId: user.id, userName }, true)}
                       className={cn("gap-1", status === true && "bg-green-600 hover:bg-green-700")}
                     >
@@ -524,6 +586,7 @@ export function AdminCheckin() {
                     <Button
                       size="sm"
                       variant={status === false ? "destructive" : "outline"}
+                      disabled={!isCheckinDay}
                       onClick={() => handleCheckin({ userId: user.id, userName }, false)}
                       className="gap-1"
                     >
@@ -611,7 +674,7 @@ export function AdminCheckin() {
             <UserCheck size={40} className="mx-auto mb-3 opacity-30" />
             <p>
               {allowOrders
-                ? "Nenhum pedido encontrado para esta unidade hoje."
+                ? "Nenhum pedido encontrado para esta unidade nesta data."
                 : "Nenhum colaborador cadastrado nesta unidade."}
             </p>
           </div>

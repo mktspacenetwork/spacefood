@@ -643,10 +643,9 @@ app.post("/make-server-c3078087/orders", async (c) => {
     const menuDate = orderData.date
       ? new Date(orderData.date).toISOString().split('T')[0]
       : today;
-    // For manual logs, use the submitted date as the log date (retroactive support)
-    const logDate = isManualLog && orderData.date
-      ? new Date(orderData.date).toISOString().split('T')[0]
-      : today;
+    // The daily index is keyed by the day the order/meal is FOR, so check-in and
+    // the kitchen see each order on its correct date (not the day it was created).
+    const logDate = menuDate;
     const existingOrders = await kv.get(`orders:${auth.userId}`) || [];
 
     if (isManualLog) {
@@ -811,8 +810,9 @@ app.delete("/make-server-c3078087/orders/:id", async (c) => {
     userOrders.splice(orderIndex, 1);
     await kv.set(`orders:${auth.userId}`, userOrders);
 
-    // Remove from daily list
-    const date = order.date.split('T')[0];
+    // Remove from daily list — keyed by the order's target day (menuDate),
+    // falling back to creation date for legacy orders.
+    const date = order.menuDate || order.date.split('T')[0];
     const dailyOrders = await kv.get(`orders-daily:${date}`) || [];
     const dailyIndex = dailyOrders.findIndex((o: any) => o.id === id);
     if (dailyIndex >= 0) {
