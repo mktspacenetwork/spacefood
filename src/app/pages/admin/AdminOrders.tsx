@@ -4,7 +4,7 @@ import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
 import { api } from "../../lib/api";
 import { toast } from "sonner";
-import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
+import { format, addDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "../../lib/utils";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
@@ -39,7 +39,7 @@ const STATUS_COLOR: Record<string, string> = {
   Cancelado: "bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800",
 };
 
-type PeriodType = "today" | "week" | "month" | "custom";
+type PeriodType = "today" | "tomorrow" | "week" | "month" | "custom";
 
 function getDateRange(period: PeriodType, customFrom: string, customTo: string) {
   const today = new Date();
@@ -48,6 +48,10 @@ function getDateRange(period: PeriodType, customFrom: string, customTo: string) 
   switch (period) {
     case "today":
       return { from: todayStr, to: todayStr };
+    case "tomorrow": {
+      const tomorrowStr = getBrazilDateString(addDays(today, 1));
+      return { from: tomorrowStr, to: tomorrowStr };
+    }
     case "week": {
       const ws = startOfWeek(today, { weekStartsOn: 1 });
       const we = endOfWeek(today, { weekStartsOn: 1 });
@@ -113,7 +117,7 @@ export function AdminOrders() {
     try {
       const range = getDateRange(period, customFrom, customTo);
       let data: any;
-      if (period === "today") {
+      if (period === "today" || period === "tomorrow") {
         data = await api.authGet(`/admin/orders?date=${range.from}`);
       } else {
         data = await api.authGet(`/admin/orders?from=${range.from}&to=${range.to}`);
@@ -197,8 +201,9 @@ export function AdminOrders() {
 
   const periodLabel: Record<PeriodType, string> = {
     today: "Hoje",
+    tomorrow: "Amanhã",
     week: "Esta Semana",
-    month: "Este Mes",
+    month: "Este Mês",
     custom: "Personalizado",
   };
 
@@ -258,7 +263,7 @@ export function AdminOrders() {
 
       {/* Period Tabs */}
       <div className="flex flex-wrap items-center gap-1.5">
-        {(["today", "week", "month", "custom"] as PeriodType[]).map(p => (
+        {(["today", "tomorrow", "week", "month", "custom"] as PeriodType[]).map(p => (
           <button
             key={p}
             onClick={() => setPeriod(p)}
@@ -269,7 +274,7 @@ export function AdminOrders() {
                 : "bg-card text-muted-foreground border-border hover:bg-accent hover:text-foreground"
             )}
           >
-            {p === "today" && <Calendar size={11} className="inline mr-1" />}
+            {(p === "today" || p === "tomorrow") && <Calendar size={11} className="inline mr-1" />}
             {periodLabel[p]}
           </button>
         ))}

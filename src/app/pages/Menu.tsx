@@ -113,8 +113,14 @@ export function Menu() {
           .map((d: string) => new Date(d + "T00:00:00"))
           .filter((d: Date) => startOfDay(d) >= startOfDay(new Date()))
           .sort((a: Date, b: Date) => a.getTime() - b.getTime());
-        if (!dates.some(d => isSameDay(d, new Date()))) {
-          dates.unshift(new Date());
+        // Safety: ensure today is in the list only if it's a weekday (Mon-Fri).
+        // The backend already handles this, but guard client-side too so weekends
+        // are never forced into the picker without an explicit menu configuration.
+        const todayNow = new Date();
+        const todayDow = todayNow.getDay(); // 0=Sun, 6=Sat
+        const todayIsWeekday = todayDow >= 1 && todayDow <= 5;
+        if (todayIsWeekday && !dates.some(d => isSameDay(d, todayNow))) {
+          dates.unshift(todayNow);
         }
         setAvailableDates(dates);
         if (dates.length > 0 && !dates.some((d: Date) => isSameDay(d, orderDate))) {
@@ -174,7 +180,9 @@ export function Menu() {
           if (Array.isArray(datesRes)) {
             dates = datesRes.map((d: string) => new Date(d + "T00:00:00")).filter((d: Date) => startOfDay(d) >= startOfDay(new Date())).sort((a: Date, b: Date) => a.getTime() - b.getTime());
           }
-          if (!dates.some(d => isSameDay(d, new Date()))) dates.unshift(new Date());
+          const _todayFb = new Date();
+          const _dowFb = _todayFb.getDay();
+          if (_dowFb >= 1 && _dowFb <= 5 && !dates.some(d => isSameDay(d, _todayFb))) dates.unshift(_todayFb);
           setAvailableDates(dates);
           if (dates.length > 0 && !dates.some((d: Date) => isSameDay(d, orderDate))) setOrderDate(dates[0]);
           setDatesLoading(false);

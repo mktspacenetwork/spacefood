@@ -2642,11 +2642,16 @@ app.get("/make-server-c3078087/menu/available-dates", async (c) => {
       const start = new Date(now);
       start.setUTCDate(now.getUTCDate() + diff);
       
-      // Add 14 days (current week + next week)
+      // Add 14 days (current week + next week), weekdays only.
+      // Weekends are excluded unless the admin explicitly configured a menu for them
+      // via a weekly-menu entry (handled in the first loop above).
       for (let i = 0; i < 14; i++) {
         const d = new Date(start);
         d.setUTCDate(start.getUTCDate() + i);
-        dates.push(d.toISOString().split('T')[0]);
+        const dow = d.getUTCDay(); // 0=Sun, 6=Sat
+        if (dow !== 0 && dow !== 6) {
+          dates.push(d.toISOString().split('T')[0]);
+        }
       }
     }
 
@@ -2716,10 +2721,14 @@ app.get("/make-server-c3078087/bootstrap", async (c) => {
       const diff = day === 0 ? -6 : 1 - day;
       const start = new Date(now);
       start.setUTCDate(now.getUTCDate() + diff);
+      // Weekdays only — weekends excluded unless explicitly configured via weekly-menu
       for (let i = 0; i < 14; i++) {
         const d = new Date(start);
         d.setUTCDate(start.getUTCDate() + i);
-        datesSet.add(d.toISOString().split("T")[0]);
+        const dow = d.getUTCDay(); // 0=Sun, 6=Sat
+        if (dow !== 0 && dow !== 6) {
+          datesSet.add(d.toISOString().split("T")[0]);
+        }
       }
     }
     const availableDates = [...datesSet].sort();
