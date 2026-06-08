@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { format } from "date-fns";
+import { format, addDays, isSameDay, startOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Loader2, RefreshCw, ChefHat, Clock, Scale, Volume2, VolumeX, Utensils, Building, Package, Maximize2, Minimize2, Egg, ArrowRightLeft, AlertTriangle } from "lucide-react";
+import { Loader2, RefreshCw, ChefHat, Clock, Scale, Volume2, VolumeX, Utensils, Building, Package, Maximize2, Minimize2, Egg, ArrowRightLeft, AlertTriangle, ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { api } from "../../lib/api";
-import { Badge } from "../../components/ui/Badge";
 import { cn } from "../../lib/utils";
 import { toast } from "sonner";
-import { getBrazilDateString, getBrazilTimeString } from "../../lib/date-utils";
+import { getBrazilTimeString } from "../../lib/date-utils";
 
 interface KitchenItemSummary {
   itemId: string;
@@ -50,8 +49,18 @@ export function KitchenDashboard() {
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
   const containerRef = useRef<HTMLDivElement>(null);
   const prevOrderCount = useRef(0);
+
+  const isToday = isSameDay(selectedDate, new Date());
+  const isFuture = startOfDay(selectedDate) > startOfDay(new Date());
+  const dateStr = format(selectedDate, "yyyy-MM-dd");
+  const dateLabel = format(selectedDate, "EEEE, d 'de' MMMM", { locale: ptBR });
+
+  const goToPrevDay = () => setSelectedDate((d) => addDays(d, -1));
+  const goToNextDay = () => setSelectedDate((d) => addDays(d, 1));
+  const goToToday = () => setSelectedDate(new Date());
 
   const playNotification = () => {
     if (!soundEnabled) return;
@@ -70,26 +79,30 @@ export function KitchenDashboard() {
     } catch (_) {}
   };
 
-  const fetchData = async () => {
+  const fetchData = async (viewDateStr?: string) => {
+    const targetDate = viewDateStr ?? dateStr;
+    const viewingToday = targetDate === format(new Date(), "yyyy-MM-dd");
     try {
-      const today = getBrazilDateString();
-      const orders = await api.authGet(`/admin/orders?date=${today}`);
+      const orders = await api.authGet(`/admin/orders?date=${targetDate}`);
       // Filter out manual logs (Taipas food diary entries) — cozinha não precisa ver
-      const todayOrders = (Array.isArray(orders) ? orders : []).filter((o: any) => !o.isManualLog);
+      const filteredOrders = (Array.isArray(orders) ? orders : []).filter((o: any) => !o.isManualLog);
 
-      if (prevOrderCount.current > 0 && todayOrders.length > prevOrderCount.current) {
+      // Only fire sound notification when watching today's orders live
+      if (viewingToday && prevOrderCount.current > 0 && filteredOrders.length > prevOrderCount.current) {
         playNotification();
         toast.info("Novo pedido recebido!", { duration: 3000 });
       }
-      prevOrderCount.current = todayOrders.length;
+      if (viewingToday) {
+        prevOrderCount.current = filteredOrders.length;
+      }
 
-      const sorted = todayOrders
+      const sorted = filteredOrders
         .filter((o: any) => o.status !== "Cancelado" && o.status !== "Retirado")
         .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
       setRecentOrders(sorted);
 
-      // Aggregate items from ALL today orders (including delivered, excluding manual logs)
-      const allItems = todayOrders.flatMap((o: any) => o.items || []);
+      // Aggregate items from ALL orders for the date (including delivered, excluding manual logs)
+      const allItems = filteredOrders.flatMap((o: any) => o.items || []);
       const aggregated = allItems.reduce((acc: KitchenItemSummary[], item: any) => {
         const existing = acc.find(i => i.itemId === item.id);
         const qty = item.quantity || 1;
@@ -121,11 +134,14 @@ export function KitchenDashboard() {
     }
   };
 
+  // Re-fetch immediately and restart polling interval when date changes
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
+    prevOrderCount.current = 0; // Reset counter when switching dates
+    setLoading(true);
+    fetchData(dateStr);
+    const interval = setInterval(() => fetchData(dateStr), 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [dateStr]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // True OS-level fullscreen
   useEffect(() => {
@@ -165,43 +181,93 @@ export function KitchenDashboard() {
       )}
     >
       {/* Header */}
-      <div className={cn("flex items-center justify-between flex-shrink-0 border-b border-border", isFullScreen ? "px-4 py-3" : "pb-3 mb-2")}>
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="h-9 w-9 bg-primary rounded-xl flex items-center justify-center text-primary-foreground shadow-lg shadow-primary/20 flex-shrink-0">
-            <ChefHat size={18} />
+      <div className={cn("flex-shrink-0 border-b border-border", isFullScreen ? "px-4 py-3" : "pb-3 mb-2")}>
+        <div className="flex items-center justify-between gap-2">
+          {/* Left: title + status */}
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="h-9 w-9 bg-primary rounded-xl flex items-center justify-center text-primary-foreground shadow-lg shadow-primary/20 flex-shrink-0">
+              <ChefHat size={18} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-bold tracking-tight">KDS — Cozinha</h1>
+                {!isToday && (
+                  <span className={cn(
+                    "text-[10px] font-bold px-2 py-0.5 rounded-full border",
+                    isFuture
+                      ? "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800"
+                      : "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800"
+                  )}>
+                    {isFuture ? "Pré-visualização" : "Histórico"}
+                  </span>
+                )}
+              </div>
+              <p className="text-muted-foreground text-[11px] flex items-center gap-1.5">
+                <Clock size={11} />
+                Atualizado às {format(lastUpdated, "HH:mm:ss", { locale: ptBR })}
+                <span className="text-foreground font-semibold ml-2">
+                  {recentOrders.length} pedido{recentOrders.length !== 1 ? "s" : ""}{isToday ? " ativos" : ""}
+                </span>
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <h1 className="text-lg font-bold tracking-tight">KDS — Cozinha</h1>
-            <p className="text-muted-foreground text-[11px] flex items-center gap-1.5">
-              <Clock size={11} />
-              Atualizado às {format(lastUpdated, "HH:mm:ss", { locale: ptBR })}
-              <span className="text-foreground font-semibold ml-2">
-                {recentOrders.length} pedido{recentOrders.length !== 1 ? "s" : ""} ativos
-              </span>
-            </p>
+
+          {/* Right: controls */}
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <button
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              className="p-2 rounded-lg border hover:bg-accent transition-colors"
+              title={soundEnabled ? "Desativar som" : "Ativar som"}
+            >
+              {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+            </button>
+            <button
+              onClick={() => fetchData(dateStr)}
+              className="p-2 bg-card hover:bg-accent rounded-lg border transition-colors"
+              title="Atualizar"
+            >
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            </button>
+            <button
+              onClick={handleFullscreen}
+              className={cn("p-2 rounded-lg border transition-colors", isFullScreen ? "bg-primary text-primary-foreground" : "hover:bg-accent")}
+              title={isFullScreen ? "Sair da tela cheia" : "Tela cheia (monitor)"}
+            >
+              {isFullScreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+
+        {/* Date navigator */}
+        <div className="flex items-center gap-2 mt-2.5">
           <button
-            onClick={() => setSoundEnabled(!soundEnabled)}
-            className="p-2 rounded-lg border hover:bg-accent transition-colors"
-            title={soundEnabled ? "Desativar som" : "Ativar som"}
+            onClick={goToPrevDay}
+            className="p-1.5 rounded-lg border hover:bg-accent transition-colors"
+            title="Dia anterior"
           >
-            {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+            <ChevronLeft size={15} />
           </button>
+
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            <CalendarDays size={13} className="text-muted-foreground shrink-0" />
+            <span className="text-sm font-semibold capitalize truncate">{dateLabel}</span>
+          </div>
+
+          {!isToday && (
+            <button
+              onClick={goToToday}
+              className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              Hoje
+            </button>
+          )}
+
           <button
-            onClick={fetchData}
-            className="p-2 bg-card hover:bg-accent rounded-lg border transition-colors"
-            title="Atualizar"
+            onClick={goToNextDay}
+            className="p-1.5 rounded-lg border hover:bg-accent transition-colors"
+            title="Próximo dia"
           >
-            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-          </button>
-          <button
-            onClick={handleFullscreen}
-            className={cn("p-2 rounded-lg border transition-colors", isFullScreen ? "bg-primary text-primary-foreground" : "hover:bg-accent")}
-            title={isFullScreen ? "Sair da tela cheia" : "Tela cheia (monitor)"}
-          >
-            {isFullScreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            <ChevronRight size={15} />
           </button>
         </div>
       </div>
@@ -215,7 +281,13 @@ export function KitchenDashboard() {
         ) : recentOrders.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3 border-2 border-dashed rounded-2xl">
             <ChefHat size={36} className="opacity-20" />
-            <p className="text-sm">Sem pedidos ativos no momento.</p>
+            <p className="text-sm">
+              {isFuture
+                ? "Nenhum pedido realizado para este dia ainda."
+                : isToday
+                ? "Sem pedidos ativos no momento."
+                : "Nenhum pedido registrado nesta data."}
+            </p>
           </div>
         ) : (
           <div
@@ -409,7 +481,9 @@ export function KitchenDashboard() {
             </div>
             <div>
               <h2 className="text-xs font-extrabold uppercase tracking-wide leading-none">Balanço de Produção</h2>
-              <span className="text-[10px] font-medium opacity-75">Total Consolidado (Tempo Real)</span>
+              <span className="text-[10px] font-medium opacity-75">
+                {isToday ? "Total Consolidado (Tempo Real)" : `Projeção para ${format(selectedDate, "dd/MM", { locale: ptBR })}`}
+              </span>
             </div>
           </div>
           <div className="bg-white/10 px-2 py-0.5 rounded-full text-[10px] font-bold border border-white/20 flex items-center gap-1.5">
