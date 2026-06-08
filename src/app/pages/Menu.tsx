@@ -682,10 +682,10 @@ export function Menu() {
           )}
 
           {/* Banner Carousel - Controlled by settings.showBannerCarousel (default true).
-               Show when there is no real order (hide only when OrderBanner is active).
-               Manual logs (Taipas diary) do NOT count as "ordered", so banners still show.
-               Not gated by isToday — banners are campaign content, not date-specific. */}
-          {(!todayOrder || todayOrder.isManualLog) && (settings.showBannerCarousel !== false) && (
+               Hide only when the OrderBanner is active (today + real order).
+               When viewing a future date the carousel stays visible regardless of todayOrder.
+               Manual logs (Taipas diary) do NOT count as "ordered", so banners always show. */}
+          {(!isToday || !todayOrder || todayOrder.isManualLog) && (settings.showBannerCarousel !== false) && (
             <BannerCarousel userUnit={selectedUnit} />
           )}
 
@@ -706,8 +706,9 @@ export function Menu() {
             </motion.div>
           )}
 
-          {/* Menu Content (hidden if order placed) */}
-          {todayOrder ? null : (
+          {/* Menu Content — hidden only when viewing today AND a real order already exists.
+               Navigating to other dates always shows the menu, even after ordering today. */}
+          {(isToday && todayOrder && !todayOrder.isManualLog) ? null : (
             <>
               {/* Empty menu state: no specific menu configured for this day */}
               {!loading && menuItems.length === 0 && (
