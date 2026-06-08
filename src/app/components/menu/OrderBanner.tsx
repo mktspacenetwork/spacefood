@@ -68,7 +68,7 @@ export function OrderBanner({
 
         <div className="bg-white/10 rounded-xl p-3 text-sm border border-white/10">
           <p className="opacity-90 line-clamp-2">
-            {order.items.map((i: any) => `${i.quantity}x ${i.name}`).join(", ")}
+            {(order.items || []).map((i: any) => `${i.quantity}x ${i.name}`).join(", ")}
           </p>
         </div>
 

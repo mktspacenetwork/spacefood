@@ -668,10 +668,10 @@ app.post("/make-server-c3078087/orders", async (c) => {
         return c.json({ error: "Você já realizou um pedido para esta data. Limite de 1 pedido por dia." }, 400);
       }
 
-      // Check abstention (only for real orders)
-      const abstentions = await kv.get(`abstentions:${today}`) || [];
+      // Check abstention (only for real orders, scoped to the target menu date)
+      const abstentions = await kv.get(`abstentions:${menuDate}`) || [];
       if (abstentions.find((a: any) => a.userId === auth.userId)) {
-        return c.json({ error: "Você registrou abstenção hoje. Cancele a abstenção primeiro." }, 400);
+        return c.json({ error: `Você registrou abstenção para ${menuDate}. Cancele a abstenção primeiro.` }, 400);
       }
 
       // Check cutoff time (only for real orders)
@@ -811,8 +811,8 @@ app.delete("/make-server-c3078087/orders/:id", async (c) => {
     await kv.set(`orders:${auth.userId}`, userOrders);
 
     // Remove from daily list — keyed by the order's target day (menuDate),
-    // falling back to creation date for legacy orders.
-    const date = order.menuDate || order.date.split('T')[0];
+    // falling back to creation date for legacy orders (null-safe).
+    const date = order.menuDate || (order.date ? order.date.split('T')[0] : brasiliaToday());
     const dailyOrders = await kv.get(`orders-daily:${date}`) || [];
     const dailyIndex = dailyOrders.findIndex((o: any) => o.id === id);
     if (dailyIndex >= 0) {
@@ -2294,7 +2294,9 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
     
     const weekOrdersArr = await kv.mget(weekKeys);
     const weekData: any[] = weekDates.map((wd, idx) => {
-      const dayOrders = weekOrdersArr[idx] || [];
+      // Exclude manual logs (Taipas food diary) from kitchen/production stats
+      const allDayOrders = weekOrdersArr[idx] || [];
+      const dayOrders = (allDayOrders as any[]).filter((o: any) => !o.isManualLog);
       return {
         name: wd.dayName,
         date: wd.dateStr,
