@@ -15,6 +15,7 @@ interface Banner {
   backgroundColor?: string;
   textColor?: string;
   buttonText?: string;
+  unitRestrictions?: string[];
 }
 
 export function AdminBanners() {
@@ -24,8 +25,9 @@ export function AdminBanners() {
   const [formData, setFormData] = useState<Partial<Banner>>({});
   const [uploading, setUploading] = useState(false);
   
-  // Use settings to control global carousel visibility
-  const [settings, setSettings] = useState<{ showBannerCarousel?: boolean }>({});
+  // Use settings to control global carousel visibility + available units
+  const [settings, setSettings] = useState<{ showBannerCarousel?: boolean; units?: any[] }>({});
+  const [availableUnits, setAvailableUnits] = useState<string[]>([]);
 
   useEffect(() => {
     fetchBanners();
@@ -48,6 +50,10 @@ export function AdminBanners() {
     try {
       const data = await api.authGet("/admin/settings");
       setSettings(data || {});
+      if (Array.isArray(data?.units)) {
+        const names = data.units.map((u: any) => typeof u === "string" ? u : u.name).filter(Boolean);
+        setAvailableUnits(names);
+      }
     } catch (e) {
       console.error("Failed to load settings");
     }
@@ -79,6 +85,7 @@ export function AdminBanners() {
         id: editingId === "new" ? undefined : editingId,
         active: formData.active ?? true,
         order: formData.order ?? banners.length,
+        unitRestrictions: formData.unitRestrictions || [],
       });
       toast.success("Banner salvo!");
       setEditingId(null);
@@ -329,7 +336,7 @@ export function AdminBanners() {
             </div>
           </div>
 
-          <div className="flex items-center gap-6 pt-2 border-t mt-4">
+          <div className="flex flex-wrap items-center gap-6 pt-2 border-t mt-4">
              <label className="flex items-center gap-2 cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -349,6 +356,35 @@ export function AdminBanners() {
               />
             </label>
           </div>
+
+          {availableUnits.length > 0 && (
+            <div className="pt-2 border-t space-y-2">
+              <p className="text-sm font-medium">Exibir para (unidades):</p>
+              <p className="text-xs text-muted-foreground">Deixe todas desmarcadas para exibir em todas as unidades.</p>
+              <div className="flex flex-wrap gap-3">
+                {availableUnits.map((unit) => {
+                  const checked = (formData.unitRestrictions || []).includes(unit);
+                  return (
+                    <label key={unit} className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const current = formData.unitRestrictions || [];
+                          const updated = e.target.checked
+                            ? [...current, unit]
+                            : current.filter(u => u !== unit);
+                          setFormData({ ...formData, unitRestrictions: updated });
+                        }}
+                        className="w-4 h-4 rounded border-gray-300 accent-primary"
+                      />
+                      <span className="text-sm">{unit}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           
           <div className="flex justify-end gap-2 pt-4">
             <Button variant="ghost" onClick={() => setEditingId(null)}>Cancelar</Button>
@@ -434,6 +470,13 @@ export function AdminBanners() {
                    <span className="text-xs text-muted-foreground font-medium">{banner.active ? 'Ativo' : 'Inativo'}</span>
                 </div>
                 <span className="text-[10px] text-muted-foreground">Ordem: {banner.order}</span>
+                {banner.unitRestrictions && banner.unitRestrictions.length > 0 ? (
+                  <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+                    🏢 {banner.unitRestrictions.join(", ")}
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground">Todas as unidades</span>
+                )}
               </div>
               
               <div className="flex gap-1">

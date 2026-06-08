@@ -12,6 +12,7 @@ interface MenuDatePickerProps {
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
   datesLoading: boolean;
+  allowPast?: boolean;
 }
 
 function getDateLabel(date: Date) {
@@ -21,6 +22,8 @@ function getDateLabel(date: Date) {
 
   if (isSameDay(date, new Date())) return `Hoje, ${weekDayFormatted}, ${dayAndMonth}`;
   if (isSameDay(date, addDays(new Date(), 1))) return `Amanhã, ${weekDayFormatted}, ${dayAndMonth}`;
+  if (isSameDay(date, addDays(new Date(), -1))) return `Ontem, ${weekDayFormatted}, ${dayAndMonth}`;
+  if (isSameDay(date, addDays(new Date(), -2))) return `Anteontem, ${weekDayFormatted}, ${dayAndMonth}`;
   return `${weekDayFormatted}, ${dayAndMonth}`;
 }
 
@@ -31,6 +34,7 @@ export function MenuDatePicker({
   isOpen,
   setIsOpen,
   datesLoading,
+  allowPast,
 }: MenuDatePickerProps) {
   const datePickerRef = useRef<HTMLDivElement>(null);
   const selectedDateLabel = getDateLabel(orderDate);
@@ -78,7 +82,7 @@ export function MenuDatePicker({
           >
             <div className="px-3 py-2 border-b border-border">
               <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-                Cardápios disponíveis
+                {allowPast ? "Datas disponíveis" : "Cardápios disponíveis"}
               </span>
             </div>
             {availableDates.length === 0 ? (
@@ -119,8 +123,11 @@ export function MenuDatePicker({
                           isSelected ? "text-primary" : "text-foreground"
                         )}>
                           {label}
-                          {isSameDay(date, new Date()) && (
-                            <span className="ml-1 text-[10px] bg-primary/20 text-primary px-1 rounded">Hoje</span>
+                          {isSameDay(date, addDays(new Date(), -1)) && (
+                            <span className="ml-1 text-[10px] bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 px-1 rounded">Ontem</span>
+                          )}
+                          {isSameDay(date, addDays(new Date(), -2)) && (
+                            <span className="ml-1 text-[10px] bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 px-1 rounded">Anteontem</span>
                           )}
                         </span>
                         <span className="text-[11px] text-muted-foreground truncate">

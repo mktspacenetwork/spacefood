@@ -18,6 +18,7 @@ interface Banner {
   backgroundColor?: string;
   textColor?: string;
   buttonText?: string;
+  unitRestrictions?: string[];
 }
 
 const BannerItem = ({ banner }: { banner: Banner }) => {
@@ -89,16 +90,21 @@ const BannerItem = ({ banner }: { banner: Banner }) => {
   );
 };
 
-export function BannerCarousel() {
+export function BannerCarousel({ userUnit }: { userUnit?: string }) {
   const [banners, setBanners] = useState<Banner[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    api.get("/banners")
+    const unitParam = userUnit ? `?unit=${encodeURIComponent(userUnit)}` : "";
+    api.get(`/banners${unitParam}`)
       .then((data) => {
         if (Array.isArray(data)) {
-          setBanners(data);
+          // Client-side fallback filter for unit restrictions
+          const filtered = data.filter((b: Banner) =>
+            !b.unitRestrictions?.length || !userUnit || b.unitRestrictions.includes(userUnit)
+          );
+          setBanners(filtered);
         }
       })
       .catch((err) => {
@@ -106,7 +112,7 @@ export function BannerCarousel() {
         setBanners([]);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [userUnit]);
 
   const defaultBanner: Banner = {
     id: "default",

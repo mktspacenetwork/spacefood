@@ -522,6 +522,16 @@ export function Menu() {
   const isToday = isSameDay(orderDate, new Date());
   const hasAnyPreviousDay = menuItems.some(item => item.isPreviousDay);
 
+  // For Taipas (manual log) include yesterday and day-before in the date picker
+  const visibleDates = useMemo(() => {
+    if (!isManualLog) return availableDates;
+    const today = startOfDay(new Date());
+    const pastDays = [addDays(today, -2), addDays(today, -1)];
+    const existing = new Set(availableDates.map(d => d.toISOString().split('T')[0]));
+    const toAdd = pastDays.filter(d => !existing.has(d.toISOString().split('T')[0]));
+    return [...toAdd, ...availableDates].sort((a, b) => a.getTime() - b.getTime());
+  }, [availableDates, isManualLog]);
+
   return (
     <PullToRefresh onRefresh={handleRefresh}>
       <div className="space-y-8 pb-16 md:pb-8 relative w-full">
@@ -550,14 +560,15 @@ export function Menu() {
               <MenuDatePicker
                 orderDate={orderDate}
                 setOrderDate={setOrderDate}
-                availableDates={availableDates}
+                availableDates={visibleDates}
                 isOpen={isDatePickerOpen}
                 setIsOpen={setIsDatePickerOpen}
                 datesLoading={datesLoading}
+                allowPast={isManualLog}
               />
               </div>
 
-              {!isCutoffPassed && !isFutureLocked ? (
+              {ordersAllowed && (!isCutoffPassed && !isFutureLocked ? (
                 <span data-tutorial="cutoff" className={cn(
                   "text-xs font-bold px-4 py-1 rounded-lg border flex items-center gap-1.5 transition-all whitespace-nowrap w-fit shadow-sm",
                   isToday
@@ -570,14 +581,14 @@ export function Menu() {
               ) : (
                 <span data-tutorial="cutoff" className={cn(
                   "text-xs font-bold px-4 py-1 rounded-lg border flex items-center gap-1.5 whitespace-nowrap w-fit shadow-sm",
-                  isFutureLocked 
+                  isFutureLocked
                     ? "text-blue-600 bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800"
                     : "text-red-600 bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800"
                 )}>
                   {isFutureLocked ? <Lock size={14} /> : <XCircle size={14} />}
                   {isFutureLocked ? "Aguardando Abertura" : "Encerrado"}
                 </span>
-              )}
+              ))}
             </div>
           </div>
 
@@ -652,7 +663,7 @@ export function Menu() {
 
           {/* Banner Carousel - Controlled by settings.showBannerCarousel (default true) */}
           {isToday && !todayOrder && (settings.showBannerCarousel !== false) && (
-            <BannerCarousel />
+            <BannerCarousel userUnit={selectedUnit} />
           )}
 
           {/* Previous Day Menu Banner */}
@@ -747,7 +758,7 @@ export function Menu() {
                       <button
                         key={cat}
                         onClick={() => setSelectedCategory(cat)}
-                        disabled={isCutoffPassed}
+                        disabled={ordersAllowed && isCutoffPassed}
                         className={cn(
                           "whitespace-nowrap rounded-full px-5 py-2.5 text-sm font-medium transition-all duration-300 border disabled:opacity-50 flex items-center gap-2",
                           isSelected
@@ -764,7 +775,7 @@ export function Menu() {
               </div>
 
               {/* Menu Grid */}
-              <div className={cn("space-y-4", (isCutoffPassed || isFutureLocked) && "opacity-50 pointer-events-none grayscale")}>
+              <div className={cn("space-y-4", ordersAllowed && (isCutoffPassed || isFutureLocked) && "opacity-50 pointer-events-none grayscale")}>
                 <div data-tutorial="food-grid" className="flex items-center justify-between">
                   <h2 className="font-bold text-foreground text-[15px]">
                     {selectedCategory === "Todos"
@@ -897,6 +908,7 @@ export function Menu() {
             isOpen={isRatingOpen}
             onClose={() => setIsRatingOpen(false)}
             onSubmit={handleRatingSubmit}
+            isManualLog={isManualLog}
           />
 
           {/* Footer Spacer */}

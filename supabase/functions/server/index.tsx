@@ -656,9 +656,21 @@ app.post("/make-server-c3078087/orders", async (c) => {
 
     const isManualLog = orderData.isManualLog === true;
     const today = brasiliaToday();
+    // For manual logs, use the submitted date as the log date (retroactive support)
+    const logDate = isManualLog && orderData.date
+      ? new Date(orderData.date).toISOString().split('T')[0]
+      : today;
     const existingOrders = await kv.get(`orders:${auth.userId}`) || [];
 
-    if (!isManualLog) {
+    if (isManualLog) {
+      // Check if user already registered a meal for this specific date
+      const existingLog = existingOrders.find((o: any) =>
+        o.isManualLog && o.date?.startsWith(logDate) && o.status !== 'Cancelado'
+      );
+      if (existingLog) {
+        return c.json({ error: "Você já registrou uma refeição para esta data." }, 400);
+      }
+    } else {
       // Check if user already ordered today (only for real orders, not manual logs)
       const todayOrder = existingOrders.find((o: any) => o.date?.startsWith(today) && o.status !== 'Cancelado' && !o.isManualLog);
       if (todayOrder) {
@@ -718,7 +730,8 @@ app.post("/make-server-c3078087/orders", async (c) => {
     const newOrder = {
       ...orderData,
       id: crypto.randomUUID(),
-      date: new Date().toISOString(),
+      // For manual logs, preserve the submitted date (retroactive support); real orders use now
+      date: isManualLog && orderData.date ? orderData.date : new Date().toISOString(),
       userId: auth.userId,
       userName: auth.userName,
       userDietaryRestrictions: auth.dietaryRestrictions || '',
@@ -731,10 +744,10 @@ app.post("/make-server-c3078087/orders", async (c) => {
 
     await kv.set(`orders:${auth.userId}`, [newOrder, ...existingOrders]);
 
-    // Also save to daily index for efficient admin queries
-    const dailyOrders = await kv.get(`orders-daily:${today}`) || [];
+    // Also save to daily index — use logDate for manual logs (supports retroactive)
+    const dailyOrders = await kv.get(`orders-daily:${logDate}`) || [];
     dailyOrders.push(newOrder);
-    await kv.set(`orders-daily:${today}`, dailyOrders);
+    await kv.set(`orders-daily:${logDate}`, dailyOrders);
 
     return c.json(newOrder);
   } catch (e) {
@@ -2233,10 +2246,12 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
       todayOrders = allOrders.filter((o: any) => o.date?.startsWith(today));
     }
 
-    const uniqueUserIds = new Set(todayOrders.map((o: any) => o.userId));
+    const realOrders = todayOrders.filter((o: any) => !o.isManualLog);
+    const manualLogs = todayOrders.filter((o: any) => o.isManualLog);
+    const uniqueUserIds = new Set(realOrders.map((o: any) => o.userId));
     const abstentions = await kv.get(`abstentions:${today}`) || [];
 
-    const todayItems: any[] = todayOrders.flatMap((o: any) => o.items || []);
+    const todayItems: any[] = realOrders.flatMap((o: any) => o.items || []);
     const itemCount: Record<string, { name: string; count: number; category: string }> = {};
     todayItems.forEach((item: any) => {
       const qty = item.quantity || 1;
@@ -2273,16 +2288,17 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
 
     const lastOrders = todayOrders
       .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      .slice(0, 10);
+      .slice(0, 20);
 
     return c.json({
-      todayOrdersCount: todayOrders.length,
+      todayOrdersCount: realOrders.length,
+      todayManualLogsCount: manualLogs.length,
       uniqueUsersOrdered: uniqueUserIds.size,
       topItems,
       weekData,
       lastOrders,
       abstentions,
-      allOrdersCount: todayOrders.length,
+      allOrdersCount: realOrders.length,
     });
   } catch (e) {
     console.log("Dashboard error:", e);
@@ -2953,9 +2969,11 @@ app.post("/make-server-c3078087/admin/menu/import-csv", async (c) => {
 // --- Banners ---
 app.get("/make-server-c3078087/banners", async (c) => {
   try {
+    const unit = c.req.query('unit') || '';
     const banners = await kv.get("banners") || [];
     const activeBanners = banners
       .filter((b: any) => b.active)
+      .filter((b: any) => !b.unitRestrictions?.length || !unit || b.unitRestrictions.includes(unit))
       .sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
     return c.json(activeBanners);
   } catch (e) {
@@ -2978,31 +2996,32 @@ app.post("/make-server-c3078087/admin/banners", async (c) => {
   const auth = await requireAdmin(c);
   if (auth instanceof Response) return auth;
   try {
-    const { id, imageUrl, link, active, order, title, description, backgroundColor, textColor, buttonText } = await c.req.json();
+    const { id, imageUrl, link, active, order, title, description, backgroundColor, textColor, buttonText, unitRestrictions } = await c.req.json();
     let banners = await kv.get("banners") || [];
-    
+
     if (id) {
       const idx = banners.findIndex((b: any) => b.id === id);
       if (idx >= 0) {
-        banners[idx] = { ...banners[idx], imageUrl, link, active, order, title, description, backgroundColor, textColor, buttonText };
+        banners[idx] = { ...banners[idx], imageUrl, link, active, order, title, description, backgroundColor, textColor, buttonText, unitRestrictions: unitRestrictions || [] };
       } else {
-        banners.push({ id, imageUrl, link, active, order: order || banners.length, title, description, backgroundColor, textColor, buttonText });
+        banners.push({ id, imageUrl, link, active, order: order || banners.length, title, description, backgroundColor, textColor, buttonText, unitRestrictions: unitRestrictions || [] });
       }
     } else {
-      banners.push({ 
-        id: crypto.randomUUID(), 
-        imageUrl, 
-        link, 
-        active: active !== undefined ? active : true, 
+      banners.push({
+        id: crypto.randomUUID(),
+        imageUrl,
+        link,
+        active: active !== undefined ? active : true,
         order: order !== undefined ? order : banners.length,
         title,
         description,
         backgroundColor,
         textColor,
-        buttonText
+        buttonText,
+        unitRestrictions: unitRestrictions || [],
       });
     }
-    
+
     await kv.set("banners", banners);
     await logAudit(c, auth, id ? "UPDATE_BANNER" : "CREATE_BANNER", "banners", `${id ? "Atualizou" : "Criou"} banner "${title || id || "sem titulo"}".`, { bannerId: id });
     return c.json({ success: true, banners });
