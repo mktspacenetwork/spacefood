@@ -333,6 +333,9 @@ export function Menu() {
     return () => clearInterval(interval);
   }, [settings.cutoffTime, settings.openingTime, orderDate, liveOrderStatus, todayOrder?.status]);
 
+  // Derived: is the currently selected order date today?
+  const isToday = isSameDay(orderDate, new Date());
+
   // Auto-advance to next available date when today's cutoff passes (Damasceno only).
   // Taipas users (ordersAllowed=false) register any time — no auto-advance for them.
   useEffect(() => {
@@ -529,7 +532,6 @@ export function Menu() {
 
     return ["Todos", ...unique];
   }, [menuItems]);
-  const isToday = isSameDay(orderDate, new Date());
   const hasAnyPreviousDay = menuItems.some(item => item.isPreviousDay);
 
   // For Taipas (manual log) include yesterday and day-before in the date picker
