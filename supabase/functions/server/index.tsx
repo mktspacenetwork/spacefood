@@ -882,19 +882,32 @@ app.put("/make-server-c3078087/admin/orders/:id/status", async (c) => {
       return c.json({ error: `Status inválido. Use: ${validStatuses.join(', ')}` }, 400);
     }
 
-    // Update in daily index
+    // Find the order across a window of dates.
+    // Orders may be for a different day than today (pre-orders placed in advance),
+    // so we must look in the correct orders-daily:{menuDate} bucket, not just today.
     const today = brasiliaToday();
-    const dailyOrders = await kv.get(`orders-daily:${today}`) || [];
+    const todayMs = new Date(today + "T00:00:00Z").getTime();
+    const searchDates: string[] = [];
+    for (let d = -1; d <= 7; d++) {
+      const dt = new Date(todayMs + d * 86400000);
+      searchDates.push(dt.toISOString().split('T')[0]);
+    }
+
     let updatedOrder: any = null;
-    for (const order of dailyOrders) {
-      if (order.id === orderId) {
-        order.status = status;
-        updatedOrder = order;
+    let orderBucketDate: string | null = null;
+
+    for (const dateKey of searchDates) {
+      const bucket = await kv.get(`orders-daily:${dateKey}`) || [];
+      const idx = (bucket as any[]).findIndex((o: any) => o.id === orderId);
+      if (idx >= 0) {
+        bucket[idx].status = status;
+        updatedOrder = bucket[idx];
+        orderBucketDate = dateKey;
+        await kv.set(`orders-daily:${dateKey}`, bucket);
         break;
       }
     }
-    if (updatedOrder) {
-      await kv.set(`orders-daily:${today}`, dailyOrders);
+    if (updatedOrder && orderBucketDate) {
       // Also update in user's orders
       const userOrders = await kv.get(`orders:${updatedOrder.userId}`) || [];
       for (const order of userOrders) {
