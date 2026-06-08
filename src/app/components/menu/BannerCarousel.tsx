@@ -48,30 +48,30 @@ const BannerItem = ({ banner }: { banner: Banner }) => {
 
       {/* Text Content */}
       {hasContent && (
-        <div className="relative z-10 w-full h-full p-6 md:p-10 lg:p-12 flex flex-col justify-center items-start gap-2 md:gap-4 max-w-[60%]">
+        <div className="relative z-10 w-full h-full px-5 py-4 md:px-10 md:py-8 lg:px-12 flex flex-col justify-center items-start gap-1.5 md:gap-4 max-w-[62%] md:max-w-[60%] overflow-hidden">
           {banner.title && (
-            <h2 
-              className="text-xl md:text-3xl lg:text-4xl font-extrabold leading-tight tracking-tight drop-shadow-sm line-clamp-2"
+            <h2
+              className="text-base sm:text-lg md:text-3xl lg:text-4xl font-extrabold leading-tight tracking-tight drop-shadow-sm line-clamp-2"
               style={{ color: txtColor }}
             >
               {banner.title}
             </h2>
           )}
           {banner.description && (
-            <p 
-              className="text-xs md:text-sm lg:text-base font-medium opacity-90 leading-relaxed drop-shadow-sm line-clamp-2"
+            <p
+              className="text-[11px] sm:text-xs md:text-sm lg:text-base font-medium opacity-90 leading-snug drop-shadow-sm line-clamp-2"
               style={{ color: txtColor }}
             >
               {banner.description}
             </p>
           )}
           {banner.buttonText && (
-            <div className="mt-2">
-               <span 
-                className="px-4 py-2 md:px-6 md:py-2.5 rounded-full text-xs md:text-sm font-bold shadow-lg transition-transform hover:scale-105 active:scale-95 inline-block"
-                style={{ 
-                  backgroundColor: txtColor, 
-                  color: bgColor 
+            <div className="mt-0.5 md:mt-2 shrink-0">
+               <span
+                className="px-3.5 py-1.5 md:px-6 md:py-2.5 rounded-full text-[11px] sm:text-xs md:text-sm font-bold shadow-lg transition-transform hover:scale-105 active:scale-95 inline-block"
+                style={{
+                  backgroundColor: txtColor,
+                  color: bgColor
                 }}
               >
                 {banner.buttonText}
