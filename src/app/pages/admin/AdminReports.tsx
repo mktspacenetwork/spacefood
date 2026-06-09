@@ -65,7 +65,7 @@ export function AdminReports() {
     }
 
     return allOrders.filter(o => {
-      if (!o.date) return false;
+      if (!o.date || o.isManualLog) return false;
       const orderDate = new Date(o.date);
       return isWithinInterval(orderDate, { start: startDate, end: endDate });
     });

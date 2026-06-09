@@ -104,11 +104,8 @@ export function AdminDashboard() {
 
   const topItem = data.topItems[0];
 
-  // Filter out manual logs from "last orders" display
-  const realLastOrders = data.lastOrders.filter((o: any) => !o.isManualLog);
-
-  // Users who haven't ordered today
-  const orderedUserIds = new Set(realLastOrders.map((o: any) => o.userId));
+  // Users who haven't ordered today — use full set from backend (not limited to 20)
+  const orderedUserIds = new Set(data.orderedUserIds || data.lastOrders.filter((o: any) => !o.isManualLog).map((o: any) => o.userId));
   const abstainedUserIds = new Set(data.abstentions.map(a => a.userId));
   const usersNotOrdered = allUsers.filter(u =>
     !orderedUserIds.has(u.id) && !abstainedUserIds.has(u.id)

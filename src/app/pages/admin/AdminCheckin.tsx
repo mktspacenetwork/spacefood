@@ -270,8 +270,8 @@ export function AdminCheckin() {
     return ci ? ci.confirmed : null;
   };
 
-  const confirmedCount = unitCheckins.filter((c) => c.confirmed).length;
-  const absentCount = unitCheckins.filter((c) => !c.confirmed).length;
+  const confirmedCount = unitCheckins.filter((c) => c.confirmed && !c.isManual).length;
+  const absentCount = unitCheckins.filter((c) => !c.confirmed && !c.isManual).length;
   const totalInUnit = allowOrders ? unitOrders.length : unitUsers.length;
   const uncheckedCount = totalInUnit - unitCheckins.length;
 

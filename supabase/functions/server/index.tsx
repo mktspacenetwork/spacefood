@@ -2263,7 +2263,7 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
       todayOrders = allOrders.filter((o: any) => o.date?.startsWith(today));
     }
 
-    const realOrders = todayOrders.filter((o: any) => !o.isManualLog);
+    const realOrders = todayOrders.filter((o: any) => !o.isManualLog && o.status !== 'Cancelado');
     const manualLogs = todayOrders.filter((o: any) => o.isManualLog);
     const uniqueUserIds = new Set(realOrders.map((o: any) => o.userId));
     const abstentions = await kv.get(`abstentions:${today}`) || [];
@@ -2310,7 +2310,7 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
     const weekData: any[] = weekDates.map((wd, idx) => {
       // Exclude manual logs (Taipas food diary) from kitchen/production stats
       const allDayOrders = weekOrdersArr[idx] || [];
-      const dayOrders = (allDayOrders as any[]).filter((o: any) => !o.isManualLog);
+      const dayOrders = (allDayOrders as any[]).filter((o: any) => !o.isManualLog && o.status !== 'Cancelado');
       return {
         name: wd.dayName,
         date: wd.dateStr,
@@ -2327,11 +2327,11 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
       todayOrdersCount: realOrders.length,
       todayManualLogsCount: manualLogs.length,
       uniqueUsersOrdered: uniqueUserIds.size,
+      orderedUserIds: [...uniqueUserIds],
       topItems,
       weekData,
       lastOrders,
       abstentions,
-      allOrdersCount: realOrders.length,
     });
   } catch (e) {
     console.log("Dashboard error:", e);
