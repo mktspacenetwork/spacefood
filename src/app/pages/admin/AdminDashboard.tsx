@@ -18,7 +18,7 @@ interface DashboardData {
   weekData: { name: string; date: string; orders: number; items: number }[];
   lastOrders: any[];
   abstentions: { userId: string; userName: string; date: string }[];
-  allOrdersCount: number;
+  orderedUserIds?: string[];
 }
 
 interface UserInfo {
@@ -104,8 +104,11 @@ export function AdminDashboard() {
 
   const topItem = data.topItems[0];
 
+  // Filter out manual logs and cancelled orders from "last orders" display
+  const realLastOrders = data.lastOrders.filter((o: any) => !o.isManualLog && o.status !== "Cancelado");
+
   // Users who haven't ordered today — use full set from backend (not limited to 20)
-  const orderedUserIds = new Set(data.orderedUserIds || data.lastOrders.filter((o: any) => !o.isManualLog).map((o: any) => o.userId));
+  const orderedUserIds = new Set(data.orderedUserIds || realLastOrders.map((o: any) => o.userId));
   const abstainedUserIds = new Set(data.abstentions.map(a => a.userId));
   const usersNotOrdered = allUsers.filter(u =>
     !orderedUserIds.has(u.id) && !abstainedUserIds.has(u.id)
