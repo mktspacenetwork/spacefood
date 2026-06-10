@@ -942,7 +942,7 @@ export function Menu() {
                           key={item.id}
                           {...(index === 0 ? { "data-tutorial": "food-card" } : {})}
                         >
-                          <MenuItemCard item={item} ordersAllowed={ordersAllowed} isFirstCard={index === 0} />
+                          <MenuItemCard item={item} ordersAllowed={ordersAllowed} isFirstCard={index === 0} isTodayOrder={isToday} />
                         </motion.div>
                       ))}
                     </AnimatePresence>

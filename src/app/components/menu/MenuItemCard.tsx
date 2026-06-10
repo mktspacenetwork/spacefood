@@ -13,13 +13,17 @@ interface MenuItemCardProps {
   item: MenuItem;
   ordersAllowed?: boolean;
   isFirstCard?: boolean;
+  isTodayOrder?: boolean;
 }
 
-export function MenuItemCard({ item, ordersAllowed = true, isFirstCard = false }: MenuItemCardProps) {
+export function MenuItemCard({ item, ordersAllowed = true, isFirstCard = false, isTodayOrder = true }: MenuItemCardProps) {
   const { addToCart, getItemQuantity, updateQuantity, removeFromCart, items } = useCart();
   const quantity = getItemQuantity(item.id);
 
-  const isSoldOut = item.available <= 0;
+  // Stock (available) is only meaningful for same-day orders.
+  // Pre-orders for future dates skip the stock check — admin resets
+  // stock daily, so today's counter doesn't reflect Friday's supply.
+  const isSoldOut = isTodayOrder && item.available <= 0;
   // Per-item portion limit check
   // For Prato Principal: also blocked when any OTHER Prato Principal is already in the cart
   const hasDifferentPPInCart =
