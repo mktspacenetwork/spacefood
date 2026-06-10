@@ -42,6 +42,9 @@ const NotificationCard = forwardRef<HTMLDivElement, { notification: AppNotificat
   ({ notification, onRead, onDismiss }, ref) => {
     const config = typeConfig[notification.type] || typeConfig.info;
     const Icon = config.icon;
+    const [expanded, setExpanded] = useState(false);
+    // Show the "Ler mais" toggle only when the message is long enough to be clamped
+    const isLongMessage = (notification.message || "").length > 90;
 
     const timeAgo = (() => {
       try {
@@ -59,12 +62,16 @@ const NotificationCard = forwardRef<HTMLDivElement, { notification: AppNotificat
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, x: -30, scale: 0.95 }}
         transition={{ type: "spring", stiffness: 400, damping: 30 }}
-        onClick={() => !notification.read && onRead(notification.id)}
+        onClick={() => {
+          if (!notification.read) onRead(notification.id);
+          if (isLongMessage) setExpanded((v) => !v);
+        }}
         className={cn(
           "relative group rounded-2xl bg-card border transition-all duration-200 overflow-hidden",
+          isLongMessage ? "cursor-pointer active:scale-[0.99]" : "",
           !notification.read
-            ? "border-border shadow-sm cursor-pointer active:scale-[0.98]"
-            : "border-border/50 opacity-60"
+            ? "border-border shadow-sm"
+            : "border-border/50 opacity-60 hover:opacity-100"
         )}
       >
         <div className="flex gap-3.5 p-4">
@@ -87,7 +94,18 @@ const NotificationCard = forwardRef<HTMLDivElement, { notification: AppNotificat
                 <span className="text-[10px] text-muted-foreground whitespace-nowrap">{timeAgo}</span>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground mt-1 leading-relaxed line-clamp-2">{notification.message}</p>
+            <p className={cn(
+              "text-xs text-muted-foreground mt-1 leading-relaxed",
+              expanded ? "whitespace-pre-line" : "line-clamp-2"
+            )}>{notification.message}</p>
+            {isLongMessage && (
+              <button
+                onClick={(e) => { e.stopPropagation(); if (!notification.read) onRead(notification.id); setExpanded((v) => !v); }}
+                className="mt-1 text-[11px] font-bold text-primary hover:underline"
+              >
+                {expanded ? "Ler menos" : "Ler mais"}
+              </button>
+            )}
             <div className="flex items-center justify-between mt-1.5">
               {notification.sentByName && (
                 <p className="text-[10px] text-muted-foreground/70">por {notification.sentByName}</p>

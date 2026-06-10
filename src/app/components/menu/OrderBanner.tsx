@@ -12,6 +12,8 @@ interface OrderBannerProps {
   onDelete: () => void;
   /** Real-time status if polling detected a change */
   liveStatus?: string;
+  /** When the order is for a future date, a label like "terça-feira, 09/06". */
+  targetDateLabel?: string;
 }
 
 export function OrderBanner({
@@ -22,6 +24,7 @@ export function OrderBanner({
   onEdit,
   onDelete,
   liveStatus,
+  targetDateLabel,
 }: OrderBannerProps) {
   const displayStatus = liveStatus || order.status;
   const statusColors: Record<string, string> = {
@@ -30,8 +33,12 @@ export function OrderBanner({
     "Pronto": "bg-purple-500 border-purple-400/50",
     "Retirado": "bg-gray-500 border-gray-400/50",
   };
+  // For a future pre-order, the message is date-specific; otherwise it's about today.
+  const garantidoMsg = targetDateLabel
+    ? `Seu almoço de ${targetDateLabel} está garantido.`
+    : "Seu almoço de hoje está garantido.";
   const statusMessages: Record<string, string> = {
-    "Confirmado": "Seu almoço de hoje está garantido.",
+    "Confirmado": garantidoMsg,
     "Em Preparo": "Seu pedido está sendo preparado na cozinha!",
     "Pronto": "Seu pedido está pronto para retirada!",
     "Retirado": "Pedido retirado. Bom apetite!",
@@ -54,14 +61,14 @@ export function OrderBanner({
               {displayStatus === "Pronto" ? "Pedido Pronto!" : displayStatus === "Em Preparo" ? "Em Preparo..." : "Pedido Realizado!"}
             </h3>
             <p className="text-white/80 text-sm">
-              {statusMessages[displayStatus] || "Seu almoço de hoje está garantido."}
+              {statusMessages[displayStatus] || garantidoMsg}
             </p>
           </div>
         </div>
 
         <div className="bg-white/10 rounded-xl p-3 text-sm border border-white/10">
           <p className="opacity-90 line-clamp-2">
-            {order.items.map((i: any) => `${i.quantity}x ${i.name}`).join(", ")}
+            {(order.items || []).map((i: any) => `${i.quantity}x ${i.name}`).join(", ")}
           </p>
         </div>
 

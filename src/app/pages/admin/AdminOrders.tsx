@@ -4,7 +4,7 @@ import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
 import { api } from "../../lib/api";
 import { toast } from "sonner";
-import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
+import { format, addDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "../../lib/utils";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
@@ -22,6 +22,7 @@ interface Order {
   consumptionMode: string;
   userDietaryRestrictions?: string;
   lunchUnit?: string;
+  isManualLog?: boolean;
 }
 
 const MODE_LABEL: Record<string, string> = {
@@ -38,7 +39,7 @@ const STATUS_COLOR: Record<string, string> = {
   Cancelado: "bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800",
 };
 
-type PeriodType = "today" | "week" | "month" | "custom";
+type PeriodType = "today" | "tomorrow" | "week" | "month" | "custom";
 
 function getDateRange(period: PeriodType, customFrom: string, customTo: string) {
   const today = new Date();
@@ -47,6 +48,10 @@ function getDateRange(period: PeriodType, customFrom: string, customTo: string) 
   switch (period) {
     case "today":
       return { from: todayStr, to: todayStr };
+    case "tomorrow": {
+      const tomorrowStr = getBrazilDateString(addDays(today, 1));
+      return { from: tomorrowStr, to: tomorrowStr };
+    }
     case "week": {
       const ws = startOfWeek(today, { weekStartsOn: 1 });
       const we = endOfWeek(today, { weekStartsOn: 1 });
@@ -73,6 +78,9 @@ export function AdminOrders() {
   const [period, setPeriod] = useState<PeriodType>("today");
   const [customFrom, setCustomFrom] = useState(() => getBrazilDateString());
   const [customTo, setCustomTo] = useState(() => getBrazilDateString());
+
+  // Tab: real orders vs manual logs
+  const [activeTab, setActiveTab] = useState<"orders" | "registrations">("orders");
 
   // Dropdown filters
   const [unitFilter, setUnitFilter] = useState("all");
@@ -109,7 +117,7 @@ export function AdminOrders() {
     try {
       const range = getDateRange(period, customFrom, customTo);
       let data: any;
-      if (period === "today") {
+      if (period === "today" || period === "tomorrow") {
         data = await api.authGet(`/admin/orders?date=${range.from}`);
       } else {
         data = await api.authGet(`/admin/orders?from=${range.from}&to=${range.to}`);
@@ -171,6 +179,9 @@ export function AdminOrders() {
     return orders
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .filter(o => {
+        // Tab filter: real orders vs manual logs (food diary)
+        const matchTab = activeTab === "registrations" ? !!o.isManualLog : !o.isManualLog;
+
         const q = searchQuery.toLowerCase();
         const matchSearch = !q || o.userName?.toLowerCase().includes(q) || o.id.toLowerCase().includes(q);
 
@@ -182,18 +193,22 @@ export function AdminOrders() {
 
         const matchMode = modeFilter === "all" || o.consumptionMode === modeFilter;
 
-        return matchSearch && matchUnit && matchCategory && matchMode;
+        return matchTab && matchSearch && matchUnit && matchCategory && matchMode;
       });
-  }, [orders, searchQuery, unitFilter, categoryFilter, modeFilter]);
+  }, [orders, searchQuery, unitFilter, categoryFilter, modeFilter, activeTab]);
 
   const activeFilterCount = [unitFilter, categoryFilter, modeFilter].filter(f => f !== "all").length;
 
   const periodLabel: Record<PeriodType, string> = {
     today: "Hoje",
+    tomorrow: "Amanhã",
     week: "Esta Semana",
-    month: "Este Mes",
+    month: "Este Mês",
     custom: "Personalizado",
   };
+
+  const manualLogsCount = orders.filter(o => o.isManualLog).length;
+  const realOrdersCount = orders.filter(o => !o.isManualLog).length;
 
   return (
     <div className="space-y-4">
@@ -208,9 +223,47 @@ export function AdminOrders() {
         </Button>
       </div>
 
+      {/* Type Tabs: Pedidos / Registros */}
+      <div className="flex items-center gap-1 p-1 bg-muted/40 rounded-xl w-fit border border-border">
+        <button
+          onClick={() => setActiveTab("orders")}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all",
+            activeTab === "orders"
+              ? "bg-background text-foreground shadow-sm border border-border"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <ClipboardList size={14} />
+          Pedidos
+          {realOrdersCount > 0 && (
+            <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-bold">
+              {realOrdersCount}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab("registrations")}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all",
+            activeTab === "registrations"
+              ? "bg-background text-foreground shadow-sm border border-border"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <ClipboardList size={14} className="text-blue-500" />
+          Registros (Taipas)
+          {manualLogsCount > 0 && (
+            <span className="text-[10px] bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded-full font-bold">
+              {manualLogsCount}
+            </span>
+          )}
+        </button>
+      </div>
+
       {/* Period Tabs */}
       <div className="flex flex-wrap items-center gap-1.5">
-        {(["today", "week", "month", "custom"] as PeriodType[]).map(p => (
+        {(["today", "tomorrow", "week", "month", "custom"] as PeriodType[]).map(p => (
           <button
             key={p}
             onClick={() => setPeriod(p)}
@@ -221,7 +274,7 @@ export function AdminOrders() {
                 : "bg-card text-muted-foreground border-border hover:bg-accent hover:text-foreground"
             )}
           >
-            {p === "today" && <Calendar size={11} className="inline mr-1" />}
+            {(p === "today" || p === "tomorrow") && <Calendar size={11} className="inline mr-1" />}
             {periodLabel[p]}
           </button>
         ))}
@@ -307,7 +360,7 @@ export function AdminOrders() {
       {/* Active filters / count */}
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          {filteredOrders.length} pedido{filteredOrders.length !== 1 ? "s" : ""}
+          {filteredOrders.length} {activeTab === "registrations" ? `registro${filteredOrders.length !== 1 ? "s" : ""}` : `pedido${filteredOrders.length !== 1 ? "s" : ""}`}
           {activeFilterCount > 0 && (
             <span className="ml-1 text-primary font-semibold">
               ({activeFilterCount} filtro{activeFilterCount > 1 ? "s" : ""} ativo{activeFilterCount > 1 ? "s" : ""})
@@ -329,8 +382,10 @@ export function AdminOrders() {
         <SkeletonTable rows={6} />
       ) : filteredOrders.length === 0 ? (
         <div className="text-center py-14 text-muted-foreground border-2 border-dashed rounded-xl bg-card">
-          <ClipboardList className="mx-auto h-10 w-10 opacity-20 mb-3" />
-          <p className="text-sm">Nenhum pedido encontrado.</p>
+          <ClipboardList className={`mx-auto h-10 w-10 opacity-20 mb-3 ${activeTab === "registrations" ? "text-blue-500" : ""}`} />
+          <p className="text-sm">
+            {activeTab === "registrations" ? "Nenhum registro de refeição encontrado." : "Nenhum pedido encontrado."}
+          </p>
         </div>
       ) : (
         <div className="space-y-2.5">
@@ -365,11 +420,13 @@ interface OrderCardProps {
 }
 
 function OrderCard({ order, removing, onDelete }: OrderCardProps) {
+  const isManualLog = !!order.isManualLog;
   return (
     <div className={cn(
       "bg-card rounded-xl border shadow-sm overflow-hidden transition-all",
       order.status === "Cancelado" && "opacity-60",
       "border-l-4",
+      isManualLog ? "border-l-blue-400" :
       order.status === "Confirmado" ? "border-l-sky-500" :
       order.status === "Em Preparo" ? "border-l-amber-500" :
       order.status === "Pronto" ? "border-l-violet-500" :
@@ -409,9 +466,15 @@ function OrderCard({ order, removing, onDelete }: OrderCardProps) {
                 )}
               </div>
             </div>
-            <Badge className={cn("text-[10px] font-bold shrink-0 border", STATUS_COLOR[order.status] || STATUS_COLOR.Confirmado)}>
-              {order.status}
-            </Badge>
+            {isManualLog ? (
+              <Badge className="text-[10px] font-bold shrink-0 border bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800">
+                Registro de Refeição
+              </Badge>
+            ) : (
+              <Badge className={cn("text-[10px] font-bold shrink-0 border", STATUS_COLOR[order.status] || STATUS_COLOR.Confirmado)}>
+                {order.status}
+              </Badge>
+            )}
           </div>
 
           {/* Items */}

@@ -339,7 +339,7 @@ export function AdminSettings() {
                         ) : (
                           <Lock size={10} />
                         )}
-                        {unit.allowOrders ? "Pedidos ativos" : "So cardapio"}
+                        {unit.allowOrders ? "Pedidos ativos" : "Só cardápio"}
                       </button>
                       <button
                         onClick={() => removeUnit(unit.name)}

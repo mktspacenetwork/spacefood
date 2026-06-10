@@ -460,20 +460,17 @@ app.get("/make-server-c3078087/menu", async (c) => {
     }
 
     if (date) {
-      // Get the published daily menu for this specific date
+      // Get the published daily menu for this specific date.
+      // Recurring items alone do NOT constitute an active menu — only show them
+      // when there is a specifically configured daily menu for this date.
       const dailyMenu = await kv.get(`daily-menu:${date}`);
+      if (!dailyMenu || !Array.isArray(dailyMenu) || dailyMenu.length === 0) {
+        return c.json([]);
+      }
       const recurringIds = await kv.get("menu:recurring-items") || [];
-      
-      const itemIds = new Set(recurringIds);
-      if (dailyMenu && Array.isArray(dailyMenu)) {
-        dailyMenu.forEach((i: any) => itemIds.add(i.id));
-      }
-
-      if (itemIds.size > 0) {
-        return c.json(items.filter((i: any) => itemIds.has(i.id)));
-      }
-      // If no daily menu for this date, return empty
-      return c.json([]);
+      const itemIds = new Set<string>(recurringIds);
+      dailyMenu.forEach((i: any) => itemIds.add(i.id));
+      return c.json(items.filter((i: any) => itemIds.has(i.id)));
     }
 
     return c.json(items);
@@ -483,48 +480,33 @@ app.get("/make-server-c3078087/menu", async (c) => {
   }
 });
 
-// Get today's menu - shows today's menu or yesterday's in grayscale
+// Get today's menu — only when a specific daily menu is configured (no recurring-only fallback,
+// no yesterday fallback). Returns [] when no menu is active for today.
 app.get("/make-server-c3078087/menu/today", async (c) => {
   try {
     // Better date handling for Brazil (UTC-3)
     const now = new Date();
     const brazilDate = new Date(now.getTime() - 3 * 60 * 60 * 1000);
     const todayKey = brazilDate.toISOString().split('T')[0];
-    
+
     console.log(`[Menu] Fetching today's menu for: ${todayKey} (UTC: ${now.toISOString()})`);
 
-    // Check if there's a daily menu for today
+    // Only show items when there's a specifically configured menu for today.
+    // Recurring items alone do NOT constitute an active menu for the day.
     const todayMenu = await kv.get(`daily-menu:${todayKey}`);
+    if (!todayMenu || !Array.isArray(todayMenu) || todayMenu.length === 0) {
+      return c.json([]);
+    }
+
     const recurringIds = await kv.get("menu:recurring-items") || [];
     const allItems = await kv.get("menu:items") || [];
 
-    const todayItemIds = new Set(recurringIds);
-    if (todayMenu && Array.isArray(todayMenu)) {
-      todayMenu.forEach((i: any) => todayItemIds.add(i.id));
-    }
-
-    if (todayItemIds.size > 0) {
-      const todayItems = allItems
-        .filter((i: any) => todayItemIds.has(i.id))
-        .map((i: any) => ({ ...i, isPreviousDay: false }));
-      return c.json(todayItems);
-    }
-
-    // No menu for today - try yesterday (show in grayscale)
-    const yesterdayDate = new Date(brazilDate);
-    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-    const yesterdayKey = yesterdayDate.toISOString().split('T')[0];
-    
-    const yesterdayMenu = await kv.get(`daily-menu:${yesterdayKey}`);
-    if (yesterdayMenu && Array.isArray(yesterdayMenu) && yesterdayMenu.length > 0) {
-      const yesterdayItemIds = new Set(yesterdayMenu.map((i: any) => i.id));
-      const yesterdayItems = allItems
-        .filter((i: any) => yesterdayItemIds.has(i.id))
-        .map((i: any) => ({ ...i, isPreviousDay: true }));
-      return c.json(yesterdayItems);
-    }
-
-    return c.json([]);
+    const todayItemIds = new Set<string>(recurringIds);
+    todayMenu.forEach((i: any) => todayItemIds.add(i.id));
+    const todayItems = allItems
+      .filter((i: any) => todayItemIds.has(i.id))
+      .map((i: any) => ({ ...i, isPreviousDay: false }));
+    return c.json(todayItems);
   } catch (e) {
     console.log("Today menu error:", e);
     return c.json({ error: e.message }, 500);
@@ -687,83 +669,116 @@ app.post("/make-server-c3078087/orders", async (c) => {
       return c.json({ error: "Pedido deve conter pelo menos um item." }, 400);
     }
 
-    // Check if user already ordered today (using Brasília date)
+    const isManualLog = orderData.isManualLog === true;
     const today = brasiliaToday();
+    // The date the order is FOR (target menu day). Real orders may be placed
+    // today for a future date (e.g. tomorrow); manual logs may be retroactive.
+    const menuDate = orderData.date
+      ? new Date(orderData.date).toISOString().split('T')[0]
+      : today;
+    // The daily index is keyed by the day the order/meal is FOR, so check-in and
+    // the kitchen see each order on its correct date (not the day it was created).
+    const logDate = menuDate;
     const existingOrders = await kv.get(`orders:${auth.userId}`) || [];
-    const todayOrder = existingOrders.find((o: any) => o.date?.startsWith(today) && o.status !== 'Cancelado');
-    if (todayOrder) {
-      return c.json({ error: "Você já realizou um pedido hoje. Limite de 1 pedido por dia." }, 400);
-    }
 
-    // Check abstention (using same Brasília date key)
-    const abstentions = await kv.get(`abstentions:${today}`) || [];
-    if (abstentions.find((a: any) => a.userId === auth.userId)) {
-      return c.json({ error: "Você registrou abstenção hoje. Cancele a abstenção primeiro." }, 400);
-    }
-
-    // Check cutoff time (compare in Brasília timezone, not UTC)
-    const settings = await kv.get("settings") || {};
-    if (settings.cutoffTime) {
-      const nowBrasilia = brasiliaDateNow();
-      const [h, m] = settings.cutoffTime.split(':').map(Number);
-      const brasiliaHour = nowBrasilia.getUTCHours();
-      const brasiliaMinute = nowBrasilia.getUTCMinutes();
-      const pastCutoff = brasiliaHour > h || (brasiliaHour === h && brasiliaMinute >= m);
-
-      // For future dates, don't apply today's cutoff
-      const orderDateStr = orderData.date ? new Date(orderData.date).toISOString().split('T')[0] : today;
-      if (orderDateStr === today && pastCutoff) {
-        return c.json({ error: `Horário de pedido encerrado. O limite era ${settings.cutoffTime}.` }, 400);
+    if (isManualLog) {
+      // Check if user already registered a meal for this specific date
+      const existingLog = existingOrders.find((o: any) =>
+        o.isManualLog && o.date?.startsWith(logDate) && o.status !== 'Cancelado'
+      );
+      if (existingLog) {
+        return c.json({ error: "Você já registrou uma refeição para esta data." }, 400);
       }
-    }
+    } else {
+      // Check if user already has an order for this target date (1 order per menu day).
+      // Match by menuDate, falling back to creation date for legacy orders.
+      const existingForDate = existingOrders.find((o: any) => {
+        if (o.isManualLog || o.status === 'Cancelado') return false;
+        const oDate = o.menuDate || (o.date ? o.date.split('T')[0] : '');
+        return oDate === menuDate;
+      });
+      if (existingForDate) {
+        return c.json({ error: "Você já realizou um pedido para esta data. Limite de 1 pedido por dia." }, 400);
+      }
 
-    // Decrement stock with optimistic retry to mitigate race conditions
-    const MAX_STOCK_RETRIES = 3;
-    for (let attempt = 0; attempt < MAX_STOCK_RETRIES; attempt++) {
-      let menuItemsData = await kv.get("menu:items") || [];
-      let stockOk = true;
-      for (const orderItem of orderData.items) {
-        const menuItem = menuItemsData.find((mi: any) => mi.id === orderItem.id);
-        if (menuItem) {
-          const qty = orderItem.quantity || 1;
-          if (menuItem.available < qty) {
-            return c.json({ error: `"${menuItem.name}" não tem estoque suficiente (disponível: ${menuItem.available}).` }, 400);
+      // Check abstention (only for real orders, scoped to the target menu date)
+      const abstentions = await kv.get(`abstentions:${menuDate}`) || [];
+      if (abstentions.find((a: any) => a.userId === auth.userId)) {
+        return c.json({ error: `Você registrou abstenção para ${menuDate}. Cancele a abstenção primeiro.` }, 400);
+      }
+
+      // Check cutoff time (only for real orders)
+      const settings = await kv.get("settings") || {};
+      if (settings.cutoffTime) {
+        const nowBrasilia = brasiliaDateNow();
+        const [h, m] = settings.cutoffTime.split(':').map(Number);
+        const brasiliaHour = nowBrasilia.getUTCHours();
+        const brasiliaMinute = nowBrasilia.getUTCMinutes();
+        const pastCutoff = brasiliaHour > h || (brasiliaHour === h && brasiliaMinute >= m);
+
+        // For future dates, don't apply today's cutoff
+        const orderDateStr = orderData.date ? new Date(orderData.date).toISOString().split('T')[0] : today;
+        if (orderDateStr === today && pastCutoff) {
+          return c.json({ error: `Horário de pedido encerrado. O limite era ${settings.cutoffTime}.` }, 400);
+        }
+      }
+
+      // Decrement stock with optimistic retry (only for same-day orders).
+      // Pre-orders for future dates skip stock decrement — the stock counter resets
+      // each day when the admin configures the menu, so consuming it today for a
+      // future date would incorrectly block today's orders.
+      if (menuDate === today) {
+        const MAX_STOCK_RETRIES = 3;
+        for (let attempt = 0; attempt < MAX_STOCK_RETRIES; attempt++) {
+          let menuItemsData = await kv.get("menu:items") || [];
+          for (const orderItem of orderData.items) {
+            const menuItem = menuItemsData.find((mi: any) => mi.id === orderItem.id);
+            if (menuItem) {
+              const qty = orderItem.quantity || 1;
+              if (menuItem.available < qty) {
+                return c.json({ error: `"${menuItem.name}" não tem estoque suficiente (disponível: ${menuItem.available}).` }, 400);
+              }
+              menuItem.available -= qty;
+            }
           }
-          menuItem.available -= qty;
+          try {
+            await kv.set("menu:items", menuItemsData);
+            break; // success
+          } catch (stockErr: any) {
+            if (attempt === MAX_STOCK_RETRIES - 1) {
+              console.log("Stock update failed after retries:", stockErr);
+              return c.json({ error: "Erro ao atualizar estoque. Tente novamente." }, 500);
+            }
+            // Small delay before retry
+            await new Promise(r => setTimeout(r, 50 * (attempt + 1)));
+          }
         }
-      }
-      try {
-        await kv.set("menu:items", menuItemsData);
-        break; // success
-      } catch (stockErr: any) {
-        if (attempt === MAX_STOCK_RETRIES - 1) {
-          console.log("Stock update failed after retries:", stockErr);
-          return c.json({ error: "Erro ao atualizar estoque. Tente novamente." }, 500);
-        }
-        // Small delay before retry
-        await new Promise(r => setTimeout(r, 50 * (attempt + 1)));
       }
     }
 
     const newOrder = {
       ...orderData,
       id: crypto.randomUUID(),
-      date: new Date().toISOString(),
+      // For manual logs, preserve the submitted date (retroactive support); real orders use now
+      date: isManualLog && orderData.date ? orderData.date : new Date().toISOString(),
+      // The target menu day this order is for (YYYY-MM-DD) — drives the home banner & edit window
+      menuDate,
       userId: auth.userId,
       userName: auth.userName,
       userDietaryRestrictions: auth.dietaryRestrictions || '',
-      status: "Confirmado",
+      status: isManualLog ? "Registrado" : "Confirmado",
       consumptionMode: orderData.consumptionMode || 'dine_in_damasceno',
       deliveryAddress: orderData.deliveryAddress,
-      contactPhone: orderData.contactPhone
+      contactPhone: orderData.contactPhone,
+      isManualLog,
     };
 
     await kv.set(`orders:${auth.userId}`, [newOrder, ...existingOrders]);
 
-    // Also save to daily index for efficient admin queries
-    const dailyOrders = await kv.get(`orders-daily:${today}`) || [];
+    // Also save to daily index — use logDate for manual logs (supports retroactive)
+    const dailyOrders = await kv.get(`orders-daily:${logDate}`) || [];
     dailyOrders.push(newOrder);
-    await kv.set(`orders-daily:${today}`, dailyOrders);
+    await kv.set(`orders-daily:${logDate}`, dailyOrders);
 
     return c.json(newOrder);
   } catch (e) {
@@ -783,10 +798,20 @@ app.delete("/make-server-c3078087/orders/:id", async (c) => {
     if (orderIndex === -1) return c.json({ error: "Pedido não encontrado." }, 404);
 
     const order = userOrders[orderIndex];
-    
-    // Check cutoff AND 30-minute buffer before cutoff (Brasília timezone)
+
+    // The 30-min-before-cutoff rule only applies on the order's own target day.
+    // Orders placed for a FUTURE date stay freely editable until that day arrives.
+    const todayStr = brasiliaToday();
+    const orderMenuDate = order.menuDate || (order.date ? order.date.split('T')[0] : todayStr);
+
+    // Past real orders can no longer be edited/deleted
+    if (!order.isManualLog && orderMenuDate < todayStr) {
+      return c.json({ error: "Este pedido não pode mais ser editado." }, 400);
+    }
+
+    // Check cutoff AND 30-minute buffer — only when the order is for TODAY
     const settings = await kv.get("settings") || {};
-    if (settings.cutoffTime) {
+    if (!order.isManualLog && orderMenuDate === todayStr && settings.cutoffTime) {
       const nowBrasilia = brasiliaDateNow();
       const [h, m] = settings.cutoffTime.split(':').map(Number);
       const nowMinutes = nowBrasilia.getUTCHours() * 60 + nowBrasilia.getUTCMinutes();
@@ -805,8 +830,13 @@ app.delete("/make-server-c3078087/orders/:id", async (c) => {
       }
     }
 
-    // Restore stock
-    if (order.items && order.items.length > 0) {
+    // Restore stock — only if stock was actually decremented at order time.
+    // Stock is only decremented for same-day orders (menuDate === creation date).
+    // Pre-orders (menuDate in the future) never touched the stock counter, so
+    // cancelling them must not restore it (that would inflate stock).
+    const orderCreationDate = order.date ? order.date.split('T')[0] : '';
+    const wasStockDecremented = !order.menuDate || order.menuDate === orderCreationDate;
+    if (wasStockDecremented && order.items && order.items.length > 0) {
         let menuItemsData = await kv.get("menu:items") || [];
         let stockUpdated = false;
         for (const orderItem of order.items) {
@@ -823,8 +853,9 @@ app.delete("/make-server-c3078087/orders/:id", async (c) => {
     userOrders.splice(orderIndex, 1);
     await kv.set(`orders:${auth.userId}`, userOrders);
 
-    // Remove from daily list
-    const date = order.date.split('T')[0];
+    // Remove from daily list — keyed by the order's target day (menuDate),
+    // falling back to creation date for legacy orders (null-safe).
+    const date = order.menuDate || (order.date ? order.date.split('T')[0] : brasiliaToday());
     const dailyOrders = await kv.get(`orders-daily:${date}`) || [];
     const dailyIndex = dailyOrders.findIndex((o: any) => o.id === id);
     if (dailyIndex >= 0) {
@@ -894,19 +925,32 @@ app.put("/make-server-c3078087/admin/orders/:id/status", async (c) => {
       return c.json({ error: `Status inválido. Use: ${validStatuses.join(', ')}` }, 400);
     }
 
-    // Update in daily index
+    // Find the order across a window of dates.
+    // Orders may be for a different day than today (pre-orders placed in advance),
+    // so we must look in the correct orders-daily:{menuDate} bucket, not just today.
     const today = brasiliaToday();
-    const dailyOrders = await kv.get(`orders-daily:${today}`) || [];
+    const todayMs = new Date(today + "T00:00:00Z").getTime();
+    const searchDates: string[] = [];
+    for (let d = -1; d <= 7; d++) {
+      const dt = new Date(todayMs + d * 86400000);
+      searchDates.push(dt.toISOString().split('T')[0]);
+    }
+
     let updatedOrder: any = null;
-    for (const order of dailyOrders) {
-      if (order.id === orderId) {
-        order.status = status;
-        updatedOrder = order;
+    let orderBucketDate: string | null = null;
+
+    for (const dateKey of searchDates) {
+      const bucket = await kv.get(`orders-daily:${dateKey}`) || [];
+      const idx = (bucket as any[]).findIndex((o: any) => o.id === orderId);
+      if (idx >= 0) {
+        bucket[idx].status = status;
+        updatedOrder = bucket[idx];
+        orderBucketDate = dateKey;
+        await kv.set(`orders-daily:${dateKey}`, bucket);
         break;
       }
     }
-    if (updatedOrder) {
-      await kv.set(`orders-daily:${today}`, dailyOrders);
+    if (updatedOrder && orderBucketDate) {
       // Also update in user's orders
       const userOrders = await kv.get(`orders:${updatedOrder.userId}`) || [];
       for (const order of userOrders) {
@@ -1015,15 +1059,24 @@ app.post("/make-server-c3078087/abstention", async (c) => {
   if (auth instanceof Response) return auth;
   try {
     const today = brasiliaToday();
+    const body = await c.req.json().catch(() => ({}));
+    // Accept optional menuDate for pre-abstentions (future dates)
+    const targetDate = (body.menuDate && /^\d{4}-\d{2}-\d{2}$/.test(body.menuDate))
+      ? body.menuDate
+      : today;
 
-    // Check if already ordered today (exclude cancelled orders)
+    // Check if already ordered for this date (exclude cancelled orders)
     const existingOrders = await kv.get(`orders:${auth.userId}`) || [];
-    const todayOrder = existingOrders.find((o: any) => o.date?.startsWith(today) && o.status !== 'Cancelado');
-    if (todayOrder) {
-      return c.json({ error: "Você já realizou um pedido hoje. Não é possível registrar abstenção." }, 400);
+    const existingForDate = existingOrders.find((o: any) => {
+      if (o.isManualLog || o.status === 'Cancelado') return false;
+      const oDate = o.menuDate || (o.date ? o.date.split('T')[0] : '');
+      return oDate === targetDate;
+    });
+    if (existingForDate) {
+      return c.json({ error: "Você já realizou um pedido para esta data. Não é possível registrar abstenção." }, 400);
     }
 
-    const key = `abstentions:${today}`;
+    const key = `abstentions:${targetDate}`;
     const list = await kv.get(key) || [];
     if (!list.find((a: any) => a.userId === auth.userId)) {
       list.push({ userId: auth.userId, userName: auth.userName, date: new Date().toISOString() });
@@ -1040,7 +1093,9 @@ app.delete("/make-server-c3078087/abstention", async (c) => {
   if (auth instanceof Response) return auth;
   try {
     const today = brasiliaToday();
-    const key = `abstentions:${today}`;
+    const dateParam = c.req.query("date");
+    const targetDate = (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) ? dateParam : today;
+    const key = `abstentions:${targetDate}`;
     let list = await kv.get(key) || [];
     list = list.filter((a: any) => a.userId !== auth.userId);
     await kv.set(key, list);
@@ -1055,7 +1110,9 @@ app.get("/make-server-c3078087/abstention/me", async (c) => {
   if (auth instanceof Response) return auth;
   try {
     const today = brasiliaToday();
-    const list = await kv.get(`abstentions:${today}`) || [];
+    const dateParam = c.req.query("date");
+    const targetDate = (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) ? dateParam : today;
+    const list = await kv.get(`abstentions:${targetDate}`) || [];
     const abstained = list.some((a: any) => a.userId === auth.userId);
     return c.json({ abstained });
   } catch (e) {
@@ -1602,6 +1659,88 @@ app.get("/make-server-c3078087/admin/ratings", async (c) => {
     return c.json({ error: e.message }, 500);
   }
 });
+
+// ── Recipe Suggestions ────────────────────────────────────────────────────
+
+// User submits a recipe suggestion
+app.post("/make-server-c3078087/recipe-suggestions", async (c) => {
+  const auth = await requireAuth(c);
+  if (auth instanceof Response) return auth;
+  try {
+    const { title, description, recipe } = await c.req.json();
+    if (!title?.trim()) return c.json({ error: "Nome do prato é obrigatório." }, 400);
+    if (!recipe?.trim()) return c.json({ error: "Receita é obrigatória." }, 400);
+
+    const newSuggestion = {
+      id: crypto.randomUUID(),
+      userId: auth.userId,
+      userName: auth.userName,
+      title: title.trim(),
+      description: (description || "").trim(),
+      recipe: recipe.trim(),
+      submittedAt: new Date().toISOString(),
+      status: "pending",
+    };
+
+    const list = await kv.get("recipe-suggestions") || [];
+    list.unshift(newSuggestion); // newest first
+    await kv.set("recipe-suggestions", list);
+
+    return c.json(newSuggestion);
+  } catch (e) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// Admin/Kitchen: list all suggestions
+app.get("/make-server-c3078087/admin/recipe-suggestions", async (c) => {
+  const auth = await requireAdminOrKitchen(c);
+  if (auth instanceof Response) return auth;
+  try {
+    const list = await kv.get("recipe-suggestions") || [];
+    return c.json(list);
+  } catch (e) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// Admin: update suggestion status
+app.put("/make-server-c3078087/admin/recipe-suggestions/:id", async (c) => {
+  const auth = await requireAdmin(c);
+  if (auth instanceof Response) return auth;
+  try {
+    const id = c.req.param("id");
+    const { status } = await c.req.json();
+    const allowed = ["pending", "reviewed", "approved"];
+    if (!allowed.includes(status)) return c.json({ error: "Status inválido." }, 400);
+
+    let list = await kv.get("recipe-suggestions") || [];
+    const idx = list.findIndex((s: any) => s.id === id);
+    if (idx === -1) return c.json({ error: "Sugestão não encontrada." }, 404);
+    list[idx].status = status;
+    await kv.set("recipe-suggestions", list);
+    return c.json(list[idx]);
+  } catch (e) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// Admin: delete suggestion
+app.delete("/make-server-c3078087/admin/recipe-suggestions/:id", async (c) => {
+  const auth = await requireAdmin(c);
+  if (auth instanceof Response) return auth;
+  try {
+    const id = c.req.param("id");
+    let list = await kv.get("recipe-suggestions") || [];
+    list = list.filter((s: any) => s.id !== id);
+    await kv.set("recipe-suggestions", list);
+    return c.json({ success: true });
+  } catch (e) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 
 // --- User Profile Update ---
 app.put("/make-server-c3078087/users/me", async (c) => {
@@ -2180,10 +2319,12 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
       todayOrders = allOrders.filter((o: any) => o.date?.startsWith(today));
     }
 
-    const uniqueUserIds = new Set(todayOrders.map((o: any) => o.userId));
+    const realOrders = todayOrders.filter((o: any) => !o.isManualLog && o.status !== 'Cancelado');
+    const manualLogs = todayOrders.filter((o: any) => o.isManualLog);
+    const uniqueUserIds = new Set(realOrders.map((o: any) => o.userId));
     const abstentions = await kv.get(`abstentions:${today}`) || [];
 
-    const todayItems: any[] = todayOrders.flatMap((o: any) => o.items || []);
+    const todayItems: any[] = realOrders.flatMap((o: any) => o.items || []);
     const itemCount: Record<string, { name: string; count: number; category: string }> = {};
     todayItems.forEach((item: any) => {
       const qty = item.quantity || 1;
@@ -2193,7 +2334,21 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
         itemCount[item.id] = { name: item.name, count: qty, category: item.category || '' };
       }
     });
-    const topItems = Object.values(itemCount).sort((a, b) => b.count - a.count);
+
+    // Enrich with current menu item names/categories so renames are always reflected.
+    // Orders store a snapshot at creation time; cross-referencing keeps the display fresh.
+    const currentMenuItems: any[] = await kv.get("menu:items") || [];
+    const menuItemMap = new Map(currentMenuItems.map((mi: any) => [mi.id, mi]));
+    const topItems = Object.entries(itemCount)
+      .map(([id, data]) => {
+        const live = menuItemMap.get(id);
+        return {
+          name: live?.name ?? data.name,
+          category: live?.category ?? data.category,
+          count: data.count,
+        };
+      })
+      .sort((a, b) => b.count - a.count);
 
     // Weekly data (last 7 days) using daily indexes - batched read
     const weekDates: { dateStr: string; dayName: string }[] = [];
@@ -2209,7 +2364,9 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
     
     const weekOrdersArr = await kv.mget(weekKeys);
     const weekData: any[] = weekDates.map((wd, idx) => {
-      const dayOrders = weekOrdersArr[idx] || [];
+      // Exclude manual logs (Taipas food diary) from kitchen/production stats
+      const allDayOrders = weekOrdersArr[idx] || [];
+      const dayOrders = (allDayOrders as any[]).filter((o: any) => !o.isManualLog && o.status !== 'Cancelado');
       return {
         name: wd.dayName,
         date: wd.dateStr,
@@ -2220,16 +2377,17 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
 
     const lastOrders = todayOrders
       .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      .slice(0, 10);
+      .slice(0, 20);
 
     return c.json({
-      todayOrdersCount: todayOrders.length,
+      todayOrdersCount: realOrders.length,
+      todayManualLogsCount: manualLogs.length,
       uniqueUsersOrdered: uniqueUserIds.size,
+      orderedUserIds: [...uniqueUserIds],
       topItems,
       weekData,
       lastOrders,
       abstentions,
-      allOrdersCount: todayOrders.length,
     });
   } catch (e) {
     console.log("Dashboard error:", e);
@@ -2540,11 +2698,16 @@ app.get("/make-server-c3078087/menu/available-dates", async (c) => {
       const start = new Date(now);
       start.setUTCDate(now.getUTCDate() + diff);
       
-      // Add 14 days (current week + next week)
+      // Add 14 days (current week + next week), weekdays only.
+      // Weekends are excluded unless the admin explicitly configured a menu for them
+      // via a weekly-menu entry (handled in the first loop above).
       for (let i = 0; i < 14; i++) {
         const d = new Date(start);
         d.setUTCDate(start.getUTCDate() + i);
-        dates.push(d.toISOString().split('T')[0]);
+        const dow = d.getUTCDay(); // 0=Sun, 6=Sat
+        if (dow !== 0 && dow !== 6) {
+          dates.push(d.toISOString().split('T')[0]);
+        }
       }
     }
 
@@ -2614,10 +2777,14 @@ app.get("/make-server-c3078087/bootstrap", async (c) => {
       const diff = day === 0 ? -6 : 1 - day;
       const start = new Date(now);
       start.setUTCDate(now.getUTCDate() + diff);
+      // Weekdays only — weekends excluded unless explicitly configured via weekly-menu
       for (let i = 0; i < 14; i++) {
         const d = new Date(start);
         d.setUTCDate(start.getUTCDate() + i);
-        datesSet.add(d.toISOString().split("T")[0]);
+        const dow = d.getUTCDay(); // 0=Sun, 6=Sat
+        if (dow !== 0 && dow !== 6) {
+          datesSet.add(d.toISOString().split("T")[0]);
+        }
       }
     }
     const availableDates = [...datesSet].sort();
@@ -2627,28 +2794,16 @@ app.get("/make-server-c3078087/bootstrap", async (c) => {
     const isToday = menuDateKey === today;
 
     const todayDailyMenu = await kv.get(`daily-menu:${menuDateKey}`).catch(() => null);
-    const itemIds = new Set(recurringIds);
-    if (todayDailyMenu && Array.isArray(todayDailyMenu)) {
-      todayDailyMenu.forEach((i: any) => itemIds.add(i.id));
-    }
 
+    // Only show items when there's a specifically configured menu for this date.
+    // Recurring items alone do NOT constitute an active menu. No yesterday fallback.
     let menuItems: any[] = [];
-    if (itemIds.size > 0) {
+    if (todayDailyMenu && Array.isArray(todayDailyMenu) && todayDailyMenu.length > 0) {
+      const itemIds = new Set<string>(recurringIds);
+      todayDailyMenu.forEach((i: any) => itemIds.add(i.id));
       menuItems = allItems
         .filter((i: any) => itemIds.has(i.id))
         .map((i: any) => ({ ...i, isPreviousDay: false }));
-    } else if (isToday) {
-      // Fallback: show yesterday's menu greyed out
-      const yesterdayDate = new Date(Date.now() - 3 * 60 * 60 * 1000);
-      yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
-      const yesterdayKey = yesterdayDate.toISOString().split("T")[0];
-      const yesterdayDailyMenu = await kv.get(`daily-menu:${yesterdayKey}`).catch(() => null);
-      if (yesterdayDailyMenu && Array.isArray(yesterdayDailyMenu) && yesterdayDailyMenu.length > 0) {
-        const yIds = new Set(yesterdayDailyMenu.map((i: any) => i.id));
-        menuItems = allItems
-          .filter((i: any) => yIds.has(i.id))
-          .map((i: any) => ({ ...i, isPreviousDay: true }));
-      }
     }
 
     return c.json({
@@ -2900,9 +3055,11 @@ app.post("/make-server-c3078087/admin/menu/import-csv", async (c) => {
 // --- Banners ---
 app.get("/make-server-c3078087/banners", async (c) => {
   try {
+    const unit = c.req.query('unit') || '';
     const banners = await kv.get("banners") || [];
     const activeBanners = banners
       .filter((b: any) => b.active)
+      .filter((b: any) => !b.unitRestrictions?.length || !unit || b.unitRestrictions.includes(unit))
       .sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
     return c.json(activeBanners);
   } catch (e) {
@@ -2925,31 +3082,32 @@ app.post("/make-server-c3078087/admin/banners", async (c) => {
   const auth = await requireAdmin(c);
   if (auth instanceof Response) return auth;
   try {
-    const { id, imageUrl, link, active, order, title, description, backgroundColor, textColor, buttonText } = await c.req.json();
+    const { id, imageUrl, link, active, order, title, description, backgroundColor, textColor, buttonText, unitRestrictions } = await c.req.json();
     let banners = await kv.get("banners") || [];
-    
+
     if (id) {
       const idx = banners.findIndex((b: any) => b.id === id);
       if (idx >= 0) {
-        banners[idx] = { ...banners[idx], imageUrl, link, active, order, title, description, backgroundColor, textColor, buttonText };
+        banners[idx] = { ...banners[idx], imageUrl, link, active, order, title, description, backgroundColor, textColor, buttonText, unitRestrictions: unitRestrictions || [] };
       } else {
-        banners.push({ id, imageUrl, link, active, order: order || banners.length, title, description, backgroundColor, textColor, buttonText });
+        banners.push({ id, imageUrl, link, active, order: order || banners.length, title, description, backgroundColor, textColor, buttonText, unitRestrictions: unitRestrictions || [] });
       }
     } else {
-      banners.push({ 
-        id: crypto.randomUUID(), 
-        imageUrl, 
-        link, 
-        active: active !== undefined ? active : true, 
+      banners.push({
+        id: crypto.randomUUID(),
+        imageUrl,
+        link,
+        active: active !== undefined ? active : true,
         order: order !== undefined ? order : banners.length,
         title,
         description,
         backgroundColor,
         textColor,
-        buttonText
+        buttonText,
+        unitRestrictions: unitRestrictions || [],
       });
     }
-    
+
     await kv.set("banners", banners);
     await logAudit(c, auth, id ? "UPDATE_BANNER" : "CREATE_BANNER", "banners", `${id ? "Atualizou" : "Criou"} banner "${title || id || "sem titulo"}".`, { bannerId: id });
     return c.json({ success: true, banners });

@@ -19,7 +19,7 @@ import { Button } from "../components/ui/Button";
 import { SkeletonCard } from "../components/ui/SkeletonCard";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { PullToRefresh } from "../components/ui/PullToRefresh";
-import { ShoppingBag, ChevronRight, Clock, Search, XCircle, X, Star, Lock, UtensilsCrossed, Salad, Coffee, IceCream, LayoutGrid, Soup, Leaf, CookingPot, Apple, CupSoda, Flame, Circle, CheckCircle, Scale, Users, ShoppingCart } from "lucide-react";
+import { ShoppingBag, ChevronRight, Clock, Search, XCircle, X, Star, Lock, UtensilsCrossed, Salad, Coffee, IceCream, LayoutGrid, Soup, Leaf, CookingPot, Apple, CupSoda, Flame, Circle, CheckCircle, Scale, Users, ShoppingCart, BookOpen, ClipboardList, CalendarOff } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 import { api } from "../lib/api";
@@ -28,9 +28,19 @@ import { toast } from "sonner";
 import { addDays } from "date-fns";
 import { getBrazilTime, getBrazilDateString, getBrazilTimeString, isBrazilToday, isBrazilTomorrow, getBrazilHour, getBrazilMinute } from "../lib/date-utils";
 
+/** "HH:MM" minus 30 minutes, returned as "HH:MM" (clamped at 00:00). */
+function minusThirty(time: string): string {
+  const [h, m] = time.split(":").map(Number);
+  let total = h * 60 + m - 30;
+  if (total < 0) total = 0;
+  const hh = Math.floor(total / 60);
+  const mm = total % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
 export function Menu() {
   const { user } = useAuth();
-  const { totalItems, totalCalories, orderDate, setOrderDate, addToCart, clearCart, selectedUnit, setSelectedUnit, consumptionMode, setConsumptionMode } = useCart();
+  const { totalItems, totalCalories, orderDate, setOrderDate, addToCart, clearCart, selectedUnit, setSelectedUnit, consumptionMode, setConsumptionMode, isManualLog, setIsManualLog } = useCart();
   const [selectedCategory, setSelectedCategory] = useState("Todos");
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,8 +62,11 @@ export function Menu() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   // Whether user's unit allows placing orders
   const [ordersAllowed, setOrdersAllowed] = useState(true);
+  // Whether this specific user has meal ordering permission
+  const userCanOrderMeal = user?.canOrderMeal !== false;
 
   // Orders & Ratings
+  const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [todayOrder, setTodayOrder] = useState<Order | null>(null);
   const [lastOrder, setLastOrder] = useState<Order | null>(null);
   const [isRatingOpen, setIsRatingOpen] = useState(false);
@@ -78,6 +91,11 @@ export function Menu() {
     setConsumptionMode(mode);
   }, [user?.lunchLocation]);
 
+  // Sync isManualLog flag whenever ordersAllowed changes
+  useEffect(() => {
+    setIsManualLog(!ordersAllowed);
+  }, [ordersAllowed]);
+
   // ── Single consolidated bootstrap: ONE request returns everything ──
   useEffect(() => {
     let cancelled = false;
@@ -95,8 +113,14 @@ export function Menu() {
           .map((d: string) => new Date(d + "T00:00:00"))
           .filter((d: Date) => startOfDay(d) >= startOfDay(new Date()))
           .sort((a: Date, b: Date) => a.getTime() - b.getTime());
-        if (!dates.some(d => isSameDay(d, new Date()))) {
-          dates.unshift(new Date());
+        // Safety: ensure today is in the list only if it's a weekday (Mon-Fri).
+        // The backend already handles this, but guard client-side too so weekends
+        // are never forced into the picker without an explicit menu configuration.
+        const todayNow = new Date();
+        const todayDow = todayNow.getDay(); // 0=Sun, 6=Sat
+        const todayIsWeekday = todayDow >= 1 && todayDow <= 5;
+        if (todayIsWeekday && !dates.some(d => isSameDay(d, todayNow))) {
+          dates.unshift(todayNow);
         }
         setAvailableDates(dates);
         if (dates.length > 0 && !dates.some((d: Date) => isSameDay(d, orderDate))) {
@@ -107,9 +131,10 @@ export function Menu() {
         // Orders
         const ordersRes = data.orders || [];
         if (Array.isArray(ordersRes)) {
+          setAllOrders(ordersRes);
           const todayStr = getBrazilDateString();
           const yesterdayStr = getBrazilDateString(addDays(new Date(), -1));
-          const tOrder = ordersRes.find((o: any) => o.date?.startsWith(todayStr) && o.status !== "Cancelado");
+          const tOrder = ordersRes.find((o: any) => o.date?.startsWith(todayStr) && o.status !== "Cancelado" && !o.isManualLog);
           setTodayOrder(tOrder || null);
           const lOrder = ordersRes.find((o: any) => o.date?.startsWith(yesterdayStr) && !o.rating && o.status !== "Cancelado");
           if (lOrder) {
@@ -155,14 +180,17 @@ export function Menu() {
           if (Array.isArray(datesRes)) {
             dates = datesRes.map((d: string) => new Date(d + "T00:00:00")).filter((d: Date) => startOfDay(d) >= startOfDay(new Date())).sort((a: Date, b: Date) => a.getTime() - b.getTime());
           }
-          if (!dates.some(d => isSameDay(d, new Date()))) dates.unshift(new Date());
+          const _todayFb = new Date();
+          const _dowFb = _todayFb.getDay();
+          if (_dowFb >= 1 && _dowFb <= 5 && !dates.some(d => isSameDay(d, _todayFb))) dates.unshift(_todayFb);
           setAvailableDates(dates);
           if (dates.length > 0 && !dates.some((d: Date) => isSameDay(d, orderDate))) setOrderDate(dates[0]);
           setDatesLoading(false);
           if (Array.isArray(ordersRes)) {
+            setAllOrders(ordersRes);
             const todayStr = getBrazilDateString();
             const yesterdayStr = getBrazilDateString(addDays(new Date(), -1));
-            setTodayOrder(ordersRes.find((o: any) => o.date?.startsWith(todayStr) && o.status !== "Cancelado") || null);
+            setTodayOrder(ordersRes.find((o: any) => o.date?.startsWith(todayStr) && o.status !== "Cancelado" && !o.isManualLog) || null);
             const lOrder = ordersRes.find((o: any) => o.date?.startsWith(yesterdayStr) && !o.rating && o.status !== "Cancelado");
             if (lOrder) { setLastOrder(lOrder); setShowRatingBanner(true); }
           }
@@ -193,7 +221,7 @@ export function Menu() {
       const menuEndpoint = isSameDay(orderDate, new Date()) ? "/menu/today" : `/menu?date=${dateStr}`;
       const [itemsRes, absRes, settingsRes] = await Promise.all([
         api.get(menuEndpoint).catch(() => []),
-        api.authGet("/abstention/me").catch(() => ({ abstained: false })),
+        api.authGet(`/abstention/me?date=${dateStr}`).catch(() => ({ abstained: false })),
         api.get("/admin/settings").catch(() => ({})),
       ]);
       if (cancelled) return;
@@ -295,29 +323,14 @@ export function Menu() {
           setCancelAllowed(currentMinutes < cutoffMinutes);
         }
       } 
-      // 2. Check "Tomorrow" opening time
-      else if (isBrazilTomorrow(orderDate)) {
-        setIsCutoffPassed(false); // It's future, not "cutoff passed" (which implies too late)
-        
-        // Default opening time 15:00 if not set
-        const openTime = settings.openingTime || "15:00";
-        const [h, m] = openTime.split(':').map(Number);
-        const openMinutes = h * 60 + m;
-
-        if (currentMinutes < openMinutes) {
-          setIsFutureLocked(true);
-          setTimeLeft(`Abre às ${openTime}`);
-        } else {
-          setIsFutureLocked(false);
-          setTimeLeft("Aberto");
-        }
-      }
-      // 3. Far Future
+      // 2. Future dates (tomorrow and beyond) — always open for pre-orders.
+      // No opening-time gate: ordering for other days is allowed any time.
+      // Only the same-day cutoff (handled above) blocks ordering.
       else {
         setIsCutoffPassed(false);
         setIsFutureLocked(false);
-        setTimeLeft("Agendamento");
-        setCancelAllowed(false);
+        setTimeLeft(isBrazilTomorrow(orderDate) ? "Aberto" : "Agendamento");
+        setCancelAllowed(true);
       }
     };
 
@@ -326,17 +339,82 @@ export function Menu() {
     return () => clearInterval(interval);
   }, [settings.cutoffTime, settings.openingTime, orderDate, liveOrderStatus, todayOrder?.status]);
 
+  // Derived: is the currently selected order date today?
+  const isToday = isSameDay(orderDate, new Date());
+
+  // The real order (if any) placed for the currently-viewed date. Matched by the
+  // order's target menuDate (falls back to creation date for legacy orders).
+  // This is what drives the "order placed" banner — for today AND future dates.
+  const orderForDate = useMemo(() => {
+    const dateStr = format(orderDate, "yyyy-MM-dd");
+    return allOrders.find((o: any) => {
+      if (o.isManualLog || o.status === "Cancelado") return false;
+      const target = o.menuDate || (o.date ? o.date.split("T")[0] : "");
+      return target === dateStr;
+    }) || null;
+  }, [allOrders, orderDate]);
+
+  // Whether the given order can still be edited/deleted.
+  // Future-dated orders: always editable. Today: until 30 min before cutoff. Past: no.
+  const isOrderEditable = (order: Order | null): boolean => {
+    if (!order) return false;
+    const target = (order as any).menuDate || (order.date ? order.date.split("T")[0] : "");
+    const todayStr = getBrazilDateString();
+    if (target > todayStr) return true;       // future order — always editable
+    if (target < todayStr) return false;      // past order — locked
+    if (!settings.cutoffTime) return true;    // today, no cutoff configured
+    const [h, m] = settings.cutoffTime.split(":").map(Number);
+    const cutoffMinutes = h * 60 + m;
+    const nowMinutes = getBrazilHour() * 60 + getBrazilMinute();
+    return nowMinutes < cutoffMinutes - 30;   // today — 30-min buffer before cutoff
+  };
+
+  // Human-readable edit deadline label for the order banner.
+  const getEditDeadlineLabel = (order: Order | null): string => {
+    if (!order) return "";
+    const target = (order as any).menuDate || (order.date ? order.date.split("T")[0] : "");
+    const todayStr = getBrazilDateString();
+    if (target > todayStr) {
+      // Future order: deadline is 30 min before that day's cutoff
+      if (!settings.cutoffTime) return "o dia do pedido";
+      const dayLabel = format(new Date(target + "T00:00:00"), "dd/MM", { locale: ptBR });
+      return `${dayLabel} às ${minusThirty(settings.cutoffTime)}`;
+    }
+    // Today: 30 min before cutoff
+    if (!settings.cutoffTime) return "";
+    return minusThirty(settings.cutoffTime);
+  };
+
+  // Auto-advance fires at most once per session. After the first advance the user
+  // is free to navigate back to today and see today's menu greyed-out with a notice.
+  const hasAutoAdvanced = useRef(false);
+
+  // Auto-advance to next available date when today's cutoff passes (Damasceno only).
+  // Taipas users (ordersAllowed=false) register any time — no auto-advance for them.
+  useEffect(() => {
+    if (!isCutoffPassed || !ordersAllowed || !isToday) return;
+    if (hasAutoAdvanced.current) return; // already advanced once — don't override manual navigation
+    if (availableDates.length === 0) return;
+    const todayStart = startOfDay(new Date());
+    const nextDate = availableDates.find(d => startOfDay(d) > todayStart);
+    if (nextDate) {
+      hasAutoAdvanced.current = true;
+      setOrderDate(nextDate);
+    }
+  }, [isCutoffPassed, isToday, ordersAllowed, availableDates]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const toggleAbstention = async () => {
     setAbsLoading(true);
+    const menuDate = format(orderDate, "yyyy-MM-dd");
     try {
       if (hasAbstained) {
-        await api.authDel("/abstention");
+        await api.authDel(`/abstention?date=${menuDate}`);
         setHasAbstained(false);
         toast.success("Abstenção cancelada. Você pode fazer pedido.");
       } else {
-        await api.authPost("/abstention", {});
+        await api.authPost("/abstention", { menuDate });
         setHasAbstained(true);
-        toast.info("Registrado: Você não almoçará hoje.");
+        toast.info(isToday ? "Registrado: Você não almoçará hoje." : `Registrado: Você não almoçará em ${format(orderDate, "dd/MM")}.`);
       }
     } catch (e: any) {
       toast.error(e.message || "Erro ao registrar abstenção.");
@@ -376,10 +454,10 @@ export function Menu() {
   };
 
   const handleEditOrder = () => {
-    if (!todayOrder) return;
+    if (!orderForDate) return;
 
-    if (!cancelAllowed) {
-      toast.error(`O prazo para editar já passou (limite: ${getCancelDeadlineLabel()}).`);
+    if (!isOrderEditable(orderForDate)) {
+      toast.error(`O prazo para editar já passou (limite: ${getEditDeadlineLabel(orderForDate)}).`);
       return;
     }
     setEditDialogOpen(true);
@@ -387,18 +465,21 @@ export function Menu() {
 
   const confirmEditOrder = async () => {
     setEditDialogOpen(false);
+    if (!orderForDate) return;
+    const editingOrder = orderForDate;
     const toastId = toast.loading("Preparando edição...");
     try {
-      await api.authDel(`/orders/${todayOrder!.id}`);
+      await api.authDel(`/orders/${editingOrder.id}`);
       clearCart();
-      todayOrder!.items.forEach((orderItem: any) => {
+      editingOrder.items.forEach((orderItem: any) => {
         const fullItem = menuItems.find(i => i.id === orderItem.id) || orderItem;
         for (let i = 0; i < (orderItem.quantity || 1); i++) {
           addToCart(fullItem);
         }
       });
       toast.dismiss(toastId);
-      setTodayOrder(null);
+      setAllOrders(prev => prev.filter(o => o.id !== editingOrder.id));
+      if (todayOrder?.id === editingOrder.id) setTodayOrder(null);
       navigate("/cart");
     } catch (e: any) {
       toast.error(e.message || "Erro ao editar pedido.");
@@ -407,10 +488,10 @@ export function Menu() {
   };
 
   const handleDeleteOrder = () => {
-    if (!todayOrder) return;
+    if (!orderForDate) return;
 
-    if (!cancelAllowed) {
-      toast.error(`O prazo para excluir já passou (limite: ${getCancelDeadlineLabel()}).`);
+    if (!isOrderEditable(orderForDate)) {
+      toast.error(`O prazo para excluir já passou (limite: ${getEditDeadlineLabel(orderForDate)}).`);
       return;
     }
     setDeleteDialogOpen(true);
@@ -418,11 +499,14 @@ export function Menu() {
 
   const confirmDeleteOrder = async () => {
     setDeleteDialogOpen(false);
+    if (!orderForDate) return;
+    const deletingOrder = orderForDate;
     const toastId = toast.loading("Excluindo pedido...");
     try {
-      await api.authDel(`/orders/${todayOrder!.id}`);
+      await api.authDel(`/orders/${deletingOrder.id}`);
       toast.success("Pedido excluído com sucesso.");
-      setTodayOrder(null);
+      setAllOrders(prev => prev.filter(o => o.id !== deletingOrder.id));
+      if (todayOrder?.id === deletingOrder.id) setTodayOrder(null);
     } catch (e: any) {
       toast.error(e.message || "Erro ao excluir pedido.");
     } finally {
@@ -457,14 +541,18 @@ export function Menu() {
 
   const filteredItems = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
+    const userUnit = selectedUnit || user?.lunchLocation || "";
 
-    // 1. Filter daily items
+    // 1. Filter daily items (also filter by unit restrictions)
     const dailyMatches = menuItems.filter((item) => {
       const matchesCategory = selectedCategory === "Todos" || item.category === selectedCategory;
       const matchesSearch = query === "" ||
         item.name.toLowerCase().includes(query) ||
         item.description.toLowerCase().includes(query);
-      return matchesCategory && matchesSearch;
+      // Unit restriction: if item has restrictions, only show for matching units
+      const matchesUnit = !item.unitRestrictions || item.unitRestrictions.length === 0 ||
+        (userUnit && item.unitRestrictions.includes(userUnit));
+      return matchesCategory && matchesSearch && matchesUnit;
     });
 
     // 2. If searching, also look in fullCatalog for items NOT in menuItems
@@ -508,8 +596,17 @@ export function Menu() {
 
     return ["Todos", ...unique];
   }, [menuItems]);
-  const isToday = isSameDay(orderDate, new Date());
   const hasAnyPreviousDay = menuItems.some(item => item.isPreviousDay);
+
+  // For Taipas (manual log) include yesterday and day-before in the date picker
+  const visibleDates = useMemo(() => {
+    if (!isManualLog) return availableDates;
+    const today = startOfDay(new Date());
+    const pastDays = [addDays(today, -2), addDays(today, -1)];
+    const existing = new Set(availableDates.map(d => d.toISOString().split('T')[0]));
+    const toAdd = pastDays.filter(d => !existing.has(d.toISOString().split('T')[0]));
+    return [...toAdd, ...availableDates].sort((a, b) => a.getTime() - b.getTime());
+  }, [availableDates, isManualLog]);
 
   return (
     <PullToRefresh onRefresh={handleRefresh}>
@@ -519,8 +616,8 @@ export function Menu() {
           <div className="flex items-start justify-between">
             <div className="flex flex-col gap-2">
               <h1 className="text-2xl md:text-3xl font-extrabold text-foreground tracking-tight flex items-center gap-2 font-space-grotesk">
-                <span className="italic text-xl md:text-[26px]">
-                  Olá, <span className="text-orange-500">{user?.name.split(" ")[0]}</span>
+                <span className="text-xl md:text-[26px]">
+                  Olá, <span className="text-orange-500">{user?.name?.split(" ")?.[0]}</span>
                 </span>
               </h1>
 
@@ -539,14 +636,15 @@ export function Menu() {
               <MenuDatePicker
                 orderDate={orderDate}
                 setOrderDate={setOrderDate}
-                availableDates={availableDates}
+                availableDates={visibleDates}
                 isOpen={isDatePickerOpen}
                 setIsOpen={setIsDatePickerOpen}
                 datesLoading={datesLoading}
+                allowPast={isManualLog}
               />
               </div>
 
-              {!isCutoffPassed && !isFutureLocked ? (
+              {ordersAllowed && (!isCutoffPassed && !isFutureLocked ? (
                 <span data-tutorial="cutoff" className={cn(
                   "text-xs font-bold px-4 py-1 rounded-lg border flex items-center gap-1.5 transition-all whitespace-nowrap w-fit shadow-sm",
                   isToday
@@ -559,14 +657,14 @@ export function Menu() {
               ) : (
                 <span data-tutorial="cutoff" className={cn(
                   "text-xs font-bold px-4 py-1 rounded-lg border flex items-center gap-1.5 whitespace-nowrap w-fit shadow-sm",
-                  isFutureLocked 
+                  isFutureLocked
                     ? "text-blue-600 bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800"
                     : "text-red-600 bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800"
                 )}>
                   {isFutureLocked ? <Lock size={14} /> : <XCircle size={14} />}
                   {isFutureLocked ? "Aguardando Abertura" : "Encerrado"}
                 </span>
-              )}
+              ))}
             </div>
           </div>
 
@@ -581,6 +679,26 @@ export function Menu() {
           {/* Orders NOT allowed for this unit */}
           {!ordersAllowed && (
             <UnitNoOrdersBanner unitName={selectedUnit} />
+          )}
+
+          {/* User does not have meal ordering permission */}
+          {ordersAllowed && !userCanOrderMeal && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-red-500 to-red-700 p-4 text-white shadow-lg"
+            >
+              <div className="relative z-10 flex items-start gap-3">
+                <Lock size={20} className="shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-bold">Pedidos bloqueados para sua conta</p>
+                  <p className="text-xs opacity-90 mt-0.5">
+                    Sua conta não tem permissão para realizar pedidos. Entre em contato com o administrador.
+                  </p>
+                </div>
+              </div>
+              <div className="absolute -right-10 -bottom-10 h-32 w-32 rounded-full bg-white/10 blur-2xl" />
+            </motion.div>
           )}
 
           {/* Subtle Rating Banner (instead of auto-opening sheet) */}
@@ -606,26 +724,30 @@ export function Menu() {
             </motion.button>
           )}
 
-          {/* Today's Order Status Banner */}
-          {isToday && todayOrder && (
+          {/* Order Status Banner — shows for the order placed for the currently-viewed
+               date (today OR a future pre-order). Only shows the live status for today. */}
+          {orderForDate && (
             <OrderBanner
-              order={todayOrder}
+              order={orderForDate}
               cutoffTime={settings.cutoffTime}
-              isCancelAllowed={cancelAllowed}
-              cancelDeadlineLabel={getCancelDeadlineLabel()}
+              isCancelAllowed={isOrderEditable(orderForDate)}
+              cancelDeadlineLabel={getEditDeadlineLabel(orderForDate)}
               onEdit={handleEditOrder}
               onDelete={handleDeleteOrder}
-              liveStatus={liveOrderStatus}
+              liveStatus={isToday ? liveOrderStatus : undefined}
+              targetDateLabel={isToday ? undefined : format(orderDate, "EEEE, dd/MM", { locale: ptBR })}
             />
           )}
 
-          {/* Banner Carousel - Controlled by settings.showBannerCarousel (default true) */}
-          {isToday && !todayOrder && (settings.showBannerCarousel !== false) && (
-            <BannerCarousel />
+          {/* Banner Carousel - Controlled by settings.showBannerCarousel (default true).
+               Hidden only when an order banner is active for the viewed date.
+               Manual logs (Taipas diary) do NOT count as "ordered", so banners always show. */}
+          {!orderForDate && (settings.showBannerCarousel !== false) && (
+            <BannerCarousel userUnit={selectedUnit} />
           )}
 
           {/* Previous Day Menu Banner */}
-          {hasAnyPreviousDay && isToday && !todayOrder && (
+          {hasAnyPreviousDay && isToday && !orderForDate && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -641,10 +763,49 @@ export function Menu() {
             </motion.div>
           )}
 
-          {/* Menu Content (hidden if order placed) */}
-          {todayOrder ? null : (
+          {/* Menu Content — hidden when an order already exists for the viewed date.
+               Navigating to a date without an order always shows that day's menu. */}
+          {orderForDate ? null : (
             <>
-              {/* Categories Filter with Search */}
+              {/* Empty menu state: no specific menu configured for this day */}
+              {!loading && menuItems.length === 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex flex-col items-center justify-center py-16 text-center bg-accent/30 rounded-3xl border border-dashed border-border gap-3"
+                >
+                  <div className="w-16 h-16 rounded-full bg-accent flex items-center justify-center">
+                    <CalendarOff size={28} className="text-muted-foreground" />
+                  </div>
+                  <div>
+                    <p className="text-base font-semibold text-foreground">Não há cardápio disponível ainda para esse dia.</p>
+                    <p className="text-sm text-muted-foreground mt-1">Volte em breve.</p>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Cutoff passed notice — items stay visible (greyed out) so user can browse */}
+              {isCutoffPassed && isToday && ordersAllowed && !loading && menuItems.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-start gap-3 p-4 rounded-2xl bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800"
+                >
+                  <div className="p-1.5 bg-orange-100 dark:bg-orange-900/50 rounded-full shrink-0 mt-0.5">
+                    <Clock size={16} className="text-orange-500" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-orange-900 dark:text-orange-200">Pedidos encerrados por hoje</p>
+                    <p className="text-xs text-orange-600 dark:text-orange-400 mt-0.5">
+                      Os pedidos de hoje já encerraram, mas você pode fazer o seu pedido para amanhã, caso esteja liberado.
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Categories Filter with Search — only when menu has items (or loading) */}
+              {(loading || menuItems.length > 0) && (
+              <>
               <div className="sticky top-16 md:top-0 z-10 -mx-4 md:-mx-8 -mt-10 bg-background/80 px-4 md:px-8 py-3 backdrop-blur-xl md:static md:mx-0 md:mt-0 md:bg-transparent md:px-0 md:py-0 border-b border-border/50 md:border-none transition-all">
                 <div className="no-scrollbar flex gap-3 overflow-x-auto pb-1 md:pb-0 scroll-smooth px-1 py-1 items-center">
                   
@@ -716,7 +877,7 @@ export function Menu() {
                       <button
                         key={cat}
                         onClick={() => setSelectedCategory(cat)}
-                        disabled={isCutoffPassed}
+                        disabled={ordersAllowed && isCutoffPassed}
                         className={cn(
                           "whitespace-nowrap rounded-full px-5 py-2.5 text-sm font-medium transition-all duration-300 border disabled:opacity-50 flex items-center gap-2",
                           isSelected
@@ -733,11 +894,11 @@ export function Menu() {
               </div>
 
               {/* Menu Grid */}
-              <div className={cn("space-y-4", (isCutoffPassed || isFutureLocked) && "opacity-50 pointer-events-none grayscale")}>
+              <div className={cn("space-y-4", ordersAllowed && (isCutoffPassed || isFutureLocked) && "opacity-50 pointer-events-none grayscale")}>
                 <div data-tutorial="food-grid" className="flex items-center justify-between">
                   <h2 className="font-bold text-foreground text-[15px]">
                     {selectedCategory === "Todos"
-                      ? (ordersAllowed ? "Vamos escolher seu almoço?" : "Veja o cardápio do dia.")
+                      ? (ordersAllowed ? "Vamos escolher seu almoço?" : "O que você comeu hoje?")
                       : selectedCategory}
                   </h2>
                   <span className="text-xs text-muted-foreground">
@@ -767,14 +928,14 @@ export function Menu() {
                           key={item.id}
                           {...(index === 0 ? { "data-tutorial": "food-card" } : {})}
                         >
-                          <MenuItemCard item={item} ordersAllowed={ordersAllowed} isFirstCard={index === 0} />
+                          <MenuItemCard item={item} ordersAllowed={ordersAllowed} isFirstCard={index === 0} isTodayOrder={isToday} />
                         </motion.div>
                       ))}
                     </AnimatePresence>
                   </motion.div>
                 )}
 
-                {!loading && filteredItems.length === 0 && (
+                {!loading && filteredItems.length === 0 && menuItems.length > 0 && (
                   <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -791,18 +952,32 @@ export function Menu() {
                 )}
               </div>
             </>
+            )}
+          </>
           )}
 
           {/* Bottom Actions */}
           <div className="pt-6 space-y-4">
-            {isToday && !todayOrder && ordersAllowed && (
+            {!orderForDate && ordersAllowed && userCanOrderMeal && startOfDay(orderDate) >= startOfDay(new Date()) && (
               <AbstentionButton
                 hasAbstained={hasAbstained}
                 absLoading={absLoading}
                 isCutoffPassed={isCutoffPassed}
                 onToggle={toggleAbstention}
+                isToday={isToday}
               />
             )}
+
+            {/* Link discreto para receitas */}
+            <div className="flex justify-center">
+              <Link
+                to="/receitas"
+                className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground underline-offset-4 hover:underline transition-all"
+              >
+                <BookOpen size={13} />
+                Ver receitas disponíveis
+              </Link>
+            </div>
 
             <div className="flex items-center justify-center gap-4 py-2 opacity-60">
               <Link
@@ -855,15 +1030,16 @@ export function Menu() {
             isOpen={isRatingOpen}
             onClose={() => setIsRatingOpen(false)}
             onSubmit={handleRatingSubmit}
+            isManualLog={isManualLog}
           />
 
           {/* Footer Spacer */}
           <div className="h-2" />
         </div>
 
-        {/* Floating Cart Bar - hide if orders not allowed */}
+        {/* Floating Cart Bar — visible for Damasceno (order) and Taipas (manual log) */}
         <AnimatePresence>
-          {totalItems > 0 && !todayOrder && ordersAllowed && (
+          {totalItems > 0 && !orderForDate && (ordersAllowed ? userCanOrderMeal : true) && (
             <motion.div
               initial={{ opacity: 0, y: 80 }}
               animate={{ opacity: 1, y: 0 }}
@@ -873,11 +1049,18 @@ export function Menu() {
             >
               <button
                 onClick={() => navigate("/cart")}
-                className="w-full flex items-center justify-between gap-4 bg-primary text-primary-foreground rounded-2xl px-5 py-3.5 shadow-xl shadow-primary/30 hover:shadow-2xl hover:shadow-primary/40 active:scale-[0.98] transition-all"
+                className={`w-full flex items-center justify-between gap-4 rounded-2xl px-5 py-3.5 shadow-xl active:scale-[0.98] transition-all ${
+                  isManualLog
+                    ? "bg-blue-600 text-white shadow-blue-500/30 hover:shadow-blue-500/40"
+                    : "bg-primary text-primary-foreground shadow-primary/30 hover:shadow-primary/40"
+                }`}
               >
                 <div className="flex items-center gap-3">
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20">
-                    <ShoppingBag size={16} className="text-white" />
+                    {isManualLog
+                      ? <ClipboardList size={16} className="text-white" />
+                      : <ShoppingBag size={16} className="text-white" />
+                    }
                   </div>
                   <div className="flex flex-col items-start">
                     <span className="text-xs font-bold">
@@ -887,7 +1070,9 @@ export function Menu() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold">Ver Sacola</span>
+                  <span className="text-sm font-bold">
+                    {isManualLog ? "Meu Registro" : "Ver Sacola"}
+                  </span>
                   <ChevronRight size={16} />
                 </div>
               </button>

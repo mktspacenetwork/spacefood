@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router";
 import { Button } from "../components/ui/Button";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
-import { Trash2, ChevronLeft, ArrowRight, CheckCircle, ShoppingBag, Minus, Plus, MapPin, Phone, ChevronDown, ChevronUp, Lightbulb } from "lucide-react";
+import { Trash2, ChevronLeft, ArrowRight, CheckCircle, ShoppingBag, Minus, Plus, MapPin, Phone, ChevronDown, ChevronUp, Lightbulb, ClipboardList } from "lucide-react";
 import { useAuth } from "../context/auth-context";
 import { useCart } from "../context/cart-context";
 import { useState } from "react";
@@ -14,7 +14,7 @@ import { hapticSuccess, hapticHeavy } from "../lib/haptics";
 
 export function Cart() {
   const { user } = useAuth();
-  const { items, removeFromCart, updateQuantity, clearCart, totalCalories, submitOrder, consumptionMode, setConsumptionMode, setSelectedUnit } = useCart();
+  const { items, removeFromCart, updateQuantity, clearCart, totalCalories, submitOrder, consumptionMode, setConsumptionMode, setSelectedUnit, isManualLog } = useCart();
   const navigate = useNavigate();
   const [isSuccess, setIsSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -78,7 +78,7 @@ export function Cart() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-orange-500"
+            className={`fixed inset-0 z-[100] flex flex-col items-center justify-center ${isManualLog ? "bg-blue-600" : "bg-orange-500"}`}
           >
             <AnimatePresence mode="wait">
               {orderPhase === 'sending' && (
@@ -89,18 +89,24 @@ export function Cart() {
                   exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.2 } }}
                   className="flex flex-col items-center"
                 >
-                  <div className="w-56 h-56 filter brightness-0 invert">
-                    <Lottie animationData={fryingPanAnimation} loop={true} />
-                  </div>
-                  <motion.p 
+                  {isManualLog ? (
+                    <div className="w-24 h-24 rounded-full bg-white/20 flex items-center justify-center mb-4">
+                      <ClipboardList size={48} className="text-white" />
+                    </div>
+                  ) : (
+                    <div className="w-56 h-56 filter brightness-0 invert">
+                      <Lottie animationData={fryingPanAnimation} loop={true} />
+                    </div>
+                  )}
+                  <motion.p
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3 }}
                     className="text-xl font-bold mt-4 font-space-grotesk tracking-tight text-white"
                   >
-                    Enviando pedido para a cozinha...
+                    {isManualLog ? "Salvando registro..." : "Enviando pedido para a cozinha..."}
                   </motion.p>
-                  <motion.div 
+                  <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.6 }}
@@ -139,7 +145,7 @@ export function Cart() {
                     transition={{ delay: 0.25 }}
                     className="text-2xl font-bold font-space-grotesk tracking-tight text-white"
                   >
-                    Pedido Enviado!
+                    {isManualLog ? "Refeição Registrada!" : "Pedido Enviado!"}
                   </motion.h2>
                   <motion.p
                     initial={{ opacity: 0, y: 10 }}
@@ -147,7 +153,7 @@ export function Cart() {
                     transition={{ delay: 0.4 }}
                     className="text-white/80 mt-2 text-sm font-medium"
                   >
-                    Seu almoço está garantido 🎉
+                    {isManualLog ? "Seu consumo foi salvo no perfil 📋" : "Seu almoço está garantido 🎉"}
                   </motion.p>
                 </motion.div>
               )}
@@ -161,7 +167,9 @@ export function Cart() {
             <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={() => navigate(-1)}>
               <ChevronLeft size={20} />
             </Button>
-            <h1 className="text-xl font-bold text-foreground">Revisar Pedido</h1>
+            <h1 className="text-xl font-bold text-foreground">
+              {isManualLog ? "Registrar Refeição" : "Revisar Pedido"}
+            </h1>
           </div>
 
           <div className="flex flex-col gap-4">
@@ -169,8 +177,11 @@ export function Cart() {
             <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
               <div className="px-4 py-3 border-b border-border bg-accent/30 flex items-center justify-between">
                 <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
-                  <ShoppingBag size={14} className="text-primary" />
-                  Itens ({items.length})
+                  {isManualLog
+                    ? <ClipboardList size={14} className="text-blue-600" />
+                    : <ShoppingBag size={14} className="text-primary" />
+                  }
+                  {isManualLog ? "O que você comeu" : "Itens"} ({items.length})
                 </h3>
                 <Button 
                   variant="ghost" 
@@ -239,49 +250,62 @@ export function Cart() {
 
             {/* Consumption Mode & Summary Combined */}
             <div className="grid gap-4 sm:grid-cols-2">
-              {/* Consumption Mode Selection - Read Only */}
-              <div className="rounded-2xl border border-border bg-card p-4 shadow-sm transition-all duration-300">
-                <div className="w-full flex items-center justify-between group">
-                  <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
-                    <MapPin size={14} className="text-primary" />
-                    Local de Consumo
-                  </h3>
-                  <div className="flex items-center gap-2 bg-primary/5 px-2 py-1.5 rounded-lg border border-primary/10">
-                    <span className="text-xs font-semibold text-primary">
-                      {consumptionMode === 'dine_in_damasceno' && 'Sede Damasceno'}
-                      {consumptionMode === 'dine_in_taipas' && 'Sede Taipas'}
-                      {consumptionMode === 'takeout_external' && 'Externo (Marmita)'}
-                    </span>
+              {/* Consumption Mode — hidden for manual log (Taipas); info card shown instead */}
+              {!isManualLog ? (
+                <div className="rounded-2xl border border-border bg-card p-4 shadow-sm transition-all duration-300">
+                  <div className="w-full flex items-center justify-between group">
+                    <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
+                      <MapPin size={14} className="text-primary" />
+                      Local de Consumo
+                    </h3>
+                    <div className="flex items-center gap-2 bg-primary/5 px-2 py-1.5 rounded-lg border border-primary/10">
+                      <span className="text-xs font-semibold text-primary">
+                        {consumptionMode === 'dine_in_damasceno' && 'Sede Damasceno'}
+                        {consumptionMode === 'dine_in_taipas' && 'Sede Taipas'}
+                        {consumptionMode === 'takeout_external' && 'Externo (Marmita)'}
+                      </span>
+                    </div>
                   </div>
-                </div>
 
-                {/* External Order Details */}
-                <AnimatePresence>
-                  {consumptionMode === 'takeout_external' && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="mt-3 space-y-2 overflow-hidden border-t border-dashed pt-3"
-                    >
-                      <input 
-                        type="text" 
-                        value={address}
-                        onChange={(e) => setAddress(e.target.value)}
-                        placeholder="Endereço (Ex: Bloco C)"
-                        className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs focus:ring-1 focus:ring-primary outline-none transition-all"
-                      />
-                      <input 
-                        type="tel" 
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                        placeholder="Telefone (WhatsApp)"
-                        className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs focus:ring-1 focus:ring-primary outline-none transition-all"
-                      />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+                  {/* External Order Details */}
+                  <AnimatePresence>
+                    {consumptionMode === 'takeout_external' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="mt-3 space-y-2 overflow-hidden border-t border-dashed pt-3"
+                      >
+                        <input
+                          type="text"
+                          value={address}
+                          onChange={(e) => setAddress(e.target.value)}
+                          placeholder="Endereço (Ex: Bloco C)"
+                          className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs focus:ring-1 focus:ring-primary outline-none transition-all"
+                        />
+                        <input
+                          type="tel"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          placeholder="Telefone (WhatsApp)"
+                          className="w-full px-3 py-2 rounded-lg border border-border bg-background text-xs focus:ring-1 focus:ring-primary outline-none transition-all"
+                        />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              ) : (
+                /* Manual log info card for Taipas */
+                <div className="rounded-2xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 p-4 shadow-sm flex flex-col justify-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <ClipboardList size={14} className="text-blue-600 dark:text-blue-400 shrink-0" />
+                    <h3 className="font-bold text-sm text-blue-900 dark:text-blue-100">Diário Alimentar</h3>
+                  </div>
+                  <p className="text-xs text-blue-700/80 dark:text-blue-300/70 leading-relaxed">
+                    Seu consumo será registrado no perfil para acompanhamento de calorias e macros. Nenhum pedido será enviado à cozinha.
+                  </p>
+                </div>
+              )}
 
               {/* Summary Compact */}
               <div className="rounded-2xl border border-border bg-card p-4 shadow-sm flex flex-col justify-between">
@@ -344,9 +368,12 @@ export function Cart() {
                   onClick={() => setConfirmOpen(true)}
                   disabled={loading}
                   size="sm"
-                  className="w-full mt-4 h-10 text-sm font-bold rounded-xl shadow-lg shadow-primary/20"
+                  className={`w-full mt-4 h-10 text-sm font-bold rounded-xl shadow-lg ${isManualLog ? "bg-blue-600 hover:bg-blue-700 shadow-blue-500/20" : "shadow-primary/20"}`}
                 >
-                  {loading ? "Enviando..." : "Confirmar Pedido"}
+                  {loading
+                    ? (isManualLog ? "Salvando..." : "Enviando...")
+                    : (isManualLog ? "Salvar Registro" : "Confirmar Pedido")
+                  }
                   {!loading && <ArrowRight size={16} className="ml-2" />}
                 </Button>
               </div>
@@ -356,9 +383,12 @@ export function Cart() {
           <ConfirmDialog
             open={confirmOpen}
             onOpenChange={setConfirmOpen}
-            title="Confirmar Pedido?"
-            description={`Você está prestes a confirmar ${items.length} item(ns) totalizando ${totalCalories} kcal.`}
-            confirmLabel="Sim, Confirmar"
+            title={isManualLog ? "Salvar Registro?" : "Confirmar Pedido?"}
+            description={isManualLog
+              ? `Seu consumo de ${items.length} item(ns) (${totalCalories} kcal) será salvo no perfil para acompanhamento nutricional.`
+              : `Você está prestes a confirmar ${items.length} item(ns) totalizando ${totalCalories} kcal.`
+            }
+            confirmLabel={isManualLog ? "Sim, Registrar" : "Sim, Confirmar"}
             cancelLabel="Voltar"
             onConfirm={() => {
               setConfirmOpen(false);

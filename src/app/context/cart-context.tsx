@@ -19,6 +19,8 @@ interface CartContextType {
   setSelectedUnit: (unit: string) => void;
   consumptionMode: string;
   setConsumptionMode: (mode: string) => void;
+  isManualLog: boolean;
+  setIsManualLog: (v: boolean) => void;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -26,17 +28,9 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 const CART_STORAGE_KEY = "space-food-cart";
 
 // ── Prato Principal rules ──────────────────────────────────────────────────
-// Rule 1: OVO or OMELETE (identified by name) is EXCLUSIVE with any other
-//         Prato Principal. Once one of them is in the cart, no other main
-//         dish can be added, and vice-versa.
-// Rule 2: For non-egg main dishes the total across all selected Prato
-//         Principal items must not exceed 2 (can be 1+1 or 2 of the same).
+// Rule: only ONE Prato Principal option is allowed per order.
+// Selecting any option blocks all others until it is removed.
 const PRATO_PRINCIPAL = "Prato Principal";
-
-function isEggItem(item: { name: string }): boolean {
-  const n = item.name.toLowerCase();
-  return n.includes("ovo") || n.includes("omelete");
-}
 
 function canAddPratoPrincipal(
   prev: CartItem[],
@@ -44,49 +38,28 @@ function canAddPratoPrincipal(
   delta = 1
 ): { allowed: boolean; message?: string } {
   const ppItems = prev.filter((i) => i.category === PRATO_PRINCIPAL);
-  const addingEgg = isEggItem(item);
-  const hasEgg = ppItems.some((i) => isEggItem(i));
-  const hasNonEgg = ppItems.some((i) => !isEggItem(i));
 
-  if (addingEgg) {
-    // Cannot mix egg with non-egg
-    if (hasNonEgg) {
-      return {
-        allowed: false,
-        message:
-          "Ovo e Omelete sao exclusivos — remova os outros pratos principais primeiro.",
-      };
-    }
-    // Each egg item is limited to 1 portion
+  if (ppItems.length > 0) {
     const existing = ppItems.find((i) => i.id === item.id);
-    const currentQty = existing ? existing.quantity : 0;
-    if (currentQty + delta > 1) {
-      return {
-        allowed: false,
-        message: "Maximo de 1 porcao de Ovo ou Omelete por pedido.",
-      };
-    }
-  } else {
-    // Cannot add non-egg when egg already in cart
-    if (hasEgg) {
+
+    if (!existing) {
+      // A different Prato Principal is already in the cart — blocked
       return {
         allowed: false,
         message:
-          "Nao e possivel adicionar pratos principais quando Ovo ou Omelete ja esta selecionado.",
+          "Apenas 1 opção de Prato Principal por pedido. Remova o atual para escolher outro.",
       };
     }
-    // Non-egg total must not exceed 2
-    const nonEggTotal = ppItems
-      .filter((i) => !isEggItem(i))
-      .reduce((acc, cur) => acc + cur.quantity, 0);
-    if (nonEggTotal + delta > 2) {
+
+    // Same item — respect its own portion limit
+    if (existing.quantity + delta > item.limit) {
       return {
         allowed: false,
-        message:
-          "Limite de 2 porcoes de Prato Principal por pedido (1 de cada ou 2 do mesmo).",
+        message: `Limite de ${item.limit} porção(ões) de "${item.name}" atingido.`,
       };
     }
   }
+
   return { allowed: true };
 }
 // ──────────────────────────────────────────────────────────────────────────
@@ -124,6 +97,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
     return storedMode || "dine_in_damasceno";
   });
 
+  const [isManualLog, setIsManualLog] = useState<boolean>(() => {
+    return localStorage.getItem(CART_STORAGE_KEY + "-manual-log") === "true";
+  });
+
   useEffect(() => {
     localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items));
     localStorage.setItem(CART_STORAGE_KEY + "-date", new Date().toISOString().split('T')[0]);
@@ -140,6 +117,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     localStorage.setItem(CART_STORAGE_KEY + "-mode", consumptionMode);
   }, [consumptionMode]);
+
+  useEffect(() => {
+    localStorage.setItem(CART_STORAGE_KEY + "-manual-log", String(isManualLog));
+  }, [isManualLog]);
 
   const addToCart = (item: MenuItem) => {
     setItems((prev) => {
@@ -160,14 +141,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
         return [...prev, { ...item, quantity: 1 }];
       }
 
-      // ── Other categories: use item.limit per category ──
-      const categoryTotal = prev
-        .filter((i) => i.category === item.category)
-        .reduce((acc, curr) => acc + curr.quantity, 0);
-
-      if (categoryTotal >= item.limit) {
+      // ── Other categories: respect per-item authorized portion count ──
+      const currentQty = existing ? existing.quantity : 0;
+      if (currentQty + 1 > item.limit) {
         toast.warning(
-          `Limite de ${item.limit} ${item.limit === 1 ? "item" : "itens"} para a categoria ${item.category} atingido.`
+          `Limite de ${item.limit} porção(ões) de "${item.name}" atingido.`
         );
         return prev;
       }
@@ -210,13 +188,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
           return prev;
         }
       } else {
-        const categoryTotal = prev
-          .filter((i) => i.category === itemToUpdate.category)
-          .reduce((acc, curr) => acc + curr.quantity, 0);
-
-        if (categoryTotal + delta > itemToUpdate.limit) {
+        // Per-item limit check: each item has its own authorized portion count
+        if (itemToUpdate.quantity + delta > itemToUpdate.limit) {
           toast.warning(
-            `Limite de ${itemToUpdate.limit} para ${itemToUpdate.category} atingido.`
+            `Limite de ${itemToUpdate.limit} porção(ões) de "${itemToUpdate.name}" atingido.`
           );
           return prev;
         }
@@ -248,13 +223,18 @@ export function CartProvider({ children }: { children: ReactNode }) {
         deliveryAddress,
         contactPhone,
         date: orderDate.toISOString(),
+        isManualLog,
       });
-      toast.success("Pedido realizado com sucesso!");
+      if (isManualLog) {
+        toast.success("Refeição registrada com sucesso!");
+      } else {
+        toast.success("Pedido realizado com sucesso!");
+      }
       clearCart();
       return true;
     } catch (error: any) {
       console.error("Order error:", error);
-      toast.error(error.message || "Erro ao enviar pedido. Tente novamente.");
+      toast.error(error.message || "Erro ao enviar. Tente novamente.");
       return false;
     }
   };
@@ -282,6 +262,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
         setSelectedUnit,
         consumptionMode,
         setConsumptionMode,
+        isManualLog,
+        setIsManualLog,
       }}
     >
       {children}

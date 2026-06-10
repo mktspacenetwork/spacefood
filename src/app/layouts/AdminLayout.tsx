@@ -30,7 +30,8 @@ import {
   Trash2,
   ShieldCheck,
   Lock,
-  ScrollText
+  ScrollText,
+  BookMarked,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Button } from "../components/ui/Button";
@@ -81,6 +82,7 @@ const MENU_GROUPS = [
       { icon: CalendarDays, label: "Cardápio", path: "/admin/menu-planner", permKey: "menu" },
       { icon: UtensilsCrossed, label: "Gestão de Pratos", path: "/admin/items", permKey: "items" },
       { icon: MessageSquare, label: "Avaliações", path: "/admin/reviews", permKey: "reviews" },
+      { icon: BookMarked, label: "Sugestões de Receita", path: "/admin/recipe-suggestions", permKey: "recipe-suggestions" },
       { icon: Users, label: "Usuários & Permissões", path: "/admin/users", permKey: "users" },
     ]
   },
@@ -224,6 +226,9 @@ export function AdminLayout() {
     if (user.role === 'master') return true;
     // While permissions are loading, show everything to avoid flicker
     if (myPermissions === null) return true;
+    // If the permKey is not explicitly set in the permissions object (e.g. a new feature),
+    // default to allowed so new menu items appear without requiring a permissions migration
+    if (!(permKey in myPermissions)) return true;
     return myPermissions[permKey] === true;
   };
 
@@ -241,6 +246,7 @@ export function AdminLayout() {
     myPermissions !== null &&
     user?.role !== 'master' &&
     currentPagePermKey !== null &&
+    currentPagePermKey in myPermissions &&   // only block when permission is explicitly configured
     myPermissions[currentPagePermKey] !== true;
 
   const handleSignOut = () => {

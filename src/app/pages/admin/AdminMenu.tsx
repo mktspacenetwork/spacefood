@@ -23,6 +23,8 @@ export function AdminMenu() {
   const [isNewItemModalOpen, setIsNewItemModalOpen] = useState(false);
   const [newItem, setNewItem] = useState({ name: "", description: "", calories: 0, category: "Principal", unit: "porção", available: 100, limit: 1 });
   const [publishedDays, setPublishedDays] = useState<Set<string>>(new Set());
+  // Ref mirrors publishedDays to avoid stale closure in async saveMenuDataToServer
+  const publishedDaysRef = useRef<Set<string>>(new Set());
   const [categories, setCategories] = useState<string[]>(["Principal", "Guarnição", "Salada", "Sobremesa", "Bebida"]);
   // Recurring (daily) items
   const [recurringItemIds, setRecurringItemIds] = useState<Set<string>>(new Set());
@@ -62,6 +64,15 @@ export function AdminMenu() {
     return [...new Set(allCats)];
   }, [categories, dailyItems]);
 
+  /** Keeps the ref in sync so async callbacks always read the latest value. */
+  const setPublishedDaysSync = (next: Set<string>) => {
+    publishedDaysRef.current = next;
+    setPublishedDays(next);
+  };
+
+  /** Normalize a date string (ISO, SQL, or yyyy-MM-dd) to yyyy-MM-dd */
+  const normalizeDate = (d: string): string => d.substring(0, 10);
+
   useEffect(() => { loadData(); }, []);
   useEffect(() => { loadWeekMenu(); }, [currentDate]);
 
@@ -88,12 +99,15 @@ export function AdminMenu() {
           api.authGet(`/admin/weekly-menu?week=${weekKey}`),
           api.authGet(`/admin/menu/published?week=${weekKey}`).catch(() => [])
       ]);
-      
+
       if (data && typeof data === 'object' && !Array.isArray(data)) {
         setMenuData(prev => ({ ...prev, ...data }));
       }
       if (Array.isArray(pubDays)) {
-          setPublishedDays(new Set(pubDays));
+        // Normalize to yyyy-MM-dd regardless of what the server returns
+        // (server may return ISO strings like "2026-05-21T00:00:00.000Z")
+        const normalized = new Set(pubDays.map((d: string) => normalizeDate(d)));
+        setPublishedDaysSync(normalized);
       }
     } catch (_) {}
   };
@@ -123,19 +137,38 @@ export function AdminMenu() {
   const saveMenuDataToServer = async (data: Record<string, MenuItem[]>, affectedDateKey: string) => {
     try {
       // Salvar apenas a semana afetada
-      const affectedDate = new Date(affectedDateKey);
+      const affectedDate = new Date(affectedDateKey + "T12:00:00"); // noon to avoid TZ offset
       const affectedStartDate = startOfWeek(affectedDate, { weekStartsOn: 1 });
       const affectedWeekKey = format(affectedStartDate, "yyyy-MM-dd");
-      
+
       const weekData: Record<string, MenuItem[]> = {};
       const weekDaysToSave = Array.from({ length: 6 }).map((_, i) => addDays(affectedStartDate, i));
-      
+
       weekDaysToSave.forEach(day => {
         const dk = format(day, "yyyy-MM-dd");
         if (data[dk]?.length) weekData[dk] = data[dk];
       });
-      
+
       await api.authPost("/admin/weekly-menu", { weekKey: affectedWeekKey, data: weekData });
+
+      // Use publishedDaysRef (not state) to avoid stale closure — ref is always current.
+      // If the day is already published, also update the live daily menu so the Home
+      // reflects the change immediately without needing to re-publish.
+      const isPublished = publishedDaysRef.current.has(affectedDateKey);
+      console.log(`[AdminMenu] saveMenuDataToServer: date=${affectedDateKey}, isPublished=${isPublished}, publishedDays=`, [...publishedDaysRef.current]);
+
+      if (isPublished) {
+        const dayItems = data[affectedDateKey] || [];
+        const recurringItems = allItems.filter(i => recurringItemIds.has(i.id));
+        const merged = [...dayItems];
+        recurringItems.forEach(ri => {
+          if (!merged.find(m => m.id === ri.id)) merged.push(ri);
+        });
+        const itemIds = merged.map(item => item.id);
+        await api.authPost("/admin/daily-menu", { date: affectedDateKey, itemIds });
+        console.log(`[AdminMenu] Published daily-menu updated with ${itemIds.length} items`);
+      }
+
       // Toast mais discreto para salvamento automático
       toast.success("✓ Salvo", { duration: 1500 });
     } catch (e) {
@@ -151,11 +184,7 @@ export function AdminMenu() {
     try {
       if (isCurrentlyPublished) {
         await api.authDel(`/admin/daily-menu/${dateStr}`);
-        setPublishedDays(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(dateStr);
-          return newSet;
-        });
+        setPublishedDaysSync(new Set([...publishedDaysRef.current].filter(d => d !== dateStr)));
         toast.success("Cardápio desativado do app");
       } else {
         const items = menuData[dateStr] || [];
@@ -175,7 +204,7 @@ export function AdminMenu() {
         await api.authPost("/admin/daily-menu", { date: dateStr, itemIds });
         await api.authPost("/admin/menu/publish-day", { date: dateStr });
 
-        setPublishedDays(prev => new Set([...prev, dateStr]));
+        setPublishedDaysSync(new Set([...publishedDaysRef.current, dateStr]));
         toast.success("Cardápio ativado no app!");
       }
     } catch (e: any) {
@@ -298,8 +327,27 @@ export function AdminMenu() {
     item.category.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const todayKey = format(new Date(), "yyyy-MM-dd");
+  const todayHasItems = (dailyItems.length > 0 || (menuData[todayKey] || []).length > 0);
+  const todayIsPublished = publishedDays.has(todayKey);
+  const showUnpublishedWarning = isSameDay(selectedDate, new Date()) && todayHasItems && !todayIsPublished;
+
   return (
     <div className="space-y-6 flex flex-col" ref={printRef}>
+      {/* Warning: today has items but isn't published → Home won't show them */}
+      {showUnpublishedWarning && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 px-4 py-3">
+          <span className="text-xl">⚠️</span>
+          <div className="flex-1">
+            <p className="text-sm font-bold text-amber-800 dark:text-amber-300">Cardápio de hoje não está ativo</p>
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+              Os itens adicionados <strong>não aparecem na Home</strong> enquanto o cardápio não for ativado.
+              Clique em <strong>"Ativar Cardápio"</strong> para publicar.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Planejamento de Cardápio</h1>

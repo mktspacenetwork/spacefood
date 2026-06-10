@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../components/ui/Card";
-import { Users, Utensils, CheckCircle, Loader2, AlertCircle, Clock, UserX, Crown, RefreshCw } from "lucide-react";
+import { Users, Utensils, CheckCircle, Loader2, AlertCircle, Clock, UserX, Crown, RefreshCw, ClipboardList } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { api } from "../../lib/api";
@@ -12,12 +12,13 @@ import { Button } from "../../components/ui/Button";
 
 interface DashboardData {
   todayOrdersCount: number;
+  todayManualLogsCount?: number;
   uniqueUsersOrdered: number;
   topItems: { name: string; count: number; category: string }[];
   weekData: { name: string; date: string; orders: number; items: number }[];
   lastOrders: any[];
   abstentions: { userId: string; userName: string; date: string }[];
-  allOrdersCount: number;
+  orderedUserIds?: string[];
 }
 
 interface UserInfo {
@@ -103,8 +104,11 @@ export function AdminDashboard() {
 
   const topItem = data.topItems[0];
 
-  // Users who haven't ordered today
-  const orderedUserIds = new Set(data.lastOrders.map((o: any) => o.userId));
+  // Filter out manual logs and cancelled orders from "last orders" display
+  const realLastOrders = data.lastOrders.filter((o: any) => !o.isManualLog && o.status !== "Cancelado");
+
+  // Users who haven't ordered today — use full set from backend (not limited to 20)
+  const orderedUserIds = new Set(data.orderedUserIds || realLastOrders.map((o: any) => o.userId));
   const abstainedUserIds = new Set(data.abstentions.map(a => a.userId));
   const usersNotOrdered = allUsers.filter(u =>
     !orderedUserIds.has(u.id) && !abstainedUserIds.has(u.id)
@@ -134,7 +138,14 @@ export function AdminDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-foreground">{data.todayOrdersCount}</div>
-            <p className="text-xs text-muted-foreground mt-1">pedidos realizados</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              pedidos realizados
+              {(data.todayManualLogsCount ?? 0) > 0 && (
+                <span className="ml-2 text-blue-500 font-semibold">
+                  + {data.todayManualLogsCount} reg.
+                </span>
+              )}
+            </p>
           </CardContent>
         </Card>
 
@@ -289,10 +300,10 @@ export function AdminDashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-3 max-h-[400px] overflow-y-auto">
-              {data.lastOrders.length === 0 && (
+              {realLastOrders.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-8">Nenhum pedido ainda</p>
               )}
-              {data.lastOrders.map((order: any, idx: number) => (
+              {realLastOrders.map((order: any, idx: number) => (
                 <div key={order.id || `order-${idx}`} className="flex items-center gap-3 p-3 rounded-xl bg-accent/30 border border-border/50">
                   <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
                     {(order.userName || "U").charAt(0).toUpperCase()}

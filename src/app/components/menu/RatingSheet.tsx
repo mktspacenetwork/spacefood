@@ -10,9 +10,10 @@ interface RatingSheetProps {
   onClose: () => void;
   order: Order | null;
   onSubmit: (orderId: string, stars: number, comment: string) => Promise<void>;
+  isManualLog?: boolean;
 }
 
-export function RatingSheet({ isOpen, onClose, order, onSubmit }: RatingSheetProps) {
+export function RatingSheet({ isOpen, onClose, order, onSubmit, isManualLog }: RatingSheetProps) {
   const [stars, setStars] = useState(0);
   const [comment, setComment] = useState("");
   const [loading, setLoading] = useState(false);
@@ -47,9 +48,13 @@ export function RatingSheet({ isOpen, onClose, order, onSubmit }: RatingSheetPro
                 <MessageSquare size={32} className="text-orange-600" />
               </div>
 
-              <h3 className="text-2xl font-bold text-foreground">Avalie seu último pedido</h3>
+              <h3 className="text-2xl font-bold text-foreground">
+                {isManualLog ? "Avalie sua refeição" : "Avalie seu último pedido"}
+              </h3>
               <p className="text-muted-foreground text-sm max-w-xs">
-                O que achou do almoço de ontem? Sua opinião ajuda a melhorar o cardápio.
+                {isManualLog
+                  ? "Como foi o que você comeu ontem? Sua opinião ajuda a melhorar o cardápio."
+                  : "O que achou do almoço de ontem? Sua opinião ajuda a melhorar o cardápio."}
               </p>
 
               <div className="flex items-center gap-2 my-4">

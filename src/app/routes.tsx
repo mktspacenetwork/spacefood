@@ -28,6 +28,8 @@ import { Rate } from "./pages/Rate";
 import { AdminBanners } from "./pages/admin/AdminBanners";
 import { WasteControl } from "./pages/admin/WasteControl";
 import { AdminLogs } from "./pages/admin/AdminLogs";
+import { Recipes } from "./pages/Recipes";
+import { AdminRecipes } from "./pages/admin/AdminRecipes";
 // AdminPermissions removed – route now uses AdminUsers with defaultTab="permissions"
 
 // Wrapper to add per-route error boundaries
@@ -89,6 +91,7 @@ export const router = createBrowserRouter([
           { path: "food-care", element: <WithBoundary name="Cuidados com sua comida"><FoodCare /></WithBoundary> },
           { path: "team", element: <WithBoundary name="Equipe Responsavel"><Team /></WithBoundary> },
           { path: "rate", element: <WithBoundary name="Avaliar Almoco"><Rate /></WithBoundary> },
+          { path: "receitas", element: <WithBoundary name="Receitas"><Recipes /></WithBoundary> },
         ],
       },
       {
@@ -121,6 +124,7 @@ export const router = createBrowserRouter([
           { path: "notifications", element: <WithBoundary name="Notificacoes Admin"><AdminNotifications /></WithBoundary> },
           { path: "settings", element: <WithBoundary name="Configuracoes"><AdminSettings /></WithBoundary> },
           { path: "logs", element: <WithBoundary name="Log de Auditoria"><AdminLogs /></WithBoundary> },
+          { path: "recipe-suggestions", element: <WithBoundary name="Sugestões de Receita"><AdminRecipes /></WithBoundary> },
         ],
       },
       {
