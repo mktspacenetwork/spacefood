@@ -690,30 +690,35 @@ app.post("/make-server-c3078087/orders", async (c) => {
         }
       }
 
-      // Decrement stock with optimistic retry to mitigate race conditions (only for real orders)
-      const MAX_STOCK_RETRIES = 3;
-      for (let attempt = 0; attempt < MAX_STOCK_RETRIES; attempt++) {
-        let menuItemsData = await kv.get("menu:items") || [];
-        for (const orderItem of orderData.items) {
-          const menuItem = menuItemsData.find((mi: any) => mi.id === orderItem.id);
-          if (menuItem) {
-            const qty = orderItem.quantity || 1;
-            if (menuItem.available < qty) {
-              return c.json({ error: `"${menuItem.name}" não tem estoque suficiente (disponível: ${menuItem.available}).` }, 400);
+      // Decrement stock with optimistic retry (only for same-day orders).
+      // Pre-orders for future dates skip stock decrement — the stock counter resets
+      // each day when the admin configures the menu, so consuming it today for a
+      // future date would incorrectly block today's orders.
+      if (menuDate === today) {
+        const MAX_STOCK_RETRIES = 3;
+        for (let attempt = 0; attempt < MAX_STOCK_RETRIES; attempt++) {
+          let menuItemsData = await kv.get("menu:items") || [];
+          for (const orderItem of orderData.items) {
+            const menuItem = menuItemsData.find((mi: any) => mi.id === orderItem.id);
+            if (menuItem) {
+              const qty = orderItem.quantity || 1;
+              if (menuItem.available < qty) {
+                return c.json({ error: `"${menuItem.name}" não tem estoque suficiente (disponível: ${menuItem.available}).` }, 400);
+              }
+              menuItem.available -= qty;
             }
-            menuItem.available -= qty;
           }
-        }
-        try {
-          await kv.set("menu:items", menuItemsData);
-          break; // success
-        } catch (stockErr: any) {
-          if (attempt === MAX_STOCK_RETRIES - 1) {
-            console.log("Stock update failed after retries:", stockErr);
-            return c.json({ error: "Erro ao atualizar estoque. Tente novamente." }, 500);
+          try {
+            await kv.set("menu:items", menuItemsData);
+            break; // success
+          } catch (stockErr: any) {
+            if (attempt === MAX_STOCK_RETRIES - 1) {
+              console.log("Stock update failed after retries:", stockErr);
+              return c.json({ error: "Erro ao atualizar estoque. Tente novamente." }, 500);
+            }
+            // Small delay before retry
+            await new Promise(r => setTimeout(r, 50 * (attempt + 1)));
           }
-          // Small delay before retry
-          await new Promise(r => setTimeout(r, 50 * (attempt + 1)));
         }
       }
     }
@@ -792,8 +797,13 @@ app.delete("/make-server-c3078087/orders/:id", async (c) => {
       }
     }
 
-    // Restore stock
-    if (order.items && order.items.length > 0) {
+    // Restore stock — only if stock was actually decremented at order time.
+    // Stock is only decremented for same-day orders (menuDate === creation date).
+    // Pre-orders (menuDate in the future) never touched the stock counter, so
+    // cancelling them must not restore it (that would inflate stock).
+    const orderCreationDate = order.date ? order.date.split('T')[0] : '';
+    const wasStockDecremented = !order.menuDate || order.menuDate === orderCreationDate;
+    if (wasStockDecremented && order.items && order.items.length > 0) {
         let menuItemsData = await kv.get("menu:items") || [];
         let stockUpdated = false;
         for (const orderItem of order.items) {
