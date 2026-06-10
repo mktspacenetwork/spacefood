@@ -14,7 +14,8 @@ import { hapticSuccess, hapticHeavy } from "../lib/haptics";
 
 export function Cart() {
   const { user } = useAuth();
-  const { items, removeFromCart, updateQuantity, clearCart, totalCalories, submitOrder, consumptionMode, setConsumptionMode, setSelectedUnit, isManualLog } = useCart();
+  const { items, removeFromCart, updateQuantity, clearCart, totalCalories, submitOrder, consumptionMode, setConsumptionMode, setSelectedUnit, isManualLog, editingOrderId } = useCart();
+  const isEditing = !!editingOrderId;
   const navigate = useNavigate();
   const [isSuccess, setIsSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -371,8 +372,8 @@ export function Cart() {
                   className={`w-full mt-4 h-10 text-sm font-bold rounded-xl shadow-lg ${isManualLog ? "bg-blue-600 hover:bg-blue-700 shadow-blue-500/20" : "shadow-primary/20"}`}
                 >
                   {loading
-                    ? (isManualLog ? "Salvando..." : "Enviando...")
-                    : (isManualLog ? "Salvar Registro" : "Confirmar Pedido")
+                    ? (isManualLog ? "Salvando..." : isEditing ? "Salvando..." : "Enviando...")
+                    : (isManualLog ? "Salvar Registro" : isEditing ? "Salvar Alterações" : "Confirmar Pedido")
                   }
                   {!loading && <ArrowRight size={16} className="ml-2" />}
                 </Button>

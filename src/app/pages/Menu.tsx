@@ -40,7 +40,7 @@ function minusThirty(time: string): string {
 
 export function Menu() {
   const { user } = useAuth();
-  const { totalItems, totalCalories, orderDate, setOrderDate, addToCart, clearCart, selectedUnit, setSelectedUnit, consumptionMode, setConsumptionMode, isManualLog, setIsManualLog } = useCart();
+  const { totalItems, totalCalories, orderDate, setOrderDate, addToCart, clearCart, selectedUnit, setSelectedUnit, consumptionMode, setConsumptionMode, isManualLog, setIsManualLog, setEditingOrderId } = useCart();
   const [selectedCategory, setSelectedCategory] = useState("Todos");
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,6 +64,11 @@ export function Menu() {
   const [ordersAllowed, setOrdersAllowed] = useState(true);
   // Whether this specific user has meal ordering permission
   const userCanOrderMeal = user?.canOrderMeal !== false;
+
+  // Per-date menu cache (stale-while-revalidate) so switching between dates the
+  // user has already opened is instant — no blank screen, no spinner. The menu is
+  // shown immediately from cache and refreshed silently in the background.
+  const menuCacheRef = useRef<Map<string, MenuItem[]>>(new Map());
 
   // Orders & Ratings
   const [allOrders, setAllOrders] = useState<Order[]>([]);
@@ -145,8 +150,11 @@ export function Menu() {
 
         // Menu items
         const itemsRes = data.menuItems || [];
-        if (Array.isArray(itemsRes)) setMenuItems(itemsRes);
-        else setMenuItems([]);
+        if (Array.isArray(itemsRes)) {
+          setMenuItems(itemsRes);
+          // Seed the per-date cache with today's menu for instant re-navigation.
+          menuCacheRef.current.set(format(orderDate, "yyyy-MM-dd"), itemsRes);
+        } else setMenuItems([]);
 
         // Abstention
         setHasAbstained(data.abstention?.abstained || false);
@@ -216,16 +224,30 @@ export function Menu() {
     if (isFirstRender.current) { isFirstRender.current = false; return; }
     let cancelled = false;
     const refresh = async () => {
-      setLoading(true);
       const dateStr = format(orderDate, "yyyy-MM-dd");
+      // Stale-while-revalidate: if we've already loaded this date, show it instantly
+      // and revalidate silently. Only show the loading state on a true cold fetch.
+      const cachedMenu = menuCacheRef.current.get(dateStr);
+      if (cachedMenu) {
+        setMenuItems(cachedMenu);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
       const menuEndpoint = isSameDay(orderDate, new Date()) ? "/menu/today" : `/menu?date=${dateStr}`;
       const [itemsRes, absRes, settingsRes] = await Promise.all([
-        api.get(menuEndpoint).catch(() => []),
+        api.get(menuEndpoint).catch(() => null),
         api.authGet(`/abstention/me?date=${dateStr}`).catch(() => ({ abstained: false })),
         api.get("/admin/settings").catch(() => ({})),
       ]);
       if (cancelled) return;
-      if (Array.isArray(itemsRes)) setMenuItems(itemsRes); else setMenuItems([]);
+      if (Array.isArray(itemsRes)) {
+        menuCacheRef.current.set(dateStr, itemsRes);
+        setMenuItems(itemsRes);
+      } else if (!cachedMenu) {
+        // Network failed and nothing cached → empty state
+        setMenuItems([]);
+      }
       setHasAbstained(absRes?.abstained || false);
       setSettings(settingsRes || {});
       const rawUnits = settingsRes?.units;
@@ -385,23 +407,10 @@ export function Menu() {
     return minusThirty(settings.cutoffTime);
   };
 
-  // Auto-advance fires at most once per session. After the first advance the user
-  // is free to navigate back to today and see today's menu greyed-out with a notice.
-  const hasAutoAdvanced = useRef(false);
-
-  // Auto-advance to next available date when today's cutoff passes (Damasceno only).
-  // Taipas users (ordersAllowed=false) register any time — no auto-advance for them.
-  useEffect(() => {
-    if (!isCutoffPassed || !ordersAllowed || !isToday) return;
-    if (hasAutoAdvanced.current) return; // already advanced once — don't override manual navigation
-    if (availableDates.length === 0) return;
-    const todayStart = startOfDay(new Date());
-    const nextDate = availableDates.find(d => startOfDay(d) > todayStart);
-    if (nextDate) {
-      hasAutoAdvanced.current = true;
-      setOrderDate(nextDate);
-    }
-  }, [isCutoffPassed, isToday, ordersAllowed, availableDates]); // eslint-disable-line react-hooks/exhaustive-deps
+  // NOTE: No auto-advance. When today's cutoff has passed, we keep the user on the
+  // date they selected (or today by default) and show the "Encerrado" notice with
+  // the greyed-out menu. Forcing the view to tomorrow felt like a navigation bug —
+  // the user must always see exactly the day they clicked.
 
   const toggleAbstention = async () => {
     setAbsLoading(true);
@@ -467,24 +476,24 @@ export function Menu() {
     setEditDialogOpen(false);
     if (!orderForDate) return;
     const editingOrder = orderForDate;
-    const toastId = toast.loading("Preparando edição...");
-    try {
-      await api.authDel(`/orders/${editingOrder.id}`);
-      clearCart();
-      editingOrder.items.forEach((orderItem: any) => {
-        const fullItem = menuItems.find(i => i.id === orderItem.id) || orderItem;
-        for (let i = 0; i < (orderItem.quantity || 1); i++) {
-          addToCart(fullItem);
-        }
-      });
-      toast.dismiss(toastId);
-      setAllOrders(prev => prev.filter(o => o.id !== editingOrder.id));
-      if (todayOrder?.id === editingOrder.id) setTodayOrder(null);
-      navigate("/cart");
-    } catch (e: any) {
-      toast.error(e.message || "Erro ao editar pedido.");
-      toast.dismiss(toastId);
-    }
+    // Non-destructive edit: we do NOT delete the order here. We load its items into
+    // the cart and mark it for replacement. The original order stays on the server
+    // until the new one is successfully submitted (backend replaces it atomically).
+    // If the user abandons the edit, their original order remains intact.
+    clearCart();
+    editingOrder.items.forEach((orderItem: any) => {
+      const fullItem = menuItems.find(i => i.id === orderItem.id) || orderItem;
+      for (let i = 0; i < (orderItem.quantity || 1); i++) {
+        addToCart(fullItem);
+      }
+    });
+    // Ensure the edit targets the same meal date as the original order.
+    const targetDate = (editingOrder as any).menuDate
+      ? new Date((editingOrder as any).menuDate + "T00:00:00")
+      : (editingOrder.date ? new Date(editingOrder.date) : orderDate);
+    setOrderDate(targetDate);
+    setEditingOrderId(editingOrder.id);
+    navigate("/cart");
   };
 
   const handleDeleteOrder = () => {
@@ -527,7 +536,10 @@ export function Menu() {
         api.get("/admin/settings").catch(() => ({})),
         api.authGet("/orders").catch(() => []),
       ]);
-      if (Array.isArray(itemsRes)) setMenuItems(itemsRes); else setMenuItems([]);
+      if (Array.isArray(itemsRes)) {
+        menuCacheRef.current.set(dateStr, itemsRes);
+        setMenuItems(itemsRes);
+      } else setMenuItems([]);
       setHasAbstained(absRes?.abstained || false);
       setSettings(settingsRes || {});
       if (Array.isArray(orders)) {

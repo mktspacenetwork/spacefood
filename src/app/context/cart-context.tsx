@@ -21,6 +21,9 @@ interface CartContextType {
   setConsumptionMode: (mode: string) => void;
   isManualLog: boolean;
   setIsManualLog: (v: boolean) => void;
+  // When set, the next successful submitOrder replaces this order (non-destructive edit).
+  editingOrderId: string | null;
+  setEditingOrderId: (id: string | null) => void;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -100,6 +103,15 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [isManualLog, setIsManualLog] = useState<boolean>(() => {
     return localStorage.getItem(CART_STORAGE_KEY + "-manual-log") === "true";
   });
+
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(() => {
+    return localStorage.getItem(CART_STORAGE_KEY + "-editing-order-id") || null;
+  });
+
+  useEffect(() => {
+    if (editingOrderId) localStorage.setItem(CART_STORAGE_KEY + "-editing-order-id", editingOrderId);
+    else localStorage.removeItem(CART_STORAGE_KEY + "-editing-order-id");
+  }, [editingOrderId]);
 
   useEffect(() => {
     localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items));
@@ -203,7 +215,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const clearCart = () => setItems([]);
+  const clearCart = () => {
+    setItems([]);
+    setEditingOrderId(null);
+  };
 
   const totalCalories = items.reduce((acc, item) => acc + item.calories * item.quantity, 0);
   const totalItems = items.reduce((acc, item) => acc + item.quantity, 0);
@@ -224,11 +239,13 @@ export function CartProvider({ children }: { children: ReactNode }) {
         contactPhone,
         date: orderDate.toISOString(),
         isManualLog,
+        // Non-destructive edit: backend removes the old order only after this succeeds.
+        replaceOrderId: editingOrderId || undefined,
       });
       if (isManualLog) {
         toast.success("Refeição registrada com sucesso!");
       } else {
-        toast.success("Pedido realizado com sucesso!");
+        toast.success(editingOrderId ? "Pedido atualizado com sucesso!" : "Pedido realizado com sucesso!");
       }
       clearCart();
       return true;
@@ -264,6 +281,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
         setConsumptionMode,
         isManualLog,
         setIsManualLog,
+        editingOrderId,
+        setEditingOrderId,
       }}
     >
       {children}

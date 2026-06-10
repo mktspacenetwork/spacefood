@@ -681,6 +681,15 @@ app.post("/make-server-c3078087/orders", async (c) => {
     const logDate = menuDate;
     const existingOrders = await kv.get(`orders:${auth.userId}`) || [];
 
+    // Non-destructive edit: when the client is replacing an order, it passes
+    // replaceOrderId. The old order is removed ONLY after the new one is
+    // successfully created (in this same request). If anything fails before that,
+    // the original order stays intact — no more lost orders on abandoned edits.
+    const replaceOrderId: string | null = orderData.replaceOrderId || null;
+    const replacedOrder = replaceOrderId
+      ? existingOrders.find((o: any) => o.id === replaceOrderId)
+      : null;
+
     if (isManualLog) {
       // Check if user already registered a meal for this specific date
       const existingLog = existingOrders.find((o: any) =>
@@ -694,6 +703,7 @@ app.post("/make-server-c3078087/orders", async (c) => {
       // Match by menuDate, falling back to creation date for legacy orders.
       const existingForDate = existingOrders.find((o: any) => {
         if (o.isManualLog || o.status === 'Cancelado') return false;
+        if (replaceOrderId && o.id === replaceOrderId) return false; // the order being replaced doesn't count
         const oDate = o.menuDate || (o.date ? o.date.split('T')[0] : '');
         return oDate === menuDate;
       });
@@ -721,6 +731,18 @@ app.post("/make-server-c3078087/orders", async (c) => {
         if (orderDateStr === today && pastCutoff) {
           return c.json({ error: `Horário de pedido encerrado. O limite era ${settings.cutoffTime}.` }, 400);
         }
+      }
+
+      // When replacing a same-day order, give its stock back first so the new
+      // order's decrement below nets correctly (otherwise an edit double-counts).
+      if (replacedOrder && replacedOrder.menuDate === today && Array.isArray(replacedOrder.items)) {
+        let menuItemsData = await kv.get("menu:items") || [];
+        let restored = false;
+        for (const oldItem of replacedOrder.items) {
+          const mi = menuItemsData.find((m: any) => m.id === oldItem.id);
+          if (mi) { mi.available += (oldItem.quantity || 1); restored = true; }
+        }
+        if (restored) await kv.set("menu:items", menuItemsData);
       }
 
       // Decrement stock with optimistic retry (only for same-day orders).
@@ -773,12 +795,33 @@ app.post("/make-server-c3078087/orders", async (c) => {
       isManualLog,
     };
 
-    await kv.set(`orders:${auth.userId}`, [newOrder, ...existingOrders]);
+    // Persist the new order to the user's list. If replacing, drop the old one
+    // from the same list now that the new order exists (atomic within this request).
+    const userListAfter = replacedOrder
+      ? existingOrders.filter((o: any) => o.id !== replaceOrderId)
+      : existingOrders;
+    await kv.set(`orders:${auth.userId}`, [newOrder, ...userListAfter]);
 
     // Also save to daily index — use logDate for manual logs (supports retroactive)
     const dailyOrders = await kv.get(`orders-daily:${logDate}`) || [];
     dailyOrders.push(newOrder);
     await kv.set(`orders-daily:${logDate}`, dailyOrders);
+
+    // Remove the replaced order from its (possibly different) daily bucket so the
+    // kitchen and check-in no longer show the stale version.
+    if (replacedOrder) {
+      const oldDate = replacedOrder.menuDate || (replacedOrder.date ? replacedOrder.date.split('T')[0] : null);
+      if (oldDate && oldDate !== logDate) {
+        const oldDaily = await kv.get(`orders-daily:${oldDate}`) || [];
+        const filtered = (oldDaily as any[]).filter((o: any) => o.id !== replaceOrderId);
+        if (filtered.length !== oldDaily.length) await kv.set(`orders-daily:${oldDate}`, filtered);
+      } else if (oldDate === logDate) {
+        // Same-day edit: the old order is still in the bucket we just wrote — strip it.
+        const sameDaily = await kv.get(`orders-daily:${logDate}`) || [];
+        const filtered = (sameDaily as any[]).filter((o: any) => o.id !== replaceOrderId);
+        if (filtered.length !== sameDaily.length) await kv.set(`orders-daily:${logDate}`, filtered);
+      }
+    }
 
     return c.json(newOrder);
   } catch (e) {
