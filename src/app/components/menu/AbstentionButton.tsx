@@ -6,9 +6,10 @@ interface AbstentionButtonProps {
   absLoading: boolean;
   isCutoffPassed: boolean;
   onToggle: () => void;
+  isToday?: boolean;
 }
 
-export function AbstentionButton({ hasAbstained, absLoading, isCutoffPassed, onToggle }: AbstentionButtonProps) {
+export function AbstentionButton({ hasAbstained, absLoading, isCutoffPassed, onToggle, isToday = true }: AbstentionButtonProps) {
   return (
     <button
       data-tutorial="abstention"
@@ -27,14 +28,14 @@ export function AbstentionButton({ hasAbstained, absLoading, isCutoffPassed, onT
         ) : hasAbstained ? (
           <>
             <XCircle size={24} className="text-slate-400" />
-            <span className="font-bold text-slate-500">Almoço dispensado hoje</span>
+            <span className="font-bold text-slate-500">{isToday ? "Almoço dispensado hoje" : "Almoço dispensado"}</span>
           </>
         ) : (
           <>
             <div className="bg-white/20 p-1.5 rounded-full backdrop-blur-sm">
               <Smile size={20} className="text-white group-hover:rotate-12 transition-transform" />
             </div>
-            <span className="font-bold text-lg text-white">Não quero almoçar hoje</span>
+            <span className="font-bold text-lg text-white">{isToday ? "Não quero almoçar hoje" : "Não quero almoçar"}</span>
           </>
         )}
       </div>

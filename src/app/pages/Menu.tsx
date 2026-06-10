@@ -323,29 +323,14 @@ export function Menu() {
           setCancelAllowed(currentMinutes < cutoffMinutes);
         }
       } 
-      // 2. Check "Tomorrow" opening time
-      else if (isBrazilTomorrow(orderDate)) {
-        setIsCutoffPassed(false); // It's future, not "cutoff passed" (which implies too late)
-        
-        // Default opening time 15:00 if not set
-        const openTime = settings.openingTime || "15:00";
-        const [h, m] = openTime.split(':').map(Number);
-        const openMinutes = h * 60 + m;
-
-        if (currentMinutes < openMinutes) {
-          setIsFutureLocked(true);
-          setTimeLeft(`Abre às ${openTime}`);
-        } else {
-          setIsFutureLocked(false);
-          setTimeLeft("Aberto");
-        }
-      }
-      // 3. Far Future
+      // 2. Future dates (tomorrow and beyond) — always open for pre-orders.
+      // No opening-time gate: ordering for other days is allowed any time.
+      // Only the same-day cutoff (handled above) blocks ordering.
       else {
         setIsCutoffPassed(false);
         setIsFutureLocked(false);
-        setTimeLeft("Agendamento");
-        setCancelAllowed(false);
+        setTimeLeft(isBrazilTomorrow(orderDate) ? "Aberto" : "Agendamento");
+        setCancelAllowed(true);
       }
     };
 
@@ -979,6 +964,7 @@ export function Menu() {
                 absLoading={absLoading}
                 isCutoffPassed={isCutoffPassed}
                 onToggle={toggleAbstention}
+                isToday={isToday}
               />
             )}
 
