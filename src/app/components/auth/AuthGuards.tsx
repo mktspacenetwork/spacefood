@@ -6,6 +6,7 @@ import { Login } from "../../pages/Login";
 import { Loader2, ShieldCheck, LogOut, Home } from "lucide-react";
 import { Button } from "../ui/Button";
 import { api } from "../../lib/api";
+import { supabase } from "../../lib/supabase";
 import { toast } from "sonner";
 import Lottie from "lottie-react";
 import noPermissionAnimation from "../../assets/no-permission-animation.json";
@@ -51,8 +52,12 @@ export function AdminRoute({ children }: { children: React.ReactNode }) {
       setPromoting(true);
       try {
         const result = await api.authPost("/setup-admin", {});
-        toast.success(result.message || "Promovido a administrador!");
-        toast.info("Faça logout e login novamente para aplicar.");
+        // Pull a fresh JWT so the updated `role` in user_metadata is applied
+        // right away. This triggers onAuthStateChange → mapUser, which updates
+        // the auth context and re-renders this guard with the new role — no
+        // manual logout/login required.
+        await supabase.auth.refreshSession();
+        toast.success(result.message || "Você agora é administrador!");
       } catch (e: any) {
         toast.error(e.message || "Erro ao promover");
       } finally {
@@ -97,7 +102,7 @@ function AccessDeniedScreen({ user, promoting, onPromote, onLogout }: {
             Configuração Inicial
           </p>
           <p className="text-xs text-muted-foreground">
-            Se nenhum admin existe ainda, clique abaixo para se promover. Depois, <strong>faça logout e login novamente</strong>.
+            Se nenhum admin existe ainda, clique abaixo para se promover. O acesso é aplicado <strong>automaticamente</strong>.
           </p>
         </div>
         

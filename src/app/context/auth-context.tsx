@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from "react";
 import { toast } from "sonner";
 import { User } from "../types";
 import { supabase } from "../lib/supabase";
@@ -25,6 +25,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Ensures the one-time lunch_location typo correction runs at most once and
+  // can never re-enter the auth flow.
+  const typoFixAttemptedRef = useRef(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -33,38 +36,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setIsLoading(false);
       }
-    });
+    }).catch(() => setIsLoading(false));
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        mapUser(session.user);
-      } else {
-        setUser(null);
-        setIsLoading(false);
-      }
+      // Defer out of the callback: calling Supabase APIs synchronously inside
+      // onAuthStateChange can deadlock/loop the auth lock. setTimeout(0) breaks
+      // the re-entrancy so the handler always completes.
+      setTimeout(() => {
+        if (session?.user) {
+          mapUser(session.user);
+        } else {
+          setUser(null);
+          setIsLoading(false);
+        }
+      }, 0);
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  const mapUser = async (authUser: any) => {
-    // Auto-fix typo in lunch_location: "Damaceno" → "Damasceno"
-    if (authUser.user_metadata?.lunch_location === "Sede Damaceno") {
-      try {
-        await supabase.auth.updateUser({
-          data: {
-            ...authUser.user_metadata,
-            lunch_location: "Sede Damasceno"
-          }
-        });
-        console.log("Auto-corrected lunch_location typo");
-      } catch (e) {
-        console.warn("Failed to auto-correct lunch_location:", e);
-      }
-    }
-
+  // Synchronous: resolves auth state immediately so `isLoading` always clears.
+  // No awaited network calls here — that previously let a USER_UPDATED event
+  // re-trigger this handler in a loop, hanging the app on the loading screen.
+  const mapUser = (authUser: any) => {
     const userData: User = {
       id: authUser.id,
       name: authUser.user_metadata?.name || authUser.email?.split('@')[0] || "Usuário",
@@ -79,6 +75,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     setUser(userData);
     setIsLoading(false);
+
+    // Auto-fix legacy typo in lunch_location ("Damaceno" → "Damasceno").
+    // Fire-and-forget and guarded so it runs once and never blocks/loops auth.
+    if (
+      !typoFixAttemptedRef.current &&
+      authUser.user_metadata?.lunch_location === "Sede Damaceno"
+    ) {
+      typoFixAttemptedRef.current = true;
+      supabase.auth.updateUser({
+        data: { ...authUser.user_metadata, lunch_location: "Sede Damasceno" },
+      }).catch((e) => console.warn("Failed to auto-correct lunch_location:", e));
+    }
   };
 
   const login = async (email: string, password?: string) => {

@@ -1,5 +1,5 @@
-const CACHE_NAME = 'spacefood-v5';
-const STATIC_CACHE = 'spacefood-static-v5';
+const CACHE_NAME = 'spacefood-v6';
+const STATIC_CACHE = 'spacefood-static-v6';
 
 // Static assets to precache on install (app shell)
 const PRECACHE_URLS = [
@@ -11,7 +11,7 @@ const PRECACHE_URLS = [
 
 // ── Install: precache app shell ──
 self.addEventListener('install', (event) => {
-  console.log('[SW] Installing v5 with precache...');
+  console.log('[SW] Installing v6 with precache...');
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => {
       return cache.addAll(PRECACHE_URLS).catch((err) => {
@@ -23,7 +23,7 @@ self.addEventListener('install', (event) => {
 
 // ── Activate: clean old caches ──
 self.addEventListener('activate', (event) => {
-  console.log('[SW] Activating v5.');
+  console.log('[SW] Activating v6.');
   event.waitUntil(
     caches.keys().then((names) => {
       return Promise.all(

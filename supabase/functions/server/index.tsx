@@ -73,15 +73,27 @@ app.use("/*", async (c, next) => {
 });
 
 // Singleton supabase admin client
-// Used for privileged operations like user management
+// Used for privileged operations like user management. Reused across requests
+// in the same isolate so we don't pay client-construction cost on every call.
+let _adminClient: ReturnType<typeof createClient> | null = null;
 function adminClient() {
-  return createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-  );
+  if (!_adminClient) {
+    _adminClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    );
+  }
+  return _adminClient;
 }
 
 // --- Auth Helpers ---
+// Short-lived cache of validated JWTs. A single admin page load fires several
+// requests with the SAME token; without this each one hits Supabase Auth over
+// the network just to re-validate. Keyed by the token string, so a refreshed
+// token (e.g. right after self-promotion) is a cache miss and validates fresh.
+const _authCache = new Map<string, { user: { userId: string; userName: string; role: string; dietaryRestrictions: string }; ts: number }>();
+const AUTH_CACHE_TTL = 60_000; // 60s
+
 async function getAuthUser(c: any): Promise<{ userId: string; userName: string; role: string } | null> {
   // Prefer the custom header so the Supabase gateway never blocks the request
   // (Authorization always carries the anon key; user JWT travels in X-User-Auth-Token)
@@ -107,6 +119,12 @@ async function getAuthUser(c: any): Promise<{ userId: string; userName: string; 
     }
   }
 
+  // Serve from the short-lived validation cache when possible.
+  const cached = _authCache.get(token);
+  if (cached && Date.now() - cached.ts < AUTH_CACHE_TTL) {
+    return cached.user;
+  }
+
   try {
     // Use admin client (service role) for reliable JWT validation
     const supabase = adminClient();
@@ -116,12 +134,21 @@ async function getAuthUser(c: any): Promise<{ userId: string; userName: string; 
       return null;
     }
     if (user) {
-      return {
+      const resolved = {
         userId: user.id,
         userName: user.user_metadata?.name || user.email?.split('@')[0] || 'Usuário',
         role: user.user_metadata?.role || 'user',
         dietaryRestrictions: user.user_metadata?.dietary_restrictions || '',
       };
+      _authCache.set(token, { user: resolved, ts: Date.now() });
+      // Opportunistically evict stale entries so the map can't grow unbounded.
+      if (_authCache.size > 1000) {
+        const now = Date.now();
+        for (const [k, v] of _authCache) {
+          if (now - v.ts >= AUTH_CACHE_TTL) _authCache.delete(k);
+        }
+      }
+      return resolved;
     }
     console.log("getAuthUser: getUser returned no user and no error");
   } catch (e) {
@@ -225,7 +252,13 @@ app.post("/make-server-c3078087/setup-admin", async (c) => {
   if (auth instanceof Response) return auth;
   try {
     const supabase = adminClient();
-    const { data: { users }, error: listError } = await supabase.auth.admin.listUsers();
+    // These two lookups are independent — run them in parallel to cut latency.
+    const [listResult, currentUserResult] = await Promise.all([
+      supabase.auth.admin.listUsers(),
+      supabase.auth.admin.getUserById(auth.userId),
+    ]);
+
+    const { data: { users }, error: listError } = listResult;
     if (listError) return c.json({ error: listError.message }, 500);
 
     const existingAdmins = (users || []).filter(
@@ -238,7 +271,7 @@ app.post("/make-server-c3078087/setup-admin", async (c) => {
     }
 
     // Promote caller to admin - preserve existing metadata
-    const { data: currentUser, error: getUserError } = await supabase.auth.admin.getUserById(auth.userId);
+    const { data: currentUser, error: getUserError } = currentUserResult;
     if (getUserError) return c.json({ error: getUserError.message }, 500);
     
     const { data, error } = await supabase.auth.admin.updateUserById(auth.userId, {
