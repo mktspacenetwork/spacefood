@@ -52,6 +52,9 @@ export function KitchenDashboard() {
   const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
   const containerRef = useRef<HTMLDivElement>(null);
   const prevOrderCount = useRef(0);
+  // Cache the menu catalog so we don't refetch 131 items every 5s poll.
+  // The menu rarely changes; a separate slow interval refreshes it.
+  const menuMapRef = useRef<Map<string, any>>(new Map());
 
   const isToday = isSameDay(selectedDate, new Date());
   const isFuture = startOfDay(selectedDate) > startOfDay(new Date());
@@ -75,17 +78,14 @@ export function KitchenDashboard() {
     const targetDate = viewDateStr ?? dateStr;
     const viewingToday = targetDate === format(new Date(), "yyyy-MM-dd");
     try {
-      const [orders, menuData] = await Promise.all([
-        api.authGet(`/admin/orders?date=${targetDate}`),
-        api.get("/menu/items").catch(() => []),
-      ]);
+      // Only fetch orders on the fast poll. The menu catalog is cached in
+      // menuMapRef and refreshed on a separate slow interval (see effect below).
+      const orders = await api.authGet(`/admin/orders?date=${targetDate}`);
       // Filter out manual logs (Taipas food diary entries) — cozinha não precisa ver
       const filteredOrders = (Array.isArray(orders) ? orders : []).filter((o: any) => !o.isManualLog);
 
-      // Build a live name/category map so renames in the menu are immediately reflected
-      const liveMenuMap = new Map<string, any>(
-        (Array.isArray(menuData) ? menuData : []).map((mi: any) => [mi.id, mi])
-      );
+      // Live name/category map (cached) so renames in the menu are reflected
+      const liveMenuMap = menuMapRef.current;
 
       // Only fire sound notification when watching today's orders live
       if (viewingToday && prevOrderCount.current > 0 && filteredOrders.length > prevOrderCount.current) {
@@ -135,6 +135,22 @@ export function KitchenDashboard() {
       setLoading(false);
     }
   };
+
+  // Load the menu catalog once and refresh it slowly (every 60s).
+  // Keeps the fast 5s order poll from re-downloading 131 items each time.
+  useEffect(() => {
+    let cancelled = false;
+    const loadMenu = async () => {
+      try {
+        const menuData = await api.get("/menu");
+        if (cancelled || !Array.isArray(menuData)) return;
+        menuMapRef.current = new Map(menuData.map((mi: any) => [mi.id, mi]));
+      } catch (_) { /* keep previous cache on failure */ }
+    };
+    loadMenu();
+    const menuInterval = setInterval(loadMenu, 60000);
+    return () => { cancelled = true; clearInterval(menuInterval); };
+  }, []);
 
   // Re-fetch immediately and restart polling interval when date changes
   useEffect(() => {
