@@ -221,7 +221,7 @@ export function Menu() {
       const menuEndpoint = isSameDay(orderDate, new Date()) ? "/menu/today" : `/menu?date=${dateStr}`;
       const [itemsRes, absRes, settingsRes] = await Promise.all([
         api.get(menuEndpoint).catch(() => []),
-        api.authGet("/abstention/me").catch(() => ({ abstained: false })),
+        api.authGet(`/abstention/me?date=${dateStr}`).catch(() => ({ abstained: false })),
         api.get("/admin/settings").catch(() => ({})),
       ]);
       if (cancelled) return;
@@ -420,15 +420,16 @@ export function Menu() {
 
   const toggleAbstention = async () => {
     setAbsLoading(true);
+    const menuDate = format(orderDate, "yyyy-MM-dd");
     try {
       if (hasAbstained) {
-        await api.authDel("/abstention");
+        await api.authDel(`/abstention?date=${menuDate}`);
         setHasAbstained(false);
-        toast.success(ordersAllowed ? "Abstenção cancelada. Você pode fazer pedido." : "Abstenção cancelada.");
+        toast.success("Abstenção cancelada. Você pode fazer pedido.");
       } else {
-        await api.authPost("/abstention", {});
+        await api.authPost("/abstention", { menuDate });
         setHasAbstained(true);
-        toast.info("Registrado: Você não almoçará hoje.");
+        toast.info(isToday ? "Registrado: Você não almoçará hoje." : `Registrado: Você não almoçará em ${format(orderDate, "dd/MM")}.`);
       }
     } catch (e: any) {
       toast.error(e.message || "Erro ao registrar abstenção.");
@@ -972,7 +973,7 @@ export function Menu() {
 
           {/* Bottom Actions */}
           <div className="pt-6 space-y-4">
-            {isToday && !orderForDate && ordersAllowed && userCanOrderMeal && (
+            {!orderForDate && ordersAllowed && userCanOrderMeal && startOfDay(orderDate) >= startOfDay(new Date()) && (
               <AbstentionButton
                 hasAbstained={hasAbstained}
                 absLoading={absLoading}

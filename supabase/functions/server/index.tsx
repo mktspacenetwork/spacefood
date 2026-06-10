@@ -1026,15 +1026,24 @@ app.post("/make-server-c3078087/abstention", async (c) => {
   if (auth instanceof Response) return auth;
   try {
     const today = brasiliaToday();
+    const body = await c.req.json().catch(() => ({}));
+    // Accept optional menuDate for pre-abstentions (future dates)
+    const targetDate = (body.menuDate && /^\d{4}-\d{2}-\d{2}$/.test(body.menuDate))
+      ? body.menuDate
+      : today;
 
-    // Check if already ordered today (exclude cancelled orders)
+    // Check if already ordered for this date (exclude cancelled orders)
     const existingOrders = await kv.get(`orders:${auth.userId}`) || [];
-    const todayOrder = existingOrders.find((o: any) => o.date?.startsWith(today) && o.status !== 'Cancelado');
-    if (todayOrder) {
-      return c.json({ error: "Você já realizou um pedido hoje. Não é possível registrar abstenção." }, 400);
+    const existingForDate = existingOrders.find((o: any) => {
+      if (o.isManualLog || o.status === 'Cancelado') return false;
+      const oDate = o.menuDate || (o.date ? o.date.split('T')[0] : '');
+      return oDate === targetDate;
+    });
+    if (existingForDate) {
+      return c.json({ error: "Você já realizou um pedido para esta data. Não é possível registrar abstenção." }, 400);
     }
 
-    const key = `abstentions:${today}`;
+    const key = `abstentions:${targetDate}`;
     const list = await kv.get(key) || [];
     if (!list.find((a: any) => a.userId === auth.userId)) {
       list.push({ userId: auth.userId, userName: auth.userName, date: new Date().toISOString() });
@@ -1051,7 +1060,9 @@ app.delete("/make-server-c3078087/abstention", async (c) => {
   if (auth instanceof Response) return auth;
   try {
     const today = brasiliaToday();
-    const key = `abstentions:${today}`;
+    const dateParam = c.req.query("date");
+    const targetDate = (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) ? dateParam : today;
+    const key = `abstentions:${targetDate}`;
     let list = await kv.get(key) || [];
     list = list.filter((a: any) => a.userId !== auth.userId);
     await kv.set(key, list);
@@ -1066,7 +1077,9 @@ app.get("/make-server-c3078087/abstention/me", async (c) => {
   if (auth instanceof Response) return auth;
   try {
     const today = brasiliaToday();
-    const list = await kv.get(`abstentions:${today}`) || [];
+    const dateParam = c.req.query("date");
+    const targetDate = (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) ? dateParam : today;
+    const list = await kv.get(`abstentions:${targetDate}`) || [];
     const abstained = list.some((a: any) => a.userId === auth.userId);
     return c.json({ abstained });
   } catch (e) {
