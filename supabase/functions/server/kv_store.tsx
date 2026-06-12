@@ -85,6 +85,30 @@ export const mdel = async (keys: string[]): Promise<void> => {
   }
 };
 
+// Atomically appends one item to a JSON array stored at key.
+// Uses a single INSERT ... ON CONFLICT SQL statement — safe under concurrent writes.
+// Avoids the read-modify-write race condition that loses orders when multiple
+// users submit at the same time.
+export const appendToArray = async (key: string, item: any): Promise<void> => {
+  const supabase = client();
+  const { error } = await supabase.rpc('kv_append_to_array', {
+    p_key: key,
+    p_value: item,
+  });
+  if (error) throw new Error(error.message);
+};
+
+// Atomically removes all elements with the given 'id' from a JSON array stored at key.
+// Single UPDATE statement — safe under concurrent writes.
+export const removeFromArrayById = async (key: string, id: string): Promise<void> => {
+  const supabase = client();
+  const { error } = await supabase.rpc('kv_remove_from_array_by_id', {
+    p_key: key,
+    p_id: id,
+  });
+  if (error) throw new Error(error.message);
+};
+
 // Search for key-value pairs by prefix.
 export const getByPrefix = async (prefix: string): Promise<any[]> => {
   const supabase = client()

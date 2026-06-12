@@ -803,24 +803,16 @@ app.post("/make-server-c3078087/orders", async (c) => {
       : existingOrders;
     await kv.set(`orders:${auth.userId}`, [newOrder, ...userListAfter]);
 
-    // Also save to daily index — use logDate for manual logs (supports retroactive)
-    const dailyOrders = await kv.get(`orders-daily:${logDate}`) || [];
-    dailyOrders.push(newOrder);
-    await kv.set(`orders-daily:${logDate}`, dailyOrders);
+    // Atomically append to daily index — avoids race condition when multiple
+    // users order at the same time (concurrent read-modify-write would lose orders).
+    await kv.appendToArray(`orders-daily:${logDate}`, newOrder);
 
     // Remove the replaced order from its (possibly different) daily bucket so the
     // kitchen and check-in no longer show the stale version.
     if (replacedOrder) {
       const oldDate = replacedOrder.menuDate || (replacedOrder.date ? replacedOrder.date.split('T')[0] : null);
-      if (oldDate && oldDate !== logDate) {
-        const oldDaily = await kv.get(`orders-daily:${oldDate}`) || [];
-        const filtered = (oldDaily as any[]).filter((o: any) => o.id !== replaceOrderId);
-        if (filtered.length !== oldDaily.length) await kv.set(`orders-daily:${oldDate}`, filtered);
-      } else if (oldDate === logDate) {
-        // Same-day edit: the old order is still in the bucket we just wrote — strip it.
-        const sameDaily = await kv.get(`orders-daily:${logDate}`) || [];
-        const filtered = (sameDaily as any[]).filter((o: any) => o.id !== replaceOrderId);
-        if (filtered.length !== sameDaily.length) await kv.set(`orders-daily:${logDate}`, filtered);
+      if (oldDate) {
+        await kv.removeFromArrayById(`orders-daily:${oldDate}`, replaceOrderId!);
       }
     }
 
@@ -897,15 +889,9 @@ app.delete("/make-server-c3078087/orders/:id", async (c) => {
     userOrders.splice(orderIndex, 1);
     await kv.set(`orders:${auth.userId}`, userOrders);
 
-    // Remove from daily list — keyed by the order's target day (menuDate),
-    // falling back to creation date for legacy orders (null-safe).
+    // Atomically remove from daily index — keyed by the order's target day (menuDate).
     const date = order.menuDate || (order.date ? order.date.split('T')[0] : brasiliaToday());
-    const dailyOrders = await kv.get(`orders-daily:${date}`) || [];
-    const dailyIndex = dailyOrders.findIndex((o: any) => o.id === id);
-    if (dailyIndex >= 0) {
-        dailyOrders.splice(dailyIndex, 1);
-        await kv.set(`orders-daily:${date}`, dailyOrders);
-    }
+    await kv.removeFromArrayById(`orders-daily:${date}`, id);
 
     return c.json({ success: true });
   } catch (e) {
