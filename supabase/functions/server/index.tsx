@@ -740,7 +740,7 @@ app.post("/make-server-c3078087/orders", async (c) => {
         let restored = false;
         for (const oldItem of replacedOrder.items) {
           const mi = menuItemsData.find((m: any) => m.id === oldItem.id);
-          if (mi) { mi.available += (oldItem.quantity || 1); restored = true; }
+          if (mi && !mi.unlimitedStock) { mi.available += (oldItem.quantity || 1); restored = true; }
         }
         if (restored) await kv.set("menu:items", menuItemsData);
       }
@@ -755,7 +755,8 @@ app.post("/make-server-c3078087/orders", async (c) => {
           let menuItemsData = await kv.get("menu:items") || [];
           for (const orderItem of orderData.items) {
             const menuItem = menuItemsData.find((mi: any) => mi.id === orderItem.id);
-            if (menuItem) {
+            // Bulk staples (unlimitedStock) never deplete and never block.
+            if (menuItem && !menuItem.unlimitedStock) {
               const qty = orderItem.quantity || 1;
               if (menuItem.available < qty) {
                 return c.json({ error: `"${menuItem.name}" não tem estoque suficiente (disponível: ${menuItem.available}).` }, 400);
@@ -884,7 +885,7 @@ app.delete("/make-server-c3078087/orders/:id", async (c) => {
         let stockUpdated = false;
         for (const orderItem of order.items) {
             const menuItem = menuItemsData.find((mi: any) => mi.id === orderItem.id);
-            if (menuItem) {
+            if (menuItem && !menuItem.unlimitedStock) {
                 menuItem.available += (orderItem.quantity || 1);
                 stockUpdated = true;
             }

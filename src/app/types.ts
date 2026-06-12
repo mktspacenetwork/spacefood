@@ -7,6 +7,7 @@ export interface MenuItem {
   image: string;
   limit: number;
   available: number;
+  unlimitedStock?: boolean; // true = nunca esgota nem desconta estoque (itens feitos em grande quantidade)
   unit: string;
   portionWeight?: number;
   kitchenUnit?: "kg" | "l" | "un";

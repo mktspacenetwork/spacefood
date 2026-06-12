@@ -103,7 +103,7 @@ export function AdminItems() {
     } else {
       reset({
         name: "", description: "", category: categories[0] || "Principal",
-        calories: 0, image: "", available: 100, limit: 1, unit: "unidade",
+        calories: 0, image: "", available: 100, unlimitedStock: false, limit: 1, unit: "unidade",
         portionWeight: 0, kitchenUnit: "kg",
         protein: 0, carbs: 0, fat: 0, fiber: 0, tip: "", recipe: ""
       });
@@ -552,6 +552,22 @@ export function AdminItems() {
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold">Limite por Pessoa</Label>
                 <Input type="number" {...register("limit", { valueAsNumber: true, min: 1 })} className="h-9 text-sm" />
+              </div>
+
+              {/* Unlimited stock toggle — bulk staples (rice, beans, salad) never sell out */}
+              <div className="col-span-2 flex items-center gap-2.5 rounded-lg border border-border bg-accent/30 px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  id="unlimitedStock"
+                  {...register("unlimitedStock")}
+                  className="h-4 w-4 rounded border-input accent-primary cursor-pointer"
+                />
+                <Label htmlFor="unlimitedStock" className="text-xs font-semibold cursor-pointer flex-1">
+                  Estoque ilimitado
+                  <span className="block font-normal text-[11px] text-muted-foreground mt-0.5">
+                    Para itens feitos em grande quantidade (arroz, feijão, salada). Nunca mostra "Esgotado".
+                  </span>
+                </Label>
               </div>
 
               {/* Image Upload */}

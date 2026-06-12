@@ -23,7 +23,8 @@ export function MenuItemCard({ item, ordersAllowed = true, isFirstCard = false, 
   // Stock (available) is only meaningful for same-day orders.
   // Pre-orders for future dates skip the stock check — admin resets
   // stock daily, so today's counter doesn't reflect Friday's supply.
-  const isSoldOut = isTodayOrder && item.available <= 0;
+  // Items marked unlimitedStock (bulk staples like rice/beans) never sell out.
+  const isSoldOut = isTodayOrder && !item.unlimitedStock && item.available <= 0;
   // Per-item portion limit check
   // For Prato Principal: also blocked when any OTHER Prato Principal is already in the cart
   const hasDifferentPPInCart =
