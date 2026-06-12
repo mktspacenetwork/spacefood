@@ -1,14 +1,18 @@
 
   <!DOCTYPE html>
-  <html lang="en">
+  <html lang="pt-BR" translate="no">
     <head>
       <meta charset="UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <!-- App is already in Portuguese. Prevent browser auto-translation (Google
+           Translate), which mutates the DOM and crashes React with
+           "Failed to execute 'insertBefore' on 'Node'". -->
+      <meta name="google" content="notranslate" />
       <title>SpaceFood</title>
       <style>html, body { height: 100%; margin: 0; } #root { height: 100%; }</style>
     </head>
 
-    <body>
+    <body class="notranslate">
       <div id="root"></div>
       <script type="module" src="/src/main.tsx"></script>
     </body>

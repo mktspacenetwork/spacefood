@@ -70,6 +70,16 @@ function canAddPratoPrincipal(
 export function CartProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<CartItem[]>(() => {
     try {
+      // Discard a cart left over from a previous day. Without this, items from an
+      // earlier attempt or an abandoned edit (e.g. rice) linger in the bag and the
+      // user sees things they didn't select this session.
+      const storedDate = localStorage.getItem(CART_STORAGE_KEY + "-date");
+      const today = new Date().toISOString().split("T")[0];
+      if (storedDate && storedDate !== today) {
+        localStorage.removeItem(CART_STORAGE_KEY);
+        localStorage.removeItem(CART_STORAGE_KEY + "-editing-order-id");
+        return [];
+      }
       const stored = localStorage.getItem(CART_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
