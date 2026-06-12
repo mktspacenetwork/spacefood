@@ -3,8 +3,9 @@ import { useCart } from "../../context/Store";
 import { Button } from "../ui/Button";
 import { Badge } from "../ui/Badge";
 import { Card } from "../ui/Card";
-import { Plus, Minus, Flame, Dumbbell, Wheat, Droplets, Leaf, BookOpen, ClipboardList } from "lucide-react";
+import { Plus, Minus, Flame, Dumbbell, Wheat, Droplets, Leaf, BookOpen, ClipboardList, X, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import { useState } from "react";
 import { cn } from "../../lib/utils";
 import { motion, AnimatePresence } from "motion/react";
 import { hapticLight, hapticMedium } from "../../lib/haptics";
@@ -19,6 +20,8 @@ interface MenuItemCardProps {
 export function MenuItemCard({ item, ordersAllowed = true, isFirstCard = false, isTodayOrder = true }: MenuItemCardProps) {
   const { addToCart, getItemQuantity, updateQuantity, removeFromCart, items } = useCart();
   const quantity = getItemQuantity(item.id);
+  const [showRecipe, setShowRecipe] = useState(false);
+  const hasRecipe = !!(item.recipe && item.recipe.trim());
 
   // Stock (available) is only meaningful for same-day orders.
   // Pre-orders for future dates skip the stock check — admin resets
@@ -70,8 +73,9 @@ export function MenuItemCard({ item, ordersAllowed = true, isFirstCard = false, 
   };
 
   return (
+    <>
     <Card className={cn(
-      "group relative overflow-hidden border-border bg-card shadow-sm transition-all hover:shadow-lg hover:-translate-y-1 duration-300 rounded-3xl", 
+      "group relative overflow-hidden border-border bg-card shadow-sm transition-all hover:shadow-lg hover:-translate-y-1 duration-300 rounded-3xl",
       (isSoldOut || isNotOnMenu) && "opacity-60 grayscale",
       isPreviousDay && "grayscale opacity-70"
     )}>
@@ -121,11 +125,15 @@ export function MenuItemCard({ item, ordersAllowed = true, isFirstCard = false, 
         <div className="space-y-1">
           <div className="flex items-start justify-between gap-1">
             <h3 className="font-bold text-sm sm:text-lg text-foreground line-clamp-1 group-hover:text-primary transition-colors flex-1">{item.name}</h3>
-            {item.recipe && item.recipe.trim() && (
-              <span className="shrink-0 flex items-center gap-0.5 text-[9px] sm:text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 px-1.5 py-0.5 rounded-full leading-none">
+            {hasRecipe && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); hapticLight(); setShowRecipe(true); }}
+                className="shrink-0 flex items-center gap-0.5 text-[9px] sm:text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 px-1.5 py-0.5 rounded-full leading-none transition-all hover:bg-amber-100 dark:hover:bg-amber-900/40 active:scale-95 cursor-pointer"
+              >
                 <BookOpen size={9} className="sm:w-2.5 sm:h-2.5" />
                 Receita
-              </span>
+              </button>
             )}
           </div>
           <p className="text-xs sm:text-sm text-muted-foreground line-clamp-2 leading-relaxed">{item.description}</p>
@@ -265,6 +273,60 @@ export function MenuItemCard({ item, ordersAllowed = true, isFirstCard = false, 
         </div>
       </div>
     </Card>
+
+    {/* Recipe modal — opens when the "Receita" badge is tapped */}
+    <AnimatePresence>
+      {showRecipe && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={() => setShowRecipe(false)}
+          className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4"
+        >
+          <motion.div
+            initial={{ y: "100%", opacity: 0, scale: 0.98 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: "100%", opacity: 0, scale: 0.98 }}
+            transition={{ type: "spring", stiffness: 320, damping: 32 }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full sm:max-w-md max-h-[85vh] overflow-y-auto bg-card rounded-t-3xl sm:rounded-3xl border border-border shadow-2xl"
+          >
+            {/* Header with image */}
+            <div className="relative">
+              <div className="aspect-[16/9] w-full overflow-hidden bg-muted">
+                <img src={item.image} alt={item.name} className="h-full w-full object-cover" />
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRecipe(false)}
+                className="absolute top-3 right-3 flex h-9 w-9 items-center justify-center rounded-full bg-background/90 text-foreground shadow-lg backdrop-blur-md hover:bg-background transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div>
+                <h3 className="text-lg font-bold text-foreground">{item.name}</h3>
+                {item.description && (
+                  <p className="text-sm text-muted-foreground italic mt-1 leading-relaxed">{item.description}</p>
+                )}
+              </div>
+
+              <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/30 rounded-2xl p-4">
+                <p className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Sparkles size={12} />
+                  Modo de Preparo / Receita
+                </p>
+                <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">{item.recipe}</p>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+    </>
   );
 }
 
