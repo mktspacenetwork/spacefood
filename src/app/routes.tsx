@@ -20,6 +20,7 @@ import { AdminNotifications } from "./pages/admin/AdminNotifications";
 import { AdminOrders } from "./pages/admin/AdminOrders";
 import { AdminUsers } from "./pages/admin/AdminUsers";
 import { AdminReports } from "./pages/admin/AdminReports";
+import { AdminCheckinReport } from "./pages/admin/AdminCheckinReport";
 import { CompleteProfile } from "./pages/CompleteProfile";
 import { Measurements } from "./pages/Measurements";
 import { FoodCare } from "./pages/FoodCare";
@@ -115,6 +116,7 @@ export const router = createBrowserRouter([
           { path: "items", element: <WithBoundary name="Itens"><AdminItems /></WithBoundary> },
           { path: "reviews", element: <WithBoundary name="Avaliações"><AdminReviews /></WithBoundary> },
           { path: "reports", element: <WithBoundary name="Relatórios"><AdminReports /></WithBoundary> },
+          { path: "checkin-report", element: <WithBoundary name="Relatório de Check-in"><AdminCheckinReport /></WithBoundary> },
           { path: "users", element: <WithBoundary name="Usuários & Permissões"><AdminUsers /></WithBoundary> },
           // permissions route → same component, opens the Permissions tab
           { path: "permissions", element: <WithBoundary name="Funções & Permissões"><AdminUsers defaultTab="permissions" /></WithBoundary> },

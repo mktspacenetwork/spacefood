@@ -3,7 +3,7 @@ import { useAuth } from "../context/auth-context";
 import { useNavigate } from "react-router";
 import { Button } from "../components/ui/Button";
 import { useTheme } from "next-themes";
-import { Camera, User as UserIcon, LogOut, Sun, Moon, ChevronRight, Check, Loader2, ArrowLeft, Building2, Phone, Upload, ImagePlus, Bell, BellOff, BellRing, MapPin, ChevronDown, AlertTriangle, RotateCcw } from "lucide-react";
+import { Camera, User as UserIcon, LogOut, Sun, Moon, ChevronRight, Check, Loader2, ArrowLeft, Building2, Phone, Upload, ImagePlus, Bell, BellOff, BellRing, MapPin, ChevronDown, AlertTriangle, RotateCcw, Mail, X } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 import { compressImage } from "../lib/image-compress";
@@ -12,7 +12,7 @@ import { usePWA } from "../lib/usePWA";
 import { api } from "../lib/api";
 
 export function Settings() {
-  const { user, logout, updateUserProfile, uploadAvatar } = useAuth();
+  const { user, logout, updateUserProfile, updateEmail, uploadAvatar } = useAuth();
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -29,6 +29,33 @@ export function Settings() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const { pushPermission, subscribeToPush } = usePWA();
   const [pushLoading, setPushLoading] = useState(false);
+
+  // Email change (separate flow — changes the login credential)
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [isSavingEmail, setIsSavingEmail] = useState(false);
+
+  const handleSaveEmail = async () => {
+    const trimmed = newEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      toast.error("Informe um email válido.");
+      return;
+    }
+    if (trimmed === (user?.email || "").toLowerCase()) {
+      toast.error("Este já é o seu email atual.");
+      return;
+    }
+    setIsSavingEmail(true);
+    try {
+      await updateEmail(trimmed);
+      setEmailModalOpen(false);
+      setNewEmail("");
+    } catch (_) {
+      // toast handled in context
+    } finally {
+      setIsSavingEmail(false);
+    }
+  };
 
   // Fetch available company units from admin settings
   useEffect(() => {
@@ -178,14 +205,23 @@ export function Settings() {
             />
           </div>
           <span className="text-sm text-muted-foreground font-medium">{user.email}</span>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-            className="flex items-center gap-2 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
-          >
-            <ImagePlus size={14} />
-            {isUploading ? "Enviando..." : "Alterar foto"}
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              className="flex items-center gap-2 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
+            >
+              <ImagePlus size={14} />
+              {isUploading ? "Enviando..." : "Alterar foto"}
+            </button>
+            <button
+              onClick={() => { setNewEmail(""); setEmailModalOpen(true); }}
+              className="flex items-center gap-2 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
+            >
+              <Mail size={14} />
+              Alterar email
+            </button>
+          </div>
         </div>
 
         {/* Form Fields */}
@@ -484,6 +520,82 @@ export function Settings() {
           <ChevronRight size={18} className="ml-auto text-red-300 dark:text-red-700" />
         </button>
       </motion.div>
+
+      {/* Email Change Modal */}
+      <AnimatePresence>
+        {emailModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => !isSavingEmail && setEmailModalOpen(false)}
+            className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4"
+          >
+            <motion.div
+              initial={{ y: "100%", opacity: 0, scale: 0.98 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: "100%", opacity: 0, scale: 0.98 }}
+              transition={{ type: "spring", stiffness: 320, damping: 32 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full sm:max-w-md bg-card rounded-t-3xl sm:rounded-3xl border border-border shadow-2xl p-6 space-y-5"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                    <Mail size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-foreground">Alterar email</h3>
+                    <p className="text-xs text-muted-foreground">Será seu novo email de acesso.</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => !isSavingEmail && setEmailModalOpen(false)}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-muted-foreground hover:bg-accent/80 transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Email atual</label>
+                  <div className="rounded-2xl border border-border bg-accent/30 px-4 py-3 text-sm text-muted-foreground">
+                    {user.email}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-foreground">Novo email</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Mail className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <input
+                      type="email"
+                      autoFocus
+                      value={newEmail}
+                      onChange={(e) => setNewEmail(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleSaveEmail(); }}
+                      className="block w-full rounded-2xl border border-border bg-background py-3.5 pl-11 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-all outline-none"
+                      placeholder="novo@email.com"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <Button
+                onClick={handleSaveEmail}
+                disabled={isSavingEmail || !newEmail.trim()}
+                className="w-full rounded-2xl h-12 bg-primary text-primary-foreground gap-2 shadow-md shadow-primary/20 hover:bg-primary/90"
+              >
+                {isSavingEmail ? <Loader2 className="animate-spin" size={18} /> : <Check size={18} />}
+                Confirmar alteração
+              </Button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

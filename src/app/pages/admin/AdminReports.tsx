@@ -11,7 +11,18 @@ import { getBrazilDateString } from "../../lib/date-utils";
 
 const COLORS = ["#f97316", "#3b82f6", "#10b981", "#8b5cf6", "#ef4444", "#ec4899"];
 
+// Damasceno = pedido real / Taipas = registro (manual log)
+const MODE_TO_UNIT: Record<string, string> = {
+  dine_in_damasceno: "Sede Damasceno",
+  dine_in_taipas: "Sede Taipas",
+  takeaway: "Externo (Marmita)",
+  delivery: "Externo (Marmita)",
+};
+const orderUnit = (o: any) =>
+  o.isManualLog ? "Sede Taipas" : (MODE_TO_UNIT[o.consumptionMode] || "Sede Damasceno");
+
 type FilterPeriod = "today" | "week" | "month" | "custom";
+type SourceFilter = "damasceno" | "taipas" | "todos";
 
 export function AdminReports() {
   const [allOrders, setAllOrders] = useState<any[]>([]);
@@ -20,6 +31,7 @@ export function AdminReports() {
   const [customStart, setCustomStart] = useState(format(subDays(new Date(), 7), "yyyy-MM-dd"));
   const [customEnd, setCustomEnd] = useState(format(new Date(), "yyyy-MM-dd"));
   const [categoryFilter, setCategoryFilter] = useState("Todas");
+  const [source, setSource] = useState<SourceFilter>("damasceno");
   const [units, setUnits] = useState<string[]>([]);
   const [balanceDate, setBalanceDate] = useState(getBrazilDateString());
 
@@ -65,11 +77,13 @@ export function AdminReports() {
     }
 
     return allOrders.filter(o => {
-      if (!o.date || o.isManualLog) return false;
+      if (!o.date) return false;
+      if (source === "damasceno" && o.isManualLog) return false;
+      if (source === "taipas" && !o.isManualLog) return false;
       const orderDate = new Date(o.date);
       return isWithinInterval(orderDate, { start: startDate, end: endDate });
     });
-  }, [allOrders, period, customStart, customEnd]);
+  }, [allOrders, period, customStart, customEnd, source]);
 
   const stats = useMemo(() => {
     const allItems = filteredOrders.flatMap((o: any) => o.items || []);
@@ -163,7 +177,7 @@ export function AdminReports() {
     const activeUnits = new Set<string>();
 
     todayOrders.forEach((order: any) => {
-      const unit = order.lunchUnit || "Sem unidade";
+      const unit = orderUnit(order);
       activeUnits.add(unit);
       (order.items || []).forEach((item: any) => {
         const cat = item.category || "Outros";
@@ -255,6 +269,23 @@ export function AdminReports() {
                 {allCategories.map((c, i) => <option key={`cat-${i}-${c}`} value={c}>{c}</option>)}
               </select>
             </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Origem</label>
+              <div className="flex gap-1">
+                {([
+                  { id: "damasceno", label: "Damasceno" },
+                  { id: "taipas", label: "Taipas" },
+                  { id: "todos", label: "Todos" },
+                ] as { id: SourceFilter; label: string }[]).map(s => (
+                  <button key={s.id} onClick={() => setSource(s.id)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                      source === s.id ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border hover:bg-accent text-foreground"
+                    }`}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -263,7 +294,9 @@ export function AdminReports() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card className="shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total de Pedidos</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              {source === "taipas" ? "Total de Registros" : source === "todos" ? "Pedidos + Registros" : "Total de Pedidos"}
+            </CardTitle>
             <ShoppingBag className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>

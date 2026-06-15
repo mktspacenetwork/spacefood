@@ -4,7 +4,8 @@ import {
   Check, X, ShieldCheck, Pencil, Users, ChevronDown, ChevronUp,
   LayoutDashboard, ClipboardList, ChefHat, ClipboardCheck, CalendarDays,
   UtensilsCrossed, MessageSquare, BarChart3, Image as ImageIcon, Bell,
-  Settings, Info, AlertTriangle, UserCog, MapPin, Crown, KeyRound, Phone, ScrollText
+  Settings, Info, AlertTriangle, UserCog, MapPin, Crown, KeyRound, Phone, ScrollText,
+  ClipboardPlus, BookMarked,
 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/input";
@@ -70,7 +71,6 @@ const PERM_GROUPS = [
       { key: "orders", label: "Pedidos", icon: ClipboardList },
       { key: "kds", label: "Cozinha (KDS)", icon: ChefHat },
       { key: "checkin", label: "Check-in", icon: ClipboardCheck },
-      { key: "waste", label: "Desperdício", icon: Trash2 },
     ],
   },
   {
@@ -80,7 +80,15 @@ const PERM_GROUPS = [
       { key: "items", label: "Gestão de Pratos", icon: UtensilsCrossed },
       { key: "users", label: "Usuários", icon: Users },
       { key: "reviews", label: "Avaliações", icon: MessageSquare },
+      { key: "recipe-suggestions", label: "Sugestões de Receita", icon: BookMarked },
+    ],
+  },
+  {
+    group: "Inteligência",
+    items: [
+      { key: "waste", label: "Desperdício", icon: Trash2 },
       { key: "reports", label: "Relatórios", icon: BarChart3 },
+      { key: "checkin-report", label: "Relatório de Check-in", icon: ClipboardPlus },
     ],
   },
   {

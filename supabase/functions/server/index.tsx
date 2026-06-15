@@ -333,7 +333,7 @@ app.get("/make-server-c3078087/admin/users", async (c) => {
   if (auth instanceof Response) return auth;
   try {
     const supabase = adminClient();
-    const { data: { users }, error } = await supabase.auth.admin.listUsers();
+    const { data: { users }, error } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
     if (error) return c.json({ error: error.message }, 400);
     return c.json(users);
   } catch (e) {
@@ -1804,6 +1804,51 @@ app.put("/make-server-c3078087/users/me", async (c) => {
   }
 });
 
+// --- Change own email ---
+// Internal app: admins create accounts with email_confirm:true and SMTP may not be
+// configured, so a confirmation-link round-trip would silently fail. We change the
+// email instantly via the admin API and auto-confirm it. The client must refresh its
+// session afterward so the new email lands in the JWT.
+app.put("/make-server-c3078087/users/me/email", async (c) => {
+  const auth = await requireAuth(c);
+  if (auth instanceof Response) return auth;
+  try {
+    const { email } = await c.req.json();
+    if (!email || typeof email !== "string") return c.json({ error: "Email é obrigatório." }, 400);
+    const normalized = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(normalized)) return c.json({ error: "Email inválido." }, 400);
+
+    const supabase = adminClient();
+
+    // Get current email for the audit log + no-op guard
+    const { data: currentUser, error: getUserError } = await supabase.auth.admin.getUserById(auth.userId);
+    if (getUserError) return c.json({ error: getUserError.message }, 500);
+    const oldEmail = currentUser.user.email || "";
+    if (normalized === oldEmail.toLowerCase()) {
+      return c.json({ error: "Este já é o seu email atual." }, 400);
+    }
+
+    // Reject if another account already uses this email
+    const { data: list } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const taken = list?.users?.some(
+      (u: any) => u.id !== auth.userId && (u.email || "").toLowerCase() === normalized
+    );
+    if (taken) return c.json({ error: "Este email já está em uso por outra conta." }, 400);
+
+    const { data, error } = await supabase.auth.admin.updateUserById(auth.userId, {
+      email: normalized,
+      email_confirm: true,
+    });
+    if (error) return c.json({ error: error.message }, 400);
+
+    await logAudit(c, auth, "UPDATE_EMAIL", "users", `Alterou o próprio email de "${oldEmail}" para "${normalized}".`, { oldEmail, newEmail: normalized });
+    return c.json({ success: true, user: data.user });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
 // --- Avatar Upload ---
 app.post("/make-server-c3078087/users/me/avatar", async (c) => {
   const auth = await requireAuth(c);
@@ -2350,8 +2395,10 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
     }
 
     const realOrders = todayOrders.filter((o: any) => !o.isManualLog && o.status !== 'Cancelado');
-    const manualLogs = todayOrders.filter((o: any) => o.isManualLog);
+    const manualLogs = todayOrders.filter((o: any) => o.isManualLog && o.status !== 'Cancelado');
     const uniqueUserIds = new Set(realOrders.map((o: any) => o.userId));
+    // Taipas (manual log) registrants — used by the navigable "não registraram" view
+    const loggedUserIds = new Set(manualLogs.map((o: any) => o.userId));
     const abstentions = await kv.get(`abstentions:${today}`) || [];
 
     const todayItems: any[] = realOrders.flatMap((o: any) => o.items || []);
@@ -2394,14 +2441,27 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
     
     const weekOrdersArr = await kv.mget(weekKeys);
     const weekData: any[] = weekDates.map((wd, idx) => {
-      // Exclude manual logs (Taipas food diary) from kitchen/production stats
-      const allDayOrders = weekOrdersArr[idx] || [];
-      const dayOrders = (allDayOrders as any[]).filter((o: any) => !o.isManualLog && o.status !== 'Cancelado');
+      const allDayOrders = (weekOrdersArr[idx] || []) as any[];
+      // Damasceno = pedidos reais (vão p/ cozinha); Taipas = registros (diário)
+      const realDay = allDayOrders.filter((o: any) => !o.isManualLog && o.status !== 'Cancelado');
+      const manualDay = allDayOrders.filter((o: any) => o.isManualLog && o.status !== 'Cancelado');
+      // Quebra de alimentos por categoria (produção Damasceno)
+      const categories: Record<string, number> = {};
+      let itemsTotal = 0;
+      realDay.forEach((o: any) => (o.items || []).forEach((it: any) => {
+        const q = it.quantity || 1;
+        itemsTotal += q;
+        const cat = it.category || 'Outros';
+        categories[cat] = (categories[cat] || 0) + q;
+      }));
       return {
         name: wd.dayName,
         date: wd.dateStr,
-        orders: dayOrders.length,
-        items: dayOrders.reduce((acc: number, o: any) => acc + (o.items?.reduce((s: number, it: any) => s + (it.quantity || 1), 0) || 0), 0),
+        damasceno: realDay.length,   // pratos enviados (Damasceno)
+        taipas: manualDay.length,    // registros (Taipas)
+        orders: realDay.length,      // compat
+        items: itemsTotal,           // alimentos totais
+        categories,
       };
     });
 
@@ -2414,6 +2474,7 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
       todayManualLogsCount: manualLogs.length,
       uniqueUsersOrdered: uniqueUserIds.size,
       orderedUserIds: [...uniqueUserIds],
+      loggedUserIds: [...loggedUserIds],
       topItems,
       weekData,
       lastOrders,
@@ -2421,6 +2482,214 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
     });
   } catch (e) {
     console.log("Dashboard error:", e);
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// --- Check-in Report (Inteligência): cruza pedido × comparecimento por período ---
+app.get("/make-server-c3078087/admin/checkin-report", async (c) => {
+  const auth = await requireAdminOrKitchen(c);
+  if (auth instanceof Response) return auth;
+  try {
+    const today = brasiliaToday();
+    const from = c.req.query('from') || today;
+    const to = c.req.query('to') || today;
+
+    // Build the list of days in range (cap at 92 to cover a full month + slack)
+    const startDate = new Date(from + "T00:00:00");
+    const endDate = new Date(to + "T23:59:59");
+    const days: string[] = [];
+    const cur = new Date(startDate);
+    while (cur <= endDate && days.length <= 92) {
+      days.push(cur.toISOString().split("T")[0]);
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    // Batch-read the three daily buckets for the whole range
+    const [ordersArr, checkinsArr, abstentionsArr] = await Promise.all([
+      kv.mget(days.map(d => `orders-daily:${d}`)),
+      kv.mget(days.map(d => `checkins:${d}`)),
+      kv.mget(days.map(d => `abstentions:${d}`)),
+    ]);
+
+    // Set of orderIds that were confirmed as "ate" (check-in confirmed === true)
+    const confirmedOrderIds = new Set<string>();
+    (checkinsArr || []).forEach((dayCheckins: any) => {
+      (dayCheckins || []).forEach((ci: any) => {
+        if (ci?.confirmed === true && ci.orderId) confirmedOrderIds.add(ci.orderId);
+      });
+    });
+
+    // Per-day set of users who placed real Damasceno orders (used to exclude from "ate without order")
+    const orderUsersByDay: Record<string, Set<string>> = {};
+    days.forEach((d, idx) => {
+      orderUsersByDay[d] = new Set();
+      ((ordersArr || [])[idx] || []).forEach((o: any) => {
+        if (o?.userId && !o.isManualLog && o.status !== 'Cancelado') {
+          orderUsersByDay[d].add(o.userId);
+        }
+      });
+    });
+
+    // "Comeram sem pedido" = admin manually added person at check-in who had no order
+    type ManualAteAgg = { userId: string; userName: string; unit: string; count: number; dates: string[] };
+    const manualAteByUser: Record<string, ManualAteAgg> = {};
+    (checkinsArr || []).forEach((dayCheckins: any, idx: number) => {
+      const dateStr = days[idx];
+      (dayCheckins || []).forEach((ci: any) => {
+        if (!ci?.isManual || !ci.confirmed) return;
+        // Skip if this person had a real order that day (already counted in normal flow)
+        if (ci.userId && orderUsersByDay[dateStr]?.has(ci.userId)) return;
+        const key = ci.userId || ci.userName || "unknown";
+        if (!manualAteByUser[key]) {
+          manualAteByUser[key] = { userId: ci.userId || "", userName: ci.userName || "—", unit: ci.unit || "", count: 0, dates: [] };
+        }
+        manualAteByUser[key].count += 1;
+        manualAteByUser[key].dates.push(dateStr);
+      });
+    });
+
+    // Substituição = pedido com item cujo nome inclui "ovo" ou "omelete" (regra do KDS)
+    const SUBSTITUTION_KEYWORDS = ["ovo", "omelete"];
+    const isSubstitution = (o: any) =>
+      (o.items || []).some((it: any) =>
+        SUBSTITUTION_KEYWORDS.some(kw => (it.name || "").toLowerCase().includes(kw))
+      );
+
+    // Per-user aggregation within the period
+    type Agg = {
+      userId: string; userName: string;
+      orders: number; registros: number; ate: number; noShow: number;
+      cancellations: number; abstentions: number; substitutions: number;
+      activeDates: Set<string>;
+    };
+    const byUser: Record<string, Agg> = {};
+    const ensure = (userId: string, userName: string): Agg => {
+      if (!byUser[userId]) {
+        byUser[userId] = {
+          userId, userName: userName || "—",
+          orders: 0, registros: 0, ate: 0, noShow: 0,
+          cancellations: 0, abstentions: 0, substitutions: 0,
+          activeDates: new Set(),
+        };
+      } else if (userName && byUser[userId].userName === "—") {
+        byUser[userId].userName = userName;
+      }
+      return byUser[userId];
+    };
+
+    (ordersArr || []).forEach((dayOrders: any, idx: number) => {
+      const dateStr = days[idx];
+      (dayOrders || []).forEach((o: any) => {
+        if (!o || !o.userId) return;
+        const u = ensure(o.userId, o.userName);
+        if (o.status === 'Cancelado') {
+          u.cancellations += 1;
+          return;
+        }
+        if (o.isManualLog) {
+          // Taipas: o registro é o próprio comprovante de que comeu
+          u.registros += 1;
+          u.ate += 1;
+          u.activeDates.add(dateStr);
+        } else {
+          // Damasceno: pedido real
+          u.orders += 1;
+          u.activeDates.add(dateStr);
+          if (confirmedOrderIds.has(o.id)) u.ate += 1;
+          else u.noShow += 1;
+          if (isSubstitution(o)) u.substitutions += 1;
+        }
+      });
+    });
+
+    // Abstentions per user within range
+    (abstentionsArr || []).forEach((dayAbs: any) => {
+      (dayAbs || []).forEach((a: any) => {
+        if (!a?.userId) return;
+        ensure(a.userId, a.userName).abstentions += 1;
+      });
+    });
+
+    // All-time: who ever placed any order/registro (to find "never ordered")
+    const everOrderedUserIds = new Set<string>();
+    const allUserOrderLists = await kv.getByPrefix("orders:");
+    (allUserOrderLists || []).forEach((list: any) => {
+      if (Array.isArray(list)) {
+        list.forEach((o: any) => { if (o?.userId) everOrderedUserIds.add(o.userId); });
+      }
+    });
+
+    // All registered users (with metadata)
+    const supabase = adminClient();
+    const { data: usersData } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const users = (usersData?.users || []).map((u: any) => ({
+      id: u.id,
+      name: u.user_metadata?.name || u.email?.split('@')[0] || "Usuário",
+      email: u.email || "",
+      department: u.user_metadata?.department || "",
+      lunchLocation: u.user_metadata?.lunch_location || "",
+      createdAt: u.created_at || "",
+    }));
+    const userById = new Map(users.map((u: any) => [u.id, u]));
+
+    // Enrich perUser rows with metadata + finalize daysActive
+    const perUser = Object.values(byUser).map((a: Agg) => {
+      const info: any = userById.get(a.userId);
+      return {
+        userId: a.userId,
+        userName: info?.name || a.userName,
+        email: info?.email || "",
+        department: info?.department || "",
+        lunchLocation: info?.lunchLocation || "",
+        orders: a.orders,
+        registros: a.registros,
+        ate: a.ate,
+        noShow: a.noShow,
+        cancellations: a.cancellations,
+        abstentions: a.abstentions,
+        substitutions: a.substitutions,
+        daysActive: a.activeDates.size,
+      };
+    });
+
+    const neverOrdered = users
+      .filter((u: any) => !everOrderedUserIds.has(u.id))
+      .map((u: any) => ({
+        userId: u.id, name: u.name, email: u.email,
+        department: u.department, lunchLocation: u.lunchLocation, createdAt: u.createdAt,
+      }));
+
+    // Enrich "ate without order" with full user metadata
+    const ateWithoutOrder = Object.values(manualAteByUser).map((a: ManualAteAgg) => {
+      const info: any = userById.get(a.userId);
+      return {
+        userId: a.userId,
+        userName: info?.name || a.userName,
+        email: info?.email || "",
+        department: info?.department || "",
+        lunchLocation: info?.lunchLocation || a.unit,
+        count: a.count,
+        dates: a.dates,
+      };
+    }).sort((x, y) => y.count - x.count);
+
+    const totals = {
+      orders: perUser.reduce((s, u) => s + u.orders, 0),
+      registros: perUser.reduce((s, u) => s + u.registros, 0),
+      ate: perUser.reduce((s, u) => s + u.ate, 0),
+      noShow: perUser.reduce((s, u) => s + u.noShow, 0),
+      cancellations: perUser.reduce((s, u) => s + u.cancellations, 0),
+      abstentions: perUser.reduce((s, u) => s + u.abstentions, 0),
+      substitutions: perUser.reduce((s, u) => s + u.substitutions, 0),
+      totalUsers: users.length,
+      neverOrdered: neverOrdered.length,
+      ateWithoutOrder: ateWithoutOrder.reduce((s, u) => s + u.count, 0),
+    };
+
+    return c.json({ from, to, days: days.length, perUser, neverOrdered, ateWithoutOrder, totals });
+  } catch (e) {
+    console.log("Check-in report error:", e);
     return c.json({ error: e.message }, 500);
   }
 });

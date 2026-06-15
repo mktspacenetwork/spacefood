@@ -91,6 +91,7 @@ const MENU_GROUPS = [
     items: [
       { icon: Trash2, label: "Desperdício", path: "/admin/waste", permKey: "waste", isComingSoon: true },
       { icon: BarChart3, label: "Relatórios", path: "/admin/reports", permKey: "reports" },
+      { icon: ClipboardPlus, label: "Relatório de Check-in", path: "/admin/checkin-report", permKey: "checkin-report" },
     ]
   },
   {

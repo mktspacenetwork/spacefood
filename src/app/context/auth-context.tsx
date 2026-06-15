@@ -13,6 +13,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   forgotPassword: (email: string) => Promise<void>;
   updateUserProfile: (name?: string, avatar?: string, department?: string, phone?: string, lunchLocation?: string, dietaryRestrictions?: string) => Promise<void>;
+  updateEmail: (email: string) => Promise<void>;
   uploadAvatar: (file: File) => Promise<string>;
   submitRating: (orderId: string, stars: number, comment?: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
@@ -183,6 +184,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateEmail = async (email: string) => {
+    if (!user) return;
+    try {
+      await api.authPut("/users/me/email", { email });
+
+      // Pull the new email into the local session/JWT so the app reflects it
+      // without requiring a re-login.
+      await supabase.auth.refreshSession();
+
+      setUser(prev => prev ? ({ ...prev, email: email.trim().toLowerCase() }) : null);
+      toast.success("Email atualizado com sucesso!");
+    } catch (error: any) {
+      toast.error(error.message || "Erro ao atualizar email");
+      throw error;
+    }
+  };
+
   const uploadAvatar = async (file: File) => {
     if (!user) return "";
     try {
@@ -211,7 +229,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, loginWithGoogle, signup, logout, forgotPassword, updateUserProfile, uploadAvatar, submitRating, isAuthenticated: !!user, isLoading }}>
+    <AuthContext.Provider value={{ user, login, loginWithGoogle, signup, logout, forgotPassword, updateUserProfile, updateEmail, uploadAvatar, submitRating, isAuthenticated: !!user, isLoading }}>
       {children}
     </AuthContext.Provider>
   );
