@@ -733,6 +733,23 @@ app.post("/make-server-c3078087/orders", async (c) => {
         }
       }
 
+      // Validate that all ordered items are actually in the menu for the target date.
+      // This blocks orders for items the admin removed after the user loaded the page.
+      const dailyMenuForDate = await kv.get(`daily-menu:${menuDate}`);
+      if (!dailyMenuForDate || !Array.isArray(dailyMenuForDate) || dailyMenuForDate.length === 0) {
+        return c.json({ error: "O cardápio para esta data não está disponível." }, 400);
+      }
+      const recurringIds: string[] = await kv.get("menu:recurring-items") || [];
+      const validItemIds = new Set<string>([
+        ...recurringIds,
+        ...dailyMenuForDate.map((i: any) => i.id),
+      ]);
+      const invalidItems = orderData.items.filter((i: any) => !validItemIds.has(i.id));
+      if (invalidItems.length > 0) {
+        const names = invalidItems.map((i: any) => `"${i.name}"`).join(", ");
+        return c.json({ error: `${names} não ${invalidItems.length === 1 ? 'está' : 'estão'} disponível no cardápio de hoje. Atualize seu carrinho.` }, 400);
+      }
+
       // When replacing a same-day order, give its stock back first so the new
       // order's decrement below nets correctly (otherwise an edit double-counts).
       if (replacedOrder && replacedOrder.menuDate === today && Array.isArray(replacedOrder.items)) {
@@ -908,9 +925,36 @@ app.get("/make-server-c3078087/admin/orders", async (c) => {
     const from = c.req.query('from');
     const to = c.req.query('to');
 
+    // Enrich order items with live catalog data so renames/edits reflect immediately in KDS
+    const enrichWithLiveMenu = async (orders: any[]) => {
+      const menuCatalog: any[] = await kv.get("menu:items") || [];
+      const menuMap = new Map(menuCatalog.map((m: any) => [m.id, m]));
+      return orders.map((order: any) => ({
+        ...order,
+        items: (order.items || []).map((item: any) => {
+          const live = menuMap.get(item.id);
+          if (!live) return item;
+          return {
+            ...item,
+            name: live.name,
+            category: live.category,
+            portionWeight: live.portionWeight ?? item.portionWeight,
+            unit: live.unit ?? item.unit,
+            kitchenUnit: live.kitchenUnit ?? item.kitchenUnit,
+          };
+        }),
+      }));
+    };
+
     if (date) {
-      const dailyOrders = await kv.get(`orders-daily:${date}`) || [];
-      return c.json(dailyOrders);
+      const dailyOrders: any[] = await kv.get(`orders-daily:${date}`) || [];
+      // Only return orders whose menuDate matches the requested date.
+      // Guards against pre-orders indexed under the wrong bucket on older versions.
+      const filtered = dailyOrders.filter((o: any) => {
+        const orderMenuDate = o.menuDate || (o.date ? o.date.split('T')[0] : date);
+        return orderMenuDate === date;
+      });
+      return c.json(await enrichWithLiveMenu(filtered));
     }
 
     // Date range query: fetch each day in the range
@@ -1531,10 +1575,13 @@ app.post("/make-server-c3078087/admin/checkins", async (c) => {
     const key = `checkins:${today}`;
     let checkins = await kv.get(key) || [];
     const idx = isManual
-      ? checkins.findIndex((ci: any) => ci.userId === userId && ci.unit === unit && ci.isManual)
+      ? checkins.findIndex((ci: any) => ci.userId === userId && ci.isManual)
       : checkins.findIndex((ci: any) => ci.orderId === orderId);
     if (idx >= 0) {
       checkins[idx].confirmed = confirmed;
+      // Allow correcting which unit a check-in counts under (e.g. "Alterar Sede")
+      // without touching the original order's consumptionMode.
+      if (unit) checkins[idx].unit = unit;
     } else {
       checkins.push({ orderId: entryId, userId, userName, confirmed, unit: unit || '', isManual: !!isManual, date: new Date().toISOString() });
     }
@@ -3619,6 +3666,51 @@ app.delete("/make-server-c3078087/admin/audit-logs", async (c) => {
     return c.json({ deleted: keys.length });
   } catch (e: any) {
     console.log("Error clearing audit logs:", e.message);
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// GET /admin/stats – quick stats (users, orders, ratings) [public]
+app.get("/make-server-c3078087/admin/stats", async (c) => {
+  // Public endpoint - no auth required for stats
+  try {
+    const supabase = adminClient();
+
+    // Total users by location
+    const { data: { users }, error: usersError } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    if (usersError) throw usersError;
+
+    const damasceno = users.filter((u: any) => u.user_metadata?.lunch_location?.includes('Damasceno')).length;
+    const taipas = users.filter((u: any) => u.user_metadata?.lunch_location?.includes('Taipas')).length;
+
+    // All orders (get from orders:* prefix)
+    const allOrdersMap = await kv.getByPrefix("orders:");
+    const allOrders = Array.isArray(allOrdersMap) ? allOrdersMap.flat().filter((o: any) => o && o.id && o.status !== 'Cancelado') : [];
+
+    // Ratings - scan all rating keys and collect
+    const allRatings: any[] = [];
+    const today = brasiliaToday();
+    for (let i = 0; i < 365; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayRatings = await kv.get(`ratings:${dateStr}`) || [];
+      if (Array.isArray(dayRatings)) {
+        allRatings.push(...dayRatings.filter((r: any) => r && typeof r.rating === 'number'));
+      }
+    }
+    const avgRating = allRatings.length > 0 ? (allRatings.reduce((s: number, r: any) => s + r.rating, 0) / allRatings.length).toFixed(2) : 0;
+
+    return c.json({
+      usuariosTotais: users.length,
+      damasceno,
+      taipas,
+      pedidosTotais: allOrders.length,
+      avaliacoes: allRatings.length,
+      mediaAvaliacao: parseFloat(avgRating as string),
+    });
+  } catch (e: any) {
+    console.log("Stats error:", e.message);
     return c.json({ error: e.message }, 500);
   }
 });
