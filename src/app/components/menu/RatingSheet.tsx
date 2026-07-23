@@ -75,14 +75,16 @@ export function RatingSheet({ isOpen, onClose, order, onSubmit, isManualLog }: R
                 ))}
               </div>
 
-              {stars > 0 && stars <= 3 && (
+              {stars > 0 && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: "auto" }}
                   className="w-full"
                 >
                   <textarea
-                    placeholder="O que houve? Conta pra gente como podemos melhorar..."
+                    placeholder={stars <= 3
+                      ? "O que houve? Conta pra gente como podemos melhorar..."
+                      : "Quer deixar um comentário? Elogios também ajudam! (opcional)"}
                     value={comment}
                     onChange={(e) => setComment(e.target.value)}
                     className="w-full p-4 rounded-xl border border-border bg-accent/30 text-sm focus:ring-2 focus:ring-primary/50 outline-none resize-none h-24"
