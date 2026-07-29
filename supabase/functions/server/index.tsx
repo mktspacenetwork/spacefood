@@ -1364,7 +1364,7 @@ app.get("/make-server-c3078087/admin/permissions", async (c) => {
 // All permission keys used across the admin panel
 const ALL_PERM_KEYS = [
   'dashboard', 'orders', 'kds', 'checkin', 'waste',
-  'menu', 'items', 'users', 'reviews', 'reports',
+  'menu', 'items', 'users', 'reviews', 'recipe-suggestions', 'reports', 'checkin-report',
   'banners', 'notifications', 'settings', 'roles_permissions', 'logs'
 ];
 
@@ -1526,15 +1526,22 @@ app.get("/make-server-c3078087/admin/my-permissions", async (c) => {
     if (assignment?.roleId) {
       const roles = await kv.get("roles:list") || [];
       const role = roles.find((r: any) => r.id === assignment.roleId);
-      if (role?.permissions) {
-        resolvedPerms = { ...role.permissions };
-      }
+      // Explicit true/false for every current key, even if the stored role
+      // predates one (e.g. saved before "checkin-report" existed) — otherwise
+      // a missing key falls through to "allowed" below, same bug as the
+      // no-role fallback used to have.
+      ALL_PERM_KEYS.forEach(k => { resolvedPerms[k] = role?.permissions?.[k] === true; });
     } else {
-      if (auth.role === 'admin') {
-        ALL_PERM_KEYS.forEach(k => { resolvedPerms[k] = true; });
-      } else if (auth.role === 'kitchen') {
-        ['dashboard', 'orders', 'kds', 'checkin', 'waste'].forEach(k => { resolvedPerms[k] = true; });
-      }
+      // No custom role assigned — this is the path EVERY current user actually
+      // resolves through today (no one has a role assignment yet). Grant an
+      // explicit baseline by the account's raw role, with an EXPLICIT false for
+      // every other key. Leaving unlisted keys absent used to silently grant
+      // them (the resolver treated "missing" as "allowed"), so every plain
+      // kitchen-role user ended up with full access to Configurações, Usuários
+      // & Permissões, Banners, Log de Auditoria, etc.
+      const kitchenBaseline = ['dashboard', 'orders', 'kds', 'checkin', 'waste', 'menu', 'reviews', 'checkin-report', 'recipe-suggestions'];
+      const granted = auth.role === 'admin' ? ALL_PERM_KEYS : auth.role === 'kitchen' ? kitchenBaseline : [];
+      ALL_PERM_KEYS.forEach(k => { resolvedPerms[k] = granted.includes(k); });
     }
     // Apply per-user overrides on top of role perms
     const overrides = await kv.get(`user-perms-override:${auth.userId}`) || {};

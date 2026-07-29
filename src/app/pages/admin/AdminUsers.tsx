@@ -1019,12 +1019,20 @@ function RoleFormModal({ open, onClose, role, onSaved }: {
     if (!name.trim()) { toast.error("Nome da função é obrigatório."); return; }
     setSaving(true);
     try {
+      // Write an explicit true/false for every current permission key, not just
+      // the ones toggled on. Otherwise an unchecked-but-never-touched key stays
+      // absent from the stored object, and the resolver treats "absent" as
+      // "allowed" — so a role can look restricted in this screen while actually
+      // granting everything it never explicitly denied.
+      const normalizedPermissions: Record<string, boolean> = {};
+      ALL_PERM_KEYS.forEach((k) => { normalizedPermissions[k] = permissions[k] === true; });
+
       let saved: PermRole;
       if (isEdit && role) {
-        saved = await api.authPut(`/admin/roles/${role.id}`, { name, description, color, permissions });
+        saved = await api.authPut(`/admin/roles/${role.id}`, { name, description, color, permissions: normalizedPermissions });
         toast.success("Função atualizada!");
       } else {
-        saved = await api.authPost("/admin/roles", { name, description, color, permissions });
+        saved = await api.authPost("/admin/roles", { name, description, color, permissions: normalizedPermissions });
         toast.success("Função criada!");
       }
       onSaved(saved); onClose();
