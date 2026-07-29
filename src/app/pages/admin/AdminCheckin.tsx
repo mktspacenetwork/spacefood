@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import {
   CheckCircle2, XCircle, Loader2, RefreshCw, UserCheck, UserX,
   Search, Clock, CheckCheck, MapPin, Plus, Users, X, UserPlus,
-  ChevronLeft, ChevronRight, CalendarDays, Lock, ArrowRightLeft
+  ChevronLeft, ChevronRight, CalendarDays, Lock, ArrowRightLeft, Undo2, CalendarOff
 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
@@ -66,6 +66,8 @@ export function AdminCheckin() {
   const [selectedDate, setSelectedDate] = useState<Date>(() => new Date());
   // Key (orderId or `user:{userId}`) of the card whose "Alterar Sede" picker is open.
   const [changingSedeFor, setChangingSedeFor] = useState<string | null>(null);
+  // Which KPI category is being drilled into (click a KPI card to filter the list to it).
+  const [statusFilter, setStatusFilter] = useState<"all" | "confirmed" | "absent" | "pending" | "abstention">("all");
 
   const dateStr = format(selectedDate, "yyyy-MM-dd");
   const dateLabel = format(selectedDate, "EEEE, d 'de' MMMM", { locale: ptBR });
@@ -262,6 +264,30 @@ export function AdminCheckin() {
     setChangingSedeFor(null);
   };
 
+  // Undo a check-in — removes the record entirely so the person goes back to
+  // "pending" instead of just flipping to "não almoçou". Handles the common
+  // "cliquei errado" case the manager flagged.
+  const handleUndoCheckin = async (entry: { orderId?: string; userId: string; isManual?: boolean }) => {
+    if (!isCheckinDay) {
+      toast.error("O check-in só pode ser desfeito no dia do almoço.");
+      return;
+    }
+    const isManual = entry.isManual ?? !entry.orderId;
+    try {
+      await api.authPost("/admin/checkins/undo", {
+        orderId: entry.orderId || null,
+        userId: entry.userId,
+        isManual,
+      });
+      setCheckins((prev) => prev.filter((c) =>
+        isManual ? !(c.userId === entry.userId && c.isManual) : c.orderId !== entry.orderId
+      ));
+      toast.success("Marcação desfeita — voltou para pendente.");
+    } catch (e: any) {
+      toast.error(e.message || "Erro ao desfazer marcação.");
+    }
+  };
+
   const handleAddManual = async () => {
     const name = manualName.trim();
     if (!name) return;
@@ -353,28 +379,54 @@ export function AdminCheckin() {
     [unitUsers, unitOrderedUserIds]
   );
 
-  const totalInUnit = allowOrders ? unitOrders.length : unitRosterOnlyUsers.length + unitOrders.length;
+  // Canonical per-person list for this tab, each tagged with ITS OWN check-in
+  // status looked up directly (getCheckinStatus). This is the single source of
+  // truth for the KPI numbers below AND for "click a KPI to see who's in it" —
+  // computed by checking each person individually, so a stray/duplicate
+  // check-in record can't throw off the totals the way `total - checkins.length`
+  // used to (that formula is what caused Pendentes to read 0 while people were
+  // still unmarked: any extra check-in row anywhere silently absorbed the gap).
+  type UnitEntry =
+    | { key: string; kind: "order"; order: OrderForCheckin; status: boolean | null }
+    | { key: string; kind: "user"; user: UserInfo; status: boolean | null };
 
-  // Only count check-ins that correspond to someone actually counted in
-  // totalInUnit for this tab. This excludes "walk-in" manual additions made on
-  // top of an order-based unit's own order total (Confirmados wouldn't make
-  // sense exceeding Total there) — but, unlike before, does NOT blanket-exclude
-  // every manual check-in, which used to zero out Confirmaram/Não Almoçaram for
-  // unidades 100% manuais like Taipas (everyone there is isManual by definition).
-  const validUnitCheckins = useMemo(() => {
-    const validKeys = new Set<string>();
-    unitOrders.forEach((o) => validKeys.add(`order:${o.id}`));
+  const unitStatusEntries = useMemo<UnitEntry[]>(() => {
+    const list: UnitEntry[] = unitOrders.map((o) => ({
+      key: o.id, kind: "order" as const, order: o, status: getCheckinStatus(o.id),
+    }));
     if (!allowOrders) {
-      unitRosterOnlyUsers.forEach((u) => validKeys.add(`user:${u.id}`));
+      unitRosterOnlyUsers.forEach((u) => {
+        list.push({ key: `user:${u.id}`, kind: "user" as const, user: u, status: getCheckinStatus("", true, u.id) });
+      });
     }
-    return unitCheckins.filter((c) =>
-      c.isManual ? validKeys.has(`user:${c.userId}`) : validKeys.has(`order:${c.orderId}`)
-    );
-  }, [unitCheckins, unitOrders, unitRosterOnlyUsers, allowOrders]);
+    return list;
+  }, [unitOrders, allowOrders, unitRosterOnlyUsers, checkins]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const confirmedCount = validUnitCheckins.filter((c) => c.confirmed).length;
-  const absentCount = validUnitCheckins.filter((c) => !c.confirmed).length;
-  const uncheckedCount = totalInUnit - validUnitCheckins.length;
+  const confirmedEntries = useMemo(() => unitStatusEntries.filter((e) => e.status === true), [unitStatusEntries]);
+  const absentEntries = useMemo(() => unitStatusEntries.filter((e) => e.status === false), [unitStatusEntries]);
+  const pendingEntries = useMemo(() => unitStatusEntries.filter((e) => e.status === null), [unitStatusEntries]);
+
+  const totalInUnit = unitStatusEntries.length;
+  const confirmedCount = confirmedEntries.length;
+  const absentCount = absentEntries.length;
+  const uncheckedCount = pendingEntries.length;
+
+  // Abstentions ("Não vai almoçar") for this unit — voluntary, registered ahead
+  // of time; kept as its own category, separate from the check-in counts above.
+  const abstentionsForUnit = useMemo(() => {
+    return abstentions.filter((abs) => {
+      const user = allUsers.find((u) => u.id === abs.userId);
+      const userUnit = user?.user_metadata?.lunch_location || abs.unit || "";
+      return userUnit === selectedUnit || (!userUnit && selectedUnit === units[0]?.name);
+    });
+  }, [abstentions, allUsers, selectedUnit, units]);
+
+  // Clicking a KPI card filters the list to just that category; clicking the
+  // active one again (or starting a free-text search) clears it back to "all".
+  const toggleStatusFilter = (f: "confirmed" | "absent" | "pending" | "abstention") => {
+    setSearchTerm("");
+    setStatusFilter((prev) => (prev === f ? "all" : f));
+  };
 
   // Per-tab list (search, when active, uses the global results below instead)
   const filteredList: OrderForCheckin[] | UserInfo[] = allowOrders ? unitOrders : unitRosterOnlyUsers;
@@ -417,6 +469,28 @@ export function AdminCheckin() {
       )}
     </div>
   );
+
+  // "Desfazer" — clears a check-in back to pending. Only shown once a person
+  // has actually been marked (Sim or Não), covering accidental clicks.
+  const renderUndoButton = (
+    status: boolean | null,
+    entry: { orderId?: string; userId: string; isManual?: boolean }
+  ) => {
+    if (status === null) return null;
+    return (
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={!isCheckinDay}
+        onClick={() => handleUndoCheckin(entry)}
+        title="Desfazer marcação"
+        className="gap-1 text-muted-foreground"
+      >
+        <Undo2 size={14} />
+        <span className="hidden lg:inline">Desfazer</span>
+      </Button>
+    );
+  };
 
   const renderOrderCard = (order: OrderForCheckin) => {
     const status = getCheckinStatus(order.id);
@@ -483,6 +557,7 @@ export function AdminCheckin() {
           >
             <XCircle size={14} /> Nao
           </Button>
+          {renderUndoButton(status, { orderId: order.id, userId: order.userId })}
           {renderSedeButton(order.id, effUnit, { orderId: order.id, userId: order.userId, userName: order.userName || "Usuario" }, status)}
         </div>
       </motion.div>
@@ -550,6 +625,7 @@ export function AdminCheckin() {
           >
             <XCircle size={14} /> Nao
           </Button>
+          {renderUndoButton(status, { userId: user.id, isManual: true })}
           {renderSedeButton(`user:${user.id}`, effUnit, { userId: user.id, userName, isManual: true }, status)}
         </div>
       </motion.div>
@@ -588,8 +664,35 @@ export function AdminCheckin() {
         )}>
           {c.confirmed ? <><CheckCircle2 size={14} className="mr-1" /> Almocou</> : <><XCircle size={14} className="mr-1" /> Nao Almocou</>}
         </Badge>
+        {renderUndoButton(c.confirmed, { userId: c.userId, isManual: true })}
         {renderSedeButton(c.orderId, c.unit || "", { userId: c.userId, userName: c.userName, isManual: true }, c.confirmed)}
       </div>
+    </motion.div>
+  );
+
+  // Dispatches a canonical per-person entry (see unitStatusEntries) to its card renderer.
+  const renderEntry = (e: UnitEntry) => (e.kind === "order" ? renderOrderCard(e.order) : renderUserCard(e.user));
+
+  const renderAbstentionCard = (abs: { userId: string; userName: string; unit?: string }) => (
+    <motion.div
+      key={`abs-${abs.userId}`}
+      initial={{ opacity: 0, y: 5 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-card rounded-xl border border-orange-200 dark:border-orange-800 bg-orange-50/30 dark:bg-orange-900/10 p-4 flex flex-col sm:flex-row sm:items-center gap-4 shadow-sm"
+    >
+      <div className="flex items-center gap-3 flex-1 min-w-0">
+        <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400">
+          {(abs.userName || "U").charAt(0).toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-foreground truncate">{abs.userName}</p>
+          <p className="text-[10px] text-muted-foreground">Registrou ausência voluntária</p>
+        </div>
+      </div>
+      <Badge className="px-3 py-1 text-sm border bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800 flex items-center gap-1.5">
+        <XCircle size={14} />
+        Não vai almoçar
+      </Badge>
     </motion.div>
   );
 
@@ -663,7 +766,7 @@ export function AdminCheckin() {
         {units.map((unit) => (
           <button
             key={unit.name}
-            onClick={() => { setSelectedUnit(unit.name); setSearchTerm(""); }}
+            onClick={() => { setSelectedUnit(unit.name); setSearchTerm(""); setStatusFilter("all"); }}
             className={cn(
               "px-4 py-2 rounded-xl text-sm font-bold border transition-all whitespace-nowrap flex items-center gap-2",
               selectedUnit === unit.name
@@ -682,8 +785,8 @@ export function AdminCheckin() {
         ))}
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* Summary Cards — click any to filter the list below to that category */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card className="border-l-4 border-l-blue-500">
           <CardContent className="pt-4 pb-3">
             <p className="text-xs text-muted-foreground uppercase font-medium">
@@ -692,25 +795,72 @@ export function AdminCheckin() {
             <p className="text-2xl font-bold text-foreground">{totalInUnit}</p>
           </CardContent>
         </Card>
-        <Card className="border-l-4 border-l-green-500">
+        <Card
+          onClick={() => toggleStatusFilter("confirmed")}
+          className={cn(
+            "border-l-4 border-l-green-500 cursor-pointer transition-all",
+            statusFilter === "confirmed" && "ring-2 ring-green-500 ring-offset-2 ring-offset-background"
+          )}
+        >
           <CardContent className="pt-4 pb-3">
             <p className="text-xs text-muted-foreground uppercase font-medium">Confirmaram</p>
             <p className="text-2xl font-bold text-green-600 dark:text-green-400">{confirmedCount}</p>
           </CardContent>
         </Card>
-        <Card className="border-l-4 border-l-red-500">
+        <Card
+          onClick={() => toggleStatusFilter("absent")}
+          className={cn(
+            "border-l-4 border-l-red-500 cursor-pointer transition-all",
+            statusFilter === "absent" && "ring-2 ring-red-500 ring-offset-2 ring-offset-background"
+          )}
+        >
           <CardContent className="pt-4 pb-3">
             <p className="text-xs text-muted-foreground uppercase font-medium">Nao Almocaram</p>
             <p className="text-2xl font-bold text-red-500">{absentCount}</p>
           </CardContent>
         </Card>
-        <Card className="border-l-4 border-l-orange-500">
+        <Card
+          onClick={() => toggleStatusFilter("pending")}
+          className={cn(
+            "border-l-4 border-l-orange-500 cursor-pointer transition-all",
+            statusFilter === "pending" && "ring-2 ring-orange-500 ring-offset-2 ring-offset-background"
+          )}
+        >
           <CardContent className="pt-4 pb-3">
             <p className="text-xs text-muted-foreground uppercase font-medium">Pendentes</p>
             <p className="text-2xl font-bold text-orange-500">{Math.max(0, uncheckedCount)}</p>
           </CardContent>
         </Card>
+        <Card
+          onClick={() => toggleStatusFilter("abstention")}
+          className={cn(
+            "border-l-4 border-l-violet-500 cursor-pointer transition-all",
+            statusFilter === "abstention" && "ring-2 ring-violet-500 ring-offset-2 ring-offset-background"
+          )}
+        >
+          <CardContent className="pt-4 pb-3">
+            <p className="text-xs text-muted-foreground uppercase font-medium">Não vai Almoçar</p>
+            <p className="text-2xl font-bold text-violet-500">{abstentionsForUnit.length}</p>
+          </CardContent>
+        </Card>
       </div>
+
+      {statusFilter !== "all" && !isSearching && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5">
+          <p className="text-sm font-medium text-foreground">
+            Filtrando por:{" "}
+            <span className="font-bold">
+              {statusFilter === "confirmed" && "Confirmaram"}
+              {statusFilter === "absent" && "Não Almoçaram"}
+              {statusFilter === "pending" && "Pendentes"}
+              {statusFilter === "abstention" && "Não vai Almoçar"}
+            </span>
+          </p>
+          <Button variant="ghost" size="sm" onClick={() => setStatusFilter("all")} className="gap-1 h-7 text-xs">
+            <X size={12} /> Limpar filtro
+          </Button>
+        </div>
+      )}
 
       {/* Unit info banner for manual mode */}
       {!allowOrders && (
@@ -733,7 +883,7 @@ export function AdminCheckin() {
             type="text"
             placeholder="Buscar por nome em todas as unidades..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => { setSearchTerm(e.target.value); setStatusFilter("all"); }}
             className="w-full pl-10 pr-4 py-2 bg-background border border-input rounded-lg focus:ring-2 focus:ring-primary/20 outline-none text-foreground"
           />
         </div>
@@ -793,8 +943,8 @@ export function AdminCheckin() {
               </div>
             )}
           </>
-        ) : (
-          /* === Per-unit view (active tab) === */
+        ) : statusFilter === "all" ? (
+          /* === Per-unit view (active tab), no category filter === */
           <>
             <AnimatePresence>
               {allowOrders ? (
@@ -814,42 +964,9 @@ export function AdminCheckin() {
               .map((c) => renderManualCard(c))}
 
             {/* Abstentions — "Não vou almoçar" entries */}
-            {abstentions
-              .filter(abs => {
-                // Show abstentions that belong to this unit (matched by user's lunch_location)
-                const user = allUsers.find(u => u.id === abs.userId);
-                const userUnit = user?.user_metadata?.lunch_location || abs.unit || "";
-                return userUnit === selectedUnit || (!userUnit && selectedUnit === units[0]?.name);
-              })
-              .map(abs => (
-                <motion.div
-                  key={`abs-${abs.userId}`}
-                  initial={{ opacity: 0, y: 5 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-card rounded-xl border border-orange-200 dark:border-orange-800 bg-orange-50/30 dark:bg-orange-900/10 p-4 flex flex-col sm:flex-row sm:items-center gap-4 shadow-sm"
-                >
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400">
-                      {(abs.userName || "U").charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-bold text-foreground truncate">{abs.userName}</p>
-                      <p className="text-[10px] text-muted-foreground">Registrou ausência voluntária</p>
-                    </div>
-                  </div>
-                  <Badge className="px-3 py-1 text-sm border bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800 flex items-center gap-1.5">
-                    <XCircle size={14} />
-                    Não vai almoçar
-                  </Badge>
-                </motion.div>
-              ))
-            }
+            {abstentionsForUnit.map((abs) => renderAbstentionCard(abs))}
 
-            {totalInUnit === 0 && abstentions.filter(abs => {
-              const user = allUsers.find(u => u.id === abs.userId);
-              const userUnit = user?.user_metadata?.lunch_location || abs.unit || "";
-              return userUnit === selectedUnit || (!userUnit && selectedUnit === units[0]?.name);
-            }).length === 0 && (
+            {totalInUnit === 0 && abstentionsForUnit.length === 0 && (
               <div className="text-center py-12 text-muted-foreground">
                 <UserCheck size={40} className="mx-auto mb-3 opacity-30" />
                 <p>
@@ -860,6 +977,36 @@ export function AdminCheckin() {
               </div>
             )}
           </>
+        ) : statusFilter === "abstention" ? (
+          /* === Drilled into "Não vai Almoçar" === */
+          <AnimatePresence>
+            {abstentionsForUnit.length > 0 ? (
+              abstentionsForUnit.map((abs) => renderAbstentionCard(abs))
+            ) : (
+              <div className="text-center py-12 text-muted-foreground">
+                <CalendarOff size={40} className="mx-auto mb-3 opacity-30" />
+                <p>Ninguém registrou ausência nesta unidade.</p>
+              </div>
+            )}
+          </AnimatePresence>
+        ) : (
+          /* === Drilled into Confirmaram / Não Almoçaram / Pendentes === */
+          <AnimatePresence>
+            {(() => {
+              const drilledEntries =
+                statusFilter === "confirmed" ? confirmedEntries :
+                statusFilter === "absent" ? absentEntries : pendingEntries;
+              if (drilledEntries.length === 0) {
+                return (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <UserCheck size={40} className="mx-auto mb-3 opacity-30" />
+                    <p>Ninguém nesta categoria.</p>
+                  </div>
+                );
+              }
+              return drilledEntries.map((e) => renderEntry(e));
+            })()}
+          </AnimatePresence>
         )}
       </div>
     </div>

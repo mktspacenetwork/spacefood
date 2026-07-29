@@ -1592,6 +1592,28 @@ app.post("/make-server-c3078087/admin/checkins", async (c) => {
   }
 });
 
+// Undo a check-in — removes the record entirely so the person goes back to
+// "pending" (not just flips confirmed to false, which would count as an
+// explicit "não almoçou" instead of "ainda não marcado").
+app.post("/make-server-c3078087/admin/checkins/undo", async (c) => {
+  const auth = await requireAdminOrKitchen(c);
+  if (auth instanceof Response) return auth;
+  try {
+    const { orderId, userId, isManual } = await c.req.json();
+    const today = brasiliaToday();
+    const key = `checkins:${today}`;
+    let checkins = await kv.get(key) || [];
+    const before = checkins.length;
+    checkins = checkins.filter((ci: any) =>
+      isManual ? !(ci.userId === userId && ci.isManual) : ci.orderId !== orderId
+    );
+    await kv.set(key, checkins);
+    return c.json({ success: true, removed: before - checkins.length });
+  } catch (e) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
 // Batch check-in
 app.post("/make-server-c3078087/admin/checkins/batch", async (c) => {
   const auth = await requireAdminOrKitchen(c);
