@@ -31,36 +31,55 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 const CART_STORAGE_KEY = "space-food-cart";
 
 // ── Prato Principal rules ──────────────────────────────────────────────────
-// Rule: only ONE Prato Principal option is allowed per order.
-// Selecting any option blocks all others until it is removed.
-const PRATO_PRINCIPAL = "Prato Principal";
+// Ovo/Omelete são tratados como "substituição": só um deles (nem entre si)
+// pode estar no pedido, e nenhum outro Prato Principal combina com eles.
+// Os demais Pratos Principais podem ser combinados livremente entre si, mas
+// no máximo 1 porção de cada — o campo `limit` cadastrado no item não se
+// aplica nesse caso.
+export const PRATO_PRINCIPAL = "Prato Principal";
 
-function canAddPratoPrincipal(
+const SUBSTITUTION_KEYWORDS = ["ovo", "ovos", "omelete", "omeletes"];
+function isSubstitutionItem(name: string): boolean {
+  const normalized = (name || "").toLowerCase();
+  // Word-boundary match: "Frango ao Molho Provolone" contém a substring "ovo"
+  // mas não é Ovo/Omelete.
+  return SUBSTITUTION_KEYWORDS.some((kw) => new RegExp(`\\b${kw}\\b`).test(normalized));
+}
+
+export function canAddPratoPrincipal(
   prev: CartItem[],
   item: MenuItem,
   delta = 1
 ): { allowed: boolean; message?: string } {
   const ppItems = prev.filter((i) => i.category === PRATO_PRINCIPAL);
+  const itemIsSubstitution = isSubstitutionItem(item.name);
+  const hasSubstitutionInCart = ppItems.some((i) => isSubstitutionItem(i.name));
+  const existing = ppItems.find((i) => i.id === item.id);
 
-  if (ppItems.length > 0) {
-    const existing = ppItems.find((i) => i.id === item.id);
-
-    if (!existing) {
-      // A different Prato Principal is already in the cart — blocked
+  if (itemIsSubstitution || hasSubstitutionInCart) {
+    const others = ppItems.filter((i) => i.id !== item.id);
+    if (others.length > 0) {
       return {
         allowed: false,
         message:
-          "Apenas 1 opção de Prato Principal por pedido. Remova o atual para escolher outro.",
+          "Ovo/Omelete é uma opção exclusiva de Prato Principal. Remova o item atual para escolher outro.",
       };
     }
-
-    // Same item — respect its own portion limit
-    if (existing.quantity + delta > item.limit) {
+    if (existing && existing.quantity + delta > item.limit) {
       return {
         allowed: false,
         message: `Limite de ${item.limit} porção(ões) de "${item.name}" atingido.`,
       };
     }
+    return { allowed: true };
+  }
+
+  const currentQty = existing ? existing.quantity : 0;
+  if (currentQty + delta > 1) {
+    return {
+      allowed: false,
+      message: `Você já escolheu "${item.name}". Prato Principal permite no máximo 1 porção de cada opção.`,
+    };
   }
 
   return { allowed: true };

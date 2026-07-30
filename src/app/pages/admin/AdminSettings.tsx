@@ -550,8 +550,8 @@ export function AdminSettings() {
                 {
                   icon: UtensilsCrossed,
                   color: "text-indigo-500",
-                  title: "Pratos Principais — limite de 2",
-                  desc: "Para pratos principais que NAO sejam Ovo/Omelete, o usuario pode escolher ate 2 porcoes no total: 1 de cada opcao disponivel, ou 2 do mesmo prato. O sistema bloqueia qualquer combinacao que ultrapasse esse limite.",
+                  title: "Pratos Principais — combinação",
+                  desc: "Fora Ovo/Omelete, o usuário pode combinar quantos Pratos Principais distintos quiser no mesmo pedido, mas no máximo 1 porção de cada opção — o campo \"Limite\" cadastrado no item não se aplica nesse caso.",
                 },
                 {
                   icon: Package,

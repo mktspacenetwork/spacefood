@@ -3,7 +3,7 @@ import { Button } from "../components/ui/Button";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { Trash2, ChevronLeft, ArrowRight, CheckCircle, ShoppingBag, Minus, Plus, MapPin, Phone, ChevronDown, ChevronUp, Lightbulb, ClipboardList } from "lucide-react";
 import { useAuth } from "../context/auth-context";
-import { useCart } from "../context/cart-context";
+import { useCart, canAddPratoPrincipal, PRATO_PRINCIPAL } from "../context/cart-context";
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
@@ -195,7 +195,12 @@ export function Cart() {
               </div>
               <ul className="divide-y divide-border">
                 <AnimatePresence mode="popLayout">
-                  {items.map((item) => (
+                  {items.map((item) => {
+                  const isPratoPrincipal = item.category === PRATO_PRINCIPAL;
+                  const isIncrementDisabled = isPratoPrincipal
+                    ? !canAddPratoPrincipal(items, item, 1).allowed
+                    : item.quantity >= item.limit;
+                  return (
                     <motion.li
                       key={item.id}
                       layout
@@ -227,9 +232,9 @@ export function Cart() {
                               {item.quantity === 1 ? <Trash2 size={12} className="text-destructive" /> : <Minus size={12} />}
                             </button>
                             <span className="text-xs font-bold w-6 text-center tabular-nums text-foreground">{item.quantity}</span>
-                            <button 
-                              onClick={() => updateQuantity(item.id, 1)} 
-                              disabled={item.quantity >= item.limit}
+                            <button
+                              onClick={() => updateQuantity(item.id, 1)}
+                              disabled={isIncrementDisabled}
                               className="h-6 w-6 flex items-center justify-center rounded-md hover:bg-background shadow-sm transition-all text-foreground disabled:opacity-50"
                             >
                               <Plus size={12} />
@@ -244,7 +249,8 @@ export function Cart() {
                       </div>
                       {/* tip removed from individual items – shown only in summary */}
                     </motion.li>
-                  ))}
+                  );
+                  })}
                 </AnimatePresence>
               </ul>
             </div>

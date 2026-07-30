@@ -9,6 +9,6 @@
  */
 
 export { supabase, AuthProvider, useAuth } from "./auth-context";
-export { CartProvider, useCart } from "./cart-context";
+export { CartProvider, useCart, canAddPratoPrincipal, PRATO_PRINCIPAL } from "./cart-context";
 export { NotificationProvider, useNotifications } from "./notification-context";
 export type { AppNotification } from "./notification-context";

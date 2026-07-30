@@ -1,5 +1,5 @@
 import { MenuItem } from "../../types";
-import { useCart } from "../../context/Store";
+import { useCart, canAddPratoPrincipal, PRATO_PRINCIPAL } from "../../context/Store";
 import { Button } from "../ui/Button";
 import { Badge } from "../ui/Badge";
 import { Card } from "../ui/Card";
@@ -28,12 +28,12 @@ export function MenuItemCard({ item, ordersAllowed = true, isFirstCard = false, 
   // stock daily, so today's counter doesn't reflect Friday's supply.
   // Items marked unlimitedStock (bulk staples like rice/beans) never sell out.
   const isSoldOut = isTodayOrder && !item.unlimitedStock && item.available <= 0;
-  // Per-item portion limit check
-  // For Prato Principal: also blocked when any OTHER Prato Principal is already in the cart
-  const hasDifferentPPInCart =
-    item.category === "Prato Principal" &&
-    items.some((i) => i.category === "Prato Principal" && i.id !== item.id);
-  const isLimitReached = quantity >= item.limit || hasDifferentPPInCart;
+  // Per-item portion limit check.
+  // For Prato Principal, the exclusivity/combo rule fully replaces the plain
+  // quantity>=limit check (see canAddPratoPrincipal for Ovo/Omelete vs combo logic).
+  const isPratoPrincipal = item.category === PRATO_PRINCIPAL;
+  const ppCheck = isPratoPrincipal ? canAddPratoPrincipal(items, item, 1) : null;
+  const isLimitReached = isPratoPrincipal ? !ppCheck!.allowed : quantity >= item.limit;
   const isPreviousDay = item.isPreviousDay || false;
   const isNotOnMenu = item.isNotOnMenu || false;
 
@@ -56,7 +56,11 @@ export function MenuItemCard({ item, ordersAllowed = true, isFirstCard = false, 
 
   const handleIncrement = () => {
     if (isLimitReached) {
-      toast.warning(`Limite de ${item.limit} unidades por pessoa.`);
+      const message =
+        isPratoPrincipal && ppCheck?.message
+          ? ppCheck.message
+          : `Limite de ${item.limit} unidades por pessoa.`;
+      toast.warning(message);
       return;
     }
     hapticLight();
