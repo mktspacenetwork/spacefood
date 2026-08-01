@@ -126,6 +126,11 @@ export function AdminLayout() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const [myPermissions, setMyPermissions] = useState<Record<string, boolean> | null>(null);
+  // 'loading' briefly shows every menu item to avoid a flash of hidden items on mount.
+  // 'error' means the permission check itself failed (network/API failure already
+  // retried once at the fetch layer) — from there on we deny by default instead of
+  // silently granting full access, since "couldn't confirm" is not the same as "allowed".
+  const [permStatus, setPermStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [settingsData, setSettingsData] = useState<{ unitName?: string, cutoffTime?: string }>({});
   const [badges, setBadges] = useState({ orders: 0, users: 0, reviews: 0 });
   
@@ -177,12 +182,19 @@ export function AdminLayout() {
 
   useEffect(() => {
     setMounted(true);
-    // Load resolved permissions for current user + settings
-    Promise.all([
-      api.authGet("/admin/my-permissions").catch(() => null),
-      api.get("/admin/settings").catch(() => ({})),
-    ]).then(([perms, settings]) => {
-      setMyPermissions(perms || null);
+    // Load resolved permissions for current user
+    api.authGet("/admin/my-permissions")
+      .then((perms) => {
+        setMyPermissions(perms || null);
+        setPermStatus('ok');
+      })
+      .catch(() => {
+        setMyPermissions(null);
+        setPermStatus('error');
+        toast.error("Não foi possível confirmar suas permissões. Algumas páginas podem ficar bloqueadas até você recarregar a página.");
+      });
+
+    api.get("/admin/settings").catch(() => ({})).then((settings) => {
       setSettingsData(settings || {});
       setTempCutoff(settings?.cutoffTime || "10:30");
     });
@@ -225,7 +237,11 @@ export function AdminLayout() {
     if (!user) return false;
     // Master has access to everything always
     if (user.role === 'master') return true;
-    // While permissions are loading, show everything to avoid flicker
+    // Still loading (first render) — show everything briefly to avoid flicker.
+    if (permStatus === 'loading') return true;
+    // The permission check itself failed — deny by default. Silently granting
+    // access here would make "couldn't confirm" indistinguishable from "allowed".
+    if (permStatus === 'error') return false;
     if (myPermissions === null) return true;
     // If the permKey is not explicitly set in the permissions object (e.g. a new feature),
     // default to allowed so new menu items appear without requiring a permissions migration
@@ -244,11 +260,17 @@ export function AdminLayout() {
   })();
 
   const isCurrentPageBlocked =
-    myPermissions !== null &&
     user?.role !== 'master' &&
     currentPagePermKey !== null &&
-    currentPagePermKey in myPermissions &&   // only block when permission is explicitly configured
-    myPermissions[currentPagePermKey] !== true;
+    (
+      // Couldn't confirm permissions at all — deny this page rather than render it.
+      permStatus === 'error' ||
+      (
+        myPermissions !== null &&
+        currentPagePermKey in myPermissions &&   // only block when permission is explicitly configured
+        myPermissions[currentPagePermKey] !== true
+      )
+    );
 
   const handleSignOut = () => {
     logout();

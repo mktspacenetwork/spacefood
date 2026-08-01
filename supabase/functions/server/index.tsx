@@ -33,7 +33,7 @@ function getRateLimitKey(c: any): string {
 // Return JSON for unmatched routes so clients get a parseable error body
 app.notFound((c) => c.json({ error: "Not found", path: new URL(c.req.url).pathname }, 404));
 app.onError((err: any, c) => {
-  console.log("Hono unhandled error:", err?.message ?? err);
+  console.error("Hono unhandled error:", err?.message ?? err);
   return c.json({ error: err?.message ?? "Internal server error" }, 500);
 });
 
@@ -130,7 +130,7 @@ async function getAuthUser(c: any): Promise<{ userId: string; userName: string; 
     const supabase = adminClient();
     const { data: { user }, error } = await supabase.auth.getUser(token);
     if (error) {
-      console.log("getAuthUser validation error:", error.message);
+      console.error("getAuthUser validation error:", error.message);
       return null;
     }
     if (user) {
@@ -150,7 +150,7 @@ async function getAuthUser(c: any): Promise<{ userId: string; userName: string; 
       }
       return resolved;
     }
-    console.log("getAuthUser: getUser returned no user and no error");
+    console.error("getAuthUser: getUser returned no user and no error");
   } catch (e) {
     console.log("getAuthUser exception:", e);
   }
@@ -178,6 +178,49 @@ async function requireAdminOrKitchen(c: any): Promise<{ userId: string; userName
   if (result instanceof Response) return result;
   if (result.role !== 'admin' && result.role !== 'kitchen' && result.role !== 'master') {
     return c.json({ error: "Acesso negado. Permissão de administrador ou cozinha necessária." }, 403);
+  }
+  return result;
+}
+
+// Same resolution logic as GET /admin/my-permissions — kept in one place so the
+// page a user sees in the sidebar and what the backend actually enforces can't drift apart.
+async function resolveUserPermissions(auth: { userId: string; role: string }): Promise<Record<string, boolean>> {
+  if (auth.role === 'master') {
+    const allPerms: Record<string, boolean> = {};
+    ALL_PERM_KEYS.forEach(k => { allPerms[k] = true; });
+    return allPerms;
+  }
+  let resolvedPerms: Record<string, boolean> = {};
+  const assignment = await kv.get(`user-role:${auth.userId}`);
+  if (assignment?.roleId) {
+    const roles = await kv.get("roles:list") || [];
+    const role = roles.find((r: any) => r.id === assignment.roleId);
+    ALL_PERM_KEYS.forEach(k => { resolvedPerms[k] = role?.permissions?.[k] === true; });
+  } else {
+    const kitchenBaseline = ['dashboard', 'orders', 'kds', 'checkin', 'waste', 'menu', 'reviews', 'checkin-report', 'recipe-suggestions'];
+    const granted = auth.role === 'admin' ? ALL_PERM_KEYS : auth.role === 'kitchen' ? kitchenBaseline : [];
+    ALL_PERM_KEYS.forEach(k => { resolvedPerms[k] = granted.includes(k); });
+  }
+  const overrides = await kv.get(`user-perms-override:${auth.userId}`) || {};
+  for (const [key, val] of Object.entries(overrides)) {
+    if (val !== null && val !== undefined) {
+      resolvedPerms[key] = val as boolean;
+    }
+  }
+  return resolvedPerms;
+}
+
+// Enforces the SAME permKey the frontend uses to show/hide a menu item — closes the
+// gap where a page was hidden client-side but its API routes had no matching check.
+async function requirePermission(c: any, permKey: string): Promise<{ userId: string; userName: string; role: string; dietaryRestrictions: string } | Response> {
+  const result = await requireAuth(c);
+  if (result instanceof Response) return result;
+  if (result.role !== 'admin' && result.role !== 'kitchen' && result.role !== 'master') {
+    return c.json({ error: "Acesso negado. Permissão de administrador ou cozinha necessária." }, 403);
+  }
+  const perms = await resolveUserPermissions(result);
+  if (!perms[permKey]) {
+    return c.json({ error: "Acesso negado. Você não tem permissão para essa ação." }, 403);
   }
   return result;
 }
@@ -283,7 +326,7 @@ app.post("/make-server-c3078087/setup-admin", async (c) => {
     if (error) return c.json({ error: error.message }, 500);
     return c.json({ success: true, message: "Você agora é administrador! Faça logout e login novamente.", user: data.user });
   } catch (e) {
-    console.log("Setup admin error:", e);
+    console.error("Setup admin error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
@@ -304,7 +347,7 @@ app.post("/make-server-c3078087/signup", async (c) => {
     if (error) return c.json({ error: error.message }, 400);
     return c.json(data);
   } catch (e) {
-    console.log("Signup error:", e);
+    console.error("Signup error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
@@ -322,14 +365,14 @@ app.post("/make-server-c3078087/forgot-password", async (c) => {
     if (error) return c.json({ error: error.message }, 400);
     return c.json({ success: true, message: "Email de recuperação enviado." });
   } catch (e) {
-    console.log("Forgot password error:", e);
+    console.error("Forgot password error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
 
 // --- Admin: Users CRUD (Protected) ---
 app.get("/make-server-c3078087/admin/users", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'users');
   if (auth instanceof Response) return auth;
   try {
     const supabase = adminClient();
@@ -342,7 +385,7 @@ app.get("/make-server-c3078087/admin/users", async (c) => {
 });
 
 app.post("/make-server-c3078087/admin/users", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'users');
   if (auth instanceof Response) return auth;
   try {
     const { email, password, name, role, department } = await c.req.json();
@@ -362,13 +405,16 @@ app.post("/make-server-c3078087/admin/users", async (c) => {
 });
 
 app.put("/make-server-c3078087/admin/users/:id", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'users');
   if (auth instanceof Response) return auth;
   try {
     const id = c.req.param('id');
     const { name, role, department, email, lunchLocation, dietaryRestrictions, age, phone } = await c.req.json();
-    console.log(`[Admin] Updating user ${id}:`, { name, role, department, email, lunchLocation, dietaryRestrictions, age, phone });
-    
+    const VALID_ROLES = ['admin', 'kitchen', 'user', 'master'];
+    if (role !== undefined && !VALID_ROLES.includes(role)) {
+      return c.json({ error: `Papel inválido. Use um de: ${VALID_ROLES.join(', ')}.` }, 400);
+    }
+
     const supabase = adminClient();
     
     // First, get the current user data to preserve existing metadata
@@ -402,7 +448,7 @@ app.put("/make-server-c3078087/admin/users/:id", async (c) => {
 
 // --- Admin: Reset user password (sends recovery email) ---
 app.post("/make-server-c3078087/admin/users/:id/reset-password", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'users');
   if (auth instanceof Response) return auth;
   try {
     const id = c.req.param('id');
@@ -432,7 +478,7 @@ app.post("/make-server-c3078087/admin/users/:id/reset-password", async (c) => {
 });
 
 app.delete("/make-server-c3078087/admin/users/:id", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'users');
   if (auth instanceof Response) return auth;
   try {
     const id = c.req.param('id');
@@ -475,7 +521,7 @@ app.get("/make-server-c3078087/menu", async (c) => {
 
     return c.json(items);
   } catch (e) {
-    console.log("Menu fetch error:", e);
+    console.error("Menu fetch error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
@@ -508,13 +554,13 @@ app.get("/make-server-c3078087/menu/today", async (c) => {
       .map((i: any) => ({ ...i, isPreviousDay: false }));
     return c.json(todayItems);
   } catch (e) {
-    console.log("Today menu error:", e);
+    console.error("Today menu error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
 
 app.post("/make-server-c3078087/menu", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'items');
   if (auth instanceof Response) return auth;
   try {
     const item = await c.req.json();
@@ -532,7 +578,7 @@ app.post("/make-server-c3078087/menu", async (c) => {
 });
 
 app.put("/make-server-c3078087/menu/:id", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'items');
   if (auth instanceof Response) return auth;
   try {
     const id = c.req.param('id');
@@ -553,7 +599,7 @@ app.put("/make-server-c3078087/menu/:id", async (c) => {
 });
 
 app.delete("/make-server-c3078087/menu/:id", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'items');
   if (auth instanceof Response) return auth;
   try {
     const id = c.req.param('id');
@@ -579,7 +625,7 @@ app.get("/make-server-c3078087/categories", async (c) => {
 });
 
 app.post("/make-server-c3078087/categories", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'items');
   if (auth instanceof Response) return auth;
   try {
     const { name } = await c.req.json();
@@ -596,7 +642,7 @@ app.post("/make-server-c3078087/categories", async (c) => {
 });
 
 app.delete("/make-server-c3078087/categories/:name", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'items');
   if (auth instanceof Response) return auth;
   try {
     const name = decodeURIComponent(c.req.param('name'));
@@ -610,7 +656,7 @@ app.delete("/make-server-c3078087/categories/:name", async (c) => {
 });
 
 app.put("/make-server-c3078087/categories/:name", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'items');
   if (auth instanceof Response) return auth;
   try {
     const oldName = decodeURIComponent(c.req.param('name'));
@@ -667,6 +713,37 @@ app.post("/make-server-c3078087/orders", async (c) => {
 
     if (!orderData.items || orderData.items.length === 0) {
       return c.json({ error: "Pedido deve conter pelo menos um item." }, 400);
+    }
+
+    // Never trust category/limit/calories from the client — only id and quantity.
+    // Everything else about "is this item allowed, how many, how many calories" is
+    // resolved from the real catalog below (closes the gap where the cart-context.tsx
+    // combo rule and per-item portion limit only existed in the browser).
+    const catalogItems: any[] = await kv.get("menu:items") || [];
+    const catalogById = new Map(catalogItems.map((i: any) => [i.id, i]));
+    const SUBSTITUTION_KEYWORDS = ["ovo", "ovos", "omelete", "omeletes"];
+    const isSubstitutionItem = (name: string) => {
+      const normalized = (name || "").toLowerCase();
+      return SUBSTITUTION_KEYWORDS.some((kw) => new RegExp(`\\b${kw}\\b`).test(normalized));
+    };
+    const PRATO_PRINCIPAL = "Prato Principal";
+    // Only items we can actually identify in the catalog are checked — an item
+    // missing from the catalog (e.g. a retroactive Taipas log for something since
+    // removed) is left alone rather than guessed at.
+    const mainDishOrderItems = orderData.items.filter((oi: any) => catalogById.get(oi.id)?.category === PRATO_PRINCIPAL);
+    const mainDishHasSubstitution = mainDishOrderItems.some((oi: any) => isSubstitutionItem(catalogById.get(oi.id)?.name || ""));
+    if (mainDishHasSubstitution && mainDishOrderItems.length > 1) {
+      return c.json({ error: "Ovo/Omelete é uma opção exclusiva de Prato Principal — não combina com outro Prato Principal no mesmo pedido." }, 400);
+    }
+    for (const oi of orderData.items) {
+      const catalogItem = catalogById.get(oi.id);
+      if (!catalogItem) continue;
+      const qty = oi.quantity || 1;
+      const isNonSubstitutionMainDish = catalogItem.category === PRATO_PRINCIPAL && !isSubstitutionItem(catalogItem.name);
+      const cap = isNonSubstitutionMainDish ? 1 : catalogItem.limit;
+      if (typeof cap === 'number' && qty > cap) {
+        return c.json({ error: `Limite de ${cap} porção(ões) de "${catalogItem.name}" atingido.` }, 400);
+      }
     }
 
     const isManualLog = orderData.isManualLog === true;
@@ -796,8 +873,23 @@ app.post("/make-server-c3078087/orders", async (c) => {
       }
     }
 
+    // Rebuild each item from the real catalog (name, category, calories) — only
+    // quantity comes from the client. Falls back to the client's own item data when
+    // the catalog doesn't have it (retroactive Taipas logs can reference items no
+    // longer in today's catalog; that's expected there, not a tampering signal).
+    const resolvedItems = orderData.items.map((oi: any) => {
+      const catalogItem = catalogById.get(oi.id);
+      const quantity = oi.quantity || 1;
+      return catalogItem ? { ...catalogItem, quantity } : { ...oi, quantity };
+    });
+    const totalCalories = resolvedItems.reduce((sum: number, it: any) => sum + (it.calories || 0) * (it.quantity || 1), 0);
+    const totalItemsCount = resolvedItems.reduce((sum: number, it: any) => sum + (it.quantity || 1), 0);
+
     const newOrder = {
       ...orderData,
+      items: resolvedItems,
+      totalCalories,
+      totalItems: totalItemsCount,
       id: crypto.randomUUID(),
       // For manual logs, preserve the submitted date (retroactive support); real orders use now
       date: isManualLog && orderData.date ? orderData.date : new Date().toISOString(),
@@ -835,7 +927,7 @@ app.post("/make-server-c3078087/orders", async (c) => {
 
     return c.json(newOrder);
   } catch (e) {
-    console.log("Order creation error:", e);
+    console.error("Order creation error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
@@ -918,7 +1010,7 @@ app.delete("/make-server-c3078087/orders/:id", async (c) => {
 
 // Admin: Get All Orders (uses daily index when possible)
 app.get("/make-server-c3078087/admin/orders", async (c) => {
-  const auth = await requireAdminOrKitchen(c);
+  const auth = await requirePermission(c, 'orders');
   if (auth instanceof Response) return auth;
   try {
     const date = c.req.query('date');
@@ -982,14 +1074,14 @@ app.get("/make-server-c3078087/admin/orders", async (c) => {
     const allOrders = allOrdersMap.flat().filter((o: any) => o && o.id);
     return c.json(allOrders);
   } catch (e) {
-    console.log("Admin orders fetch error:", e);
+    console.error("Admin orders fetch error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
 
 // Admin: Update Order Status
 app.put("/make-server-c3078087/admin/orders/:id/status", async (c) => {
-  const auth = await requireAdminOrKitchen(c);
+  const auth = await requirePermission(c, 'orders');
   if (auth instanceof Response) return auth;
   try {
     const orderId = c.req.param('id');
@@ -1058,7 +1150,7 @@ app.put("/make-server-c3078087/admin/orders/:id/status", async (c) => {
           icon: "/icon-192.png",
           tag: `order-${orderId}`,
           data: { url: "/", orderId },
-        }).catch((err: any) => console.log("[Push] Error sending order status push:", err));
+        }).catch((err: any) => console.error("[Push] Error sending order status push:", err));
       }
     }
 
@@ -1073,7 +1165,7 @@ app.put("/make-server-c3078087/admin/orders/:id/status", async (c) => {
 
 // Admin: Delete/Remove Order (for cancelled orders)
 app.delete("/make-server-c3078087/admin/orders/:id", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'orders');
   if (auth instanceof Response) return auth;
   try {
     const orderId = c.req.param('id');
@@ -1224,7 +1316,7 @@ app.get("/make-server-c3078087/notifications", async (c) => {
 });
 
 app.get("/make-server-c3078087/admin/notifications", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'notifications');
   if (auth instanceof Response) return auth;
   try {
     // Admin sees sent history (mostly global, but maybe all?)
@@ -1237,7 +1329,7 @@ app.get("/make-server-c3078087/admin/notifications", async (c) => {
 });
 
 app.post("/make-server-c3078087/notifications", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'notifications');
   if (auth instanceof Response) return auth;
   try {
     const { title, message, type, targetUserId } = await c.req.json();
@@ -1267,7 +1359,7 @@ app.post("/make-server-c3078087/notifications", async (c) => {
 });
 
 app.delete("/make-server-c3078087/notifications/:id", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'notifications');
   if (auth instanceof Response) return auth;
   try {
     const id = c.req.param('id');
@@ -1302,7 +1394,7 @@ app.get("/make-server-c3078087/admin/menu/published", async (c) => {
 });
 
 app.post("/make-server-c3078087/admin/menu/publish-day", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'menu');
   if (auth instanceof Response) return auth;
   try {
     const { date } = await c.req.json();
@@ -1370,7 +1462,7 @@ const ALL_PERM_KEYS = [
 
 // --- Custom Roles CRUD ---
 app.get("/make-server-c3078087/admin/roles", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'roles_permissions');
   if (auth instanceof Response) return auth;
   try {
     const roles = await kv.get("roles:list") || [];
@@ -1381,7 +1473,7 @@ app.get("/make-server-c3078087/admin/roles", async (c) => {
 });
 
 app.post("/make-server-c3078087/admin/roles", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'roles_permissions');
   if (auth instanceof Response) return auth;
   try {
     const { name, description, color, permissions } = await c.req.json();
@@ -1405,7 +1497,7 @@ app.post("/make-server-c3078087/admin/roles", async (c) => {
 });
 
 app.put("/make-server-c3078087/admin/roles/:id", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'roles_permissions');
   if (auth instanceof Response) return auth;
   try {
     const id = c.req.param("id");
@@ -1423,7 +1515,7 @@ app.put("/make-server-c3078087/admin/roles/:id", async (c) => {
 });
 
 app.delete("/make-server-c3078087/admin/roles/:id", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'roles_permissions');
   if (auth instanceof Response) return auth;
   try {
     const id = c.req.param("id");
@@ -1438,7 +1530,7 @@ app.delete("/make-server-c3078087/admin/roles/:id", async (c) => {
 
 // --- User-Role Assignments ---
 app.get("/make-server-c3078087/admin/user-roles", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'roles_permissions');
   if (auth instanceof Response) return auth;
   try {
     const supabase = adminClient();
@@ -1465,7 +1557,7 @@ app.get("/make-server-c3078087/admin/user-roles", async (c) => {
 });
 
 app.put("/make-server-c3078087/admin/user-roles/:userId", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'roles_permissions');
   if (auth instanceof Response) return auth;
   try {
     const userId = c.req.param("userId");
@@ -1487,7 +1579,7 @@ app.put("/make-server-c3078087/admin/user-roles/:userId", async (c) => {
 
 // --- User Permission Overrides (per-person) ---
 app.get("/make-server-c3078087/admin/user-permissions/:userId", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'roles_permissions');
   if (auth instanceof Response) return auth;
   try {
     const userId = c.req.param("userId");
@@ -1499,11 +1591,20 @@ app.get("/make-server-c3078087/admin/user-permissions/:userId", async (c) => {
 });
 
 app.put("/make-server-c3078087/admin/user-permissions/:userId", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'roles_permissions');
   if (auth instanceof Response) return auth;
   try {
     const userId = c.req.param("userId");
-    const overrides = await c.req.json();
+    const rawOverrides = await c.req.json();
+    // Only accept known permKeys with real boolean values — a stray string like
+    // "false" is truthy in a naive `if (permissions[key])` check on the frontend,
+    // so a permission would silently open rather than close.
+    const overrides: Record<string, boolean> = {};
+    for (const key of ALL_PERM_KEYS) {
+      if (typeof rawOverrides[key] === 'boolean') {
+        overrides[key] = rawOverrides[key];
+      }
+    }
     await kv.set(`user-perms-override:${userId}`, overrides);
     return c.json({ success: true });
   } catch (e: any) {
@@ -1516,50 +1617,17 @@ app.get("/make-server-c3078087/admin/my-permissions", async (c) => {
   const auth = await getAuthUser(c);
   if (!auth) return c.json({});
   try {
-    if (auth.role === 'master') {
-      const allPerms: Record<string, boolean> = {};
-      ALL_PERM_KEYS.forEach(k => { allPerms[k] = true; });
-      return c.json(allPerms);
-    }
-    let resolvedPerms: Record<string, boolean> = {};
-    const assignment = await kv.get(`user-role:${auth.userId}`);
-    if (assignment?.roleId) {
-      const roles = await kv.get("roles:list") || [];
-      const role = roles.find((r: any) => r.id === assignment.roleId);
-      // Explicit true/false for every current key, even if the stored role
-      // predates one (e.g. saved before "checkin-report" existed) — otherwise
-      // a missing key falls through to "allowed" below, same bug as the
-      // no-role fallback used to have.
-      ALL_PERM_KEYS.forEach(k => { resolvedPerms[k] = role?.permissions?.[k] === true; });
-    } else {
-      // No custom role assigned — this is the path EVERY current user actually
-      // resolves through today (no one has a role assignment yet). Grant an
-      // explicit baseline by the account's raw role, with an EXPLICIT false for
-      // every other key. Leaving unlisted keys absent used to silently grant
-      // them (the resolver treated "missing" as "allowed"), so every plain
-      // kitchen-role user ended up with full access to Configurações, Usuários
-      // & Permissões, Banners, Log de Auditoria, etc.
-      const kitchenBaseline = ['dashboard', 'orders', 'kds', 'checkin', 'waste', 'menu', 'reviews', 'checkin-report', 'recipe-suggestions'];
-      const granted = auth.role === 'admin' ? ALL_PERM_KEYS : auth.role === 'kitchen' ? kitchenBaseline : [];
-      ALL_PERM_KEYS.forEach(k => { resolvedPerms[k] = granted.includes(k); });
-    }
-    // Apply per-user overrides on top of role perms
-    const overrides = await kv.get(`user-perms-override:${auth.userId}`) || {};
-    for (const [key, val] of Object.entries(overrides)) {
-      if (val !== null && val !== undefined) {
-        resolvedPerms[key] = val as boolean;
-      }
-    }
+    const resolvedPerms = await resolveUserPermissions(auth);
     return c.json(resolvedPerms);
   } catch (e: any) {
-    console.log("my-permissions error:", e);
+    console.error("my-permissions error:", e);
     return c.json({});
   }
 });
 
 // --- Check-in ---
 app.get("/make-server-c3078087/admin/checkins", async (c) => {
-  const auth = await requireAdminOrKitchen(c);
+  const auth = await requirePermission(c, 'checkin');
   if (auth instanceof Response) return auth;
   try {
     const date = c.req.query('date') || brasiliaToday();
@@ -1571,7 +1639,7 @@ app.get("/make-server-c3078087/admin/checkins", async (c) => {
 });
 
 app.post("/make-server-c3078087/admin/checkins", async (c) => {
-  const auth = await requireAdminOrKitchen(c);
+  const auth = await requirePermission(c, 'checkin');
   if (auth instanceof Response) return auth;
   try {
     const { orderId, userId, userName, confirmed, unit, isManual } = await c.req.json();
@@ -1603,7 +1671,7 @@ app.post("/make-server-c3078087/admin/checkins", async (c) => {
 // "pending" (not just flips confirmed to false, which would count as an
 // explicit "não almoçou" instead of "ainda não marcado").
 app.post("/make-server-c3078087/admin/checkins/undo", async (c) => {
-  const auth = await requireAdminOrKitchen(c);
+  const auth = await requirePermission(c, 'checkin');
   if (auth instanceof Response) return auth;
   try {
     const { orderId, userId, isManual } = await c.req.json();
@@ -1623,7 +1691,7 @@ app.post("/make-server-c3078087/admin/checkins/undo", async (c) => {
 
 // Batch check-in
 app.post("/make-server-c3078087/admin/checkins/batch", async (c) => {
-  const auth = await requireAdminOrKitchen(c);
+  const auth = await requirePermission(c, 'checkin');
   if (auth instanceof Response) return auth;
   try {
     const { entries } = await c.req.json(); // [{ orderId, userId, userName, confirmed }]
@@ -1653,6 +1721,9 @@ app.post("/make-server-c3078087/ratings", async (c) => {
   try {
     const { orderId, stars, comment, unit } = await c.req.json();
     if (!stars) return c.json({ error: "Stars é obrigatório." }, 400);
+    if (typeof stars !== 'number' || !Number.isInteger(stars) || stars < 1 || stars > 5) {
+      return c.json({ error: "Stars deve ser um número inteiro entre 1 e 5." }, 400);
+    }
 
     // Resolve user unit from metadata if not provided
     let userUnit = unit || '';
@@ -1742,7 +1813,7 @@ app.get("/make-server-c3078087/ratings/mine", async (c) => {
 });
 
 app.get("/make-server-c3078087/admin/ratings", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'reviews');
   if (auth instanceof Response) return auth;
   try {
     const date = c.req.query('date');
@@ -1800,7 +1871,7 @@ app.post("/make-server-c3078087/recipe-suggestions", async (c) => {
 
 // Admin/Kitchen: list all suggestions
 app.get("/make-server-c3078087/admin/recipe-suggestions", async (c) => {
-  const auth = await requireAdminOrKitchen(c);
+  const auth = await requirePermission(c, 'recipe-suggestions');
   if (auth instanceof Response) return auth;
   try {
     const list = await kv.get("recipe-suggestions") || [];
@@ -1812,7 +1883,7 @@ app.get("/make-server-c3078087/admin/recipe-suggestions", async (c) => {
 
 // Admin: update suggestion status
 app.put("/make-server-c3078087/admin/recipe-suggestions/:id", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'recipe-suggestions');
   if (auth instanceof Response) return auth;
   try {
     const id = c.req.param("id");
@@ -1833,7 +1904,7 @@ app.put("/make-server-c3078087/admin/recipe-suggestions/:id", async (c) => {
 
 // Admin: delete suggestion
 app.delete("/make-server-c3078087/admin/recipe-suggestions/:id", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'recipe-suggestions');
   if (auth instanceof Response) return auth;
   try {
     const id = c.req.param("id");
@@ -1970,7 +2041,7 @@ app.post("/make-server-c3078087/users/me/avatar", async (c) => {
       });
 
     if (uploadError) {
-      console.log("Avatar upload error:", uploadError);
+      console.error("Avatar upload error:", uploadError);
       return c.json({ error: uploadError.message }, 500);
     }
 
@@ -2006,7 +2077,7 @@ app.post("/make-server-c3078087/users/me/avatar", async (c) => {
       .createSignedUrl(filePath, 60 * 60 * 24 * 365);
 
     if (signedError) {
-      console.log("Signed URL error:", signedError);
+      console.error("Signed URL error:", signedError);
       return c.json({ error: signedError.message }, 500);
     }
 
@@ -2015,7 +2086,7 @@ app.post("/make-server-c3078087/users/me/avatar", async (c) => {
     // Get current user metadata first to preserve existing fields
     const { data: currentUser, error: getUserError } = await supabase.auth.admin.getUserById(auth.userId);
     if (getUserError) {
-      console.log("Get user error:", getUserError);
+      console.error("Get user error:", getUserError);
       return c.json({ error: getUserError.message }, 500);
     }
 
@@ -2028,7 +2099,7 @@ app.post("/make-server-c3078087/users/me/avatar", async (c) => {
     });
 
     if (userError) {
-      console.log("User metadata update error:", userError);
+      console.error("User metadata update error:", userError);
       return c.json({ error: userError.message }, 500);
     }
 
@@ -2041,7 +2112,7 @@ app.post("/make-server-c3078087/users/me/avatar", async (c) => {
 
 // --- Weekly Menu ---
 app.get("/make-server-c3078087/admin/weekly-menu", async (c) => {
-  const auth = await requireAdminOrKitchen(c);
+  const auth = await requirePermission(c, 'menu');
   if (auth instanceof Response) return auth;
   try {
     const weekKey = c.req.query('week');
@@ -2057,7 +2128,7 @@ app.get("/make-server-c3078087/admin/weekly-menu", async (c) => {
 });
 
 app.post("/make-server-c3078087/admin/weekly-menu", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'menu');
   if (auth instanceof Response) return auth;
   try {
     const { weekKey, data } = await c.req.json();
@@ -2072,7 +2143,7 @@ app.post("/make-server-c3078087/admin/weekly-menu", async (c) => {
 // --- Daily Menu Management ---
 // Get daily menu for a specific date
 app.get("/make-server-c3078087/admin/daily-menu", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'menu');
   if (auth instanceof Response) return auth;
   try {
     const date = c.req.query('date');
@@ -2090,7 +2161,7 @@ app.get("/make-server-c3078087/admin/daily-menu", async (c) => {
 
 // Set daily menu for a specific date
 app.post("/make-server-c3078087/admin/daily-menu", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'menu');
   if (auth instanceof Response) return auth;
   try {
     const { date, itemIds } = await c.req.json();
@@ -2109,7 +2180,7 @@ app.post("/make-server-c3078087/admin/daily-menu", async (c) => {
 
 // Delete daily menu for a specific date
 app.delete("/make-server-c3078087/admin/daily-menu/:date", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'menu');
   if (auth instanceof Response) return auth;
   try {
     const date = c.req.param('date');
@@ -2139,20 +2210,20 @@ app.delete("/make-server-c3078087/admin/daily-menu/:date", async (c) => {
 // --- Recurring Items ---
 // GET: returns array of item IDs marked as recurring (daily)
 app.get("/make-server-c3078087/admin/recurring-items", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'menu');
   if (auth instanceof Response) return auth;
   try {
     const ids = await kv.get("menu:recurring-items") || [];
     return c.json(ids);
   } catch (e) {
-    console.log("Error fetching recurring items:", e);
+    console.error("Error fetching recurring items:", e);
     return c.json({ error: e.message }, 500);
   }
 });
 
 // POST: saves the full list of recurring item IDs
 app.post("/make-server-c3078087/admin/recurring-items", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'menu');
   if (auth instanceof Response) return auth;
   try {
     const body = await c.req.json();
@@ -2163,7 +2234,7 @@ app.post("/make-server-c3078087/admin/recurring-items", async (c) => {
     await kv.set("menu:recurring-items", itemIds);
     return c.json({ success: true, count: itemIds.length });
   } catch (e) {
-    console.log("Error saving recurring items:", e);
+    console.error("Error saving recurring items:", e);
     return c.json({ error: e.message }, 500);
   }
 });
@@ -2208,7 +2279,7 @@ app.post("/make-server-c3078087/admin/upload", async (c) => {
 
     return c.json({ url: urlData?.signedUrl, path: data?.path });
   } catch (e) {
-    console.log("Upload error:", e);
+    console.error("Upload error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
@@ -2432,7 +2503,7 @@ app.post("/make-server-c3078087/admin/generate-ai-image", async (c) => {
       .upload(fileName, imageData.buffer, { contentType: ct, upsert: true });
 
     if (uploadError) {
-      console.log("[AI Image] Upload error:", uploadError);
+      console.error("[AI Image] Upload error:", uploadError);
       return c.json({ error: `Erro ao salvar imagem: ${uploadError.message}` }, 500);
     }
 
@@ -2441,7 +2512,7 @@ app.post("/make-server-c3078087/admin/generate-ai-image", async (c) => {
       .createSignedUrl(fileName, 60 * 60 * 24 * 365);
 
     if (urlError) {
-      console.log("[AI Image] Signed URL error:", urlError);
+      console.error("[AI Image] Signed URL error:", urlError);
       return c.json({ error: `Erro ao gerar URL: ${urlError.message}` }, 500);
     }
 
@@ -2455,7 +2526,7 @@ app.post("/make-server-c3078087/admin/generate-ai-image", async (c) => {
 
 // --- Dashboard aggregated data ---
 app.get("/make-server-c3078087/admin/dashboard", async (c) => {
-  const auth = await requireAdminOrKitchen(c);
+  const auth = await requirePermission(c, 'dashboard');
   if (auth instanceof Response) return auth;
   try {
     const today = brasiliaToday();
@@ -2557,14 +2628,14 @@ app.get("/make-server-c3078087/admin/dashboard", async (c) => {
       abstentions,
     });
   } catch (e) {
-    console.log("Dashboard error:", e);
+    console.error("Dashboard error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
 
 // --- Check-in Report (Inteligência): cruza pedido × comparecimento por período ---
 app.get("/make-server-c3078087/admin/checkin-report", async (c) => {
-  const auth = await requireAdminOrKitchen(c);
+  const auth = await requirePermission(c, 'checkin-report');
   if (auth instanceof Response) return auth;
   try {
     const today = brasiliaToday();
@@ -2765,7 +2836,7 @@ app.get("/make-server-c3078087/admin/checkin-report", async (c) => {
 
     return c.json({ from, to, days: days.length, perUser, neverOrdered, ateWithoutOrder, totals });
   } catch (e) {
-    console.log("Check-in report error:", e);
+    console.error("Check-in report error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
@@ -2782,7 +2853,7 @@ app.get("/make-server-c3078087/admin/settings", async (c) => {
 });
 
 app.post("/make-server-c3078087/admin/settings", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'settings');
   if (auth instanceof Response) return auth;
   try {
     const incoming = await c.req.json();
@@ -2847,7 +2918,7 @@ app.post("/make-server-c3078087/admin/pwa-icon", async (c) => {
 
     return c.json({ url: urlData?.signedUrl, path: data?.path });
   } catch (e) {
-    console.log("PWA icon upload error:", e);
+    console.error("PWA icon upload error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
@@ -2870,7 +2941,7 @@ app.delete("/make-server-c3078087/admin/pwa-icon", async (c) => {
 
     return c.json({ success: true });
   } catch (e) {
-    console.log("PWA icon delete error:", e);
+    console.error("PWA icon delete error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
@@ -2930,7 +3001,7 @@ app.get("/make-server-c3078087/inbox", async (c) => {
 
     return c.json(all);
   } catch (e: any) {
-    console.log("Get inbox error:", e);
+    console.error("Get inbox error:", e);
     return c.json({ error: e?.message ?? "Unknown error" }, 500);
   }
 });
@@ -3007,7 +3078,7 @@ app.post("/make-server-c3078087/admin/inbox/send", async (c) => {
 
     return c.json({ success: true, notification: notif });
   } catch (e: any) {
-    console.log("Send notification error:", e);
+    console.error("Send notification error:", e);
     return c.json({ error: e?.message ?? "Unknown error" }, 500);
   }
 });
@@ -3090,7 +3161,7 @@ app.get("/make-server-c3078087/menu/available-dates", async (c) => {
     const unique = [...new Set(dates)].sort();
     return c.json(unique);
   } catch (e: any) {
-    console.log("Available dates error:", e);
+    console.error("Available dates error:", e);
     return c.json({ error: e?.message ?? "Unknown error" }, 500);
   }
 });
@@ -3189,7 +3260,7 @@ app.get("/make-server-c3078087/bootstrap", async (c) => {
       abstention,
     });
   } catch (e: any) {
-    console.log("Bootstrap error:", e);
+    console.error("Bootstrap error:", e);
     return c.json({ error: e?.message ?? "Bootstrap failed" }, 500);
   }
 });
@@ -3227,7 +3298,7 @@ app.post("/make-server-c3078087/admin/cleanup", async (c) => {
 
     return c.json({ success: true, cleaned, message: `Dados anteriores a ${cutoffStr} removidos.` });
   } catch (e: any) {
-    console.log("Cleanup error:", e);
+    console.error("Cleanup error:", e);
     return c.json({ error: e?.message ?? "Unknown error" }, 500);
   }
 });
@@ -3260,7 +3331,7 @@ app.get("/make-server-c3078087/admin/export", async (c) => {
       orders: allOrders,
     });
   } catch (e: any) {
-    console.log("Export error:", e);
+    console.error("Export error:", e);
     return c.json({ error: e?.message ?? "Unknown error" }, 500);
   }
 });
@@ -3422,7 +3493,7 @@ app.post("/make-server-c3078087/admin/menu/import-csv", async (c) => {
     console.log('[CSV Import] Success!', newItems.length, 'items. Sample:', JSON.stringify(newItems[0]));
     return c.json({ success: true, count: newItems.length, categories: updatedCats, sampleItem: newItems[0] });
   } catch (e: any) {
-    console.log("CSV Import error:", e);
+    console.error("CSV Import error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
@@ -3443,7 +3514,7 @@ app.get("/make-server-c3078087/banners", async (c) => {
 });
 
 app.get("/make-server-c3078087/admin/banners", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'banners');
   if (auth instanceof Response) return auth;
   try {
     const banners = await kv.get("banners") || [];
@@ -3454,7 +3525,7 @@ app.get("/make-server-c3078087/admin/banners", async (c) => {
 });
 
 app.post("/make-server-c3078087/admin/banners", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'banners');
   if (auth instanceof Response) return auth;
   try {
     const { id, imageUrl, link, active, order, title, description, backgroundColor, textColor, buttonText, unitRestrictions } = await c.req.json();
@@ -3492,7 +3563,7 @@ app.post("/make-server-c3078087/admin/banners", async (c) => {
 });
 
 app.delete("/make-server-c3078087/admin/banners/:id", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'banners');
   if (auth instanceof Response) return auth;
   try {
     const id = c.req.param('id');
@@ -3514,7 +3585,7 @@ app.get("/make-server-c3078087/push/vapid-key", async (c) => {
     const keys = await push.getOrCreateVAPIDKeys();
     return c.json({ publicKey: keys.publicKey });
   } catch (e) {
-    console.log("VAPID key error:", e);
+    console.error("VAPID key error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
@@ -3531,7 +3602,7 @@ app.post("/make-server-c3078087/push/subscribe", async (c) => {
     await push.saveSubscription(auth.userId, subscription);
     return c.json({ success: true });
   } catch (e) {
-    console.log("Push subscribe error:", e);
+    console.error("Push subscribe error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
@@ -3548,14 +3619,14 @@ app.post("/make-server-c3078087/push/unsubscribe", async (c) => {
     await push.removeSubscription(auth.userId, endpoint);
     return c.json({ success: true });
   } catch (e) {
-    console.log("Push unsubscribe error:", e);
+    console.error("Push unsubscribe error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
 
 // Send test push (admin only)
 app.post("/make-server-c3078087/admin/push/test", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'notifications');
   if (auth instanceof Response) return auth;
   try {
     const { userId, title, body } = await c.req.json();
@@ -3568,14 +3639,14 @@ app.post("/make-server-c3078087/admin/push/test", async (c) => {
     });
     return c.json({ success: true, ...result });
   } catch (e) {
-    console.log("Push test error:", e);
+    console.error("Push test error:", e);
     return c.json({ error: e.message }, 500);
   }
 });
 
 // --- Waste Management ---
 app.get("/make-server-c3078087/admin/waste", async (c) => {
-  const auth = await requireAdminOrKitchen(c);
+  const auth = await requirePermission(c, 'waste');
   if (auth instanceof Response) return auth;
   try {
     const date = c.req.query('date');
@@ -3592,7 +3663,7 @@ app.get("/make-server-c3078087/admin/waste", async (c) => {
 });
 
 app.post("/make-server-c3078087/admin/waste", async (c) => {
-  const auth = await requireAdminOrKitchen(c);
+  const auth = await requirePermission(c, 'waste');
   if (auth instanceof Response) return auth;
   try {
     const data = await c.req.json();
@@ -3615,7 +3686,7 @@ app.post("/make-server-c3078087/admin/waste", async (c) => {
 
 // GET /admin/audit-logs – list audit logs with optional filters
 app.get("/make-server-c3078087/admin/audit-logs", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'logs');
   if (auth instanceof Response) return auth;
   try {
     const url = new URL(c.req.url);
@@ -3665,14 +3736,14 @@ app.get("/make-server-c3078087/admin/audit-logs", async (c) => {
 
     return c.json({ logs: filtered, total });
   } catch (e: any) {
-    console.log("Error fetching audit logs:", e.message);
+    console.error("Error fetching audit logs:", e.message);
     return c.json({ error: e.message }, 500);
   }
 });
 
 // DELETE /admin/audit-logs – clear all audit logs (master only)
 app.delete("/make-server-c3078087/admin/audit-logs", async (c) => {
-  const auth = await requireAdmin(c);
+  const auth = await requirePermission(c, 'logs');
   if (auth instanceof Response) return auth;
   if (auth.role !== "master") {
     return c.json({ error: "Apenas Admin Master pode limpar logs." }, 403);
@@ -3694,7 +3765,7 @@ app.delete("/make-server-c3078087/admin/audit-logs", async (c) => {
     await logAudit(c, auth, "CLEAR_LOGS", "system", `Limpou ${keys.length} registros de log de auditoria.`);
     return c.json({ deleted: keys.length });
   } catch (e: any) {
-    console.log("Error clearing audit logs:", e.message);
+    console.error("Error clearing audit logs:", e.message);
     return c.json({ error: e.message }, 500);
   }
 });
@@ -3739,7 +3810,7 @@ app.get("/make-server-c3078087/admin/stats", async (c) => {
       mediaAvaliacao: parseFloat(avgRating as string),
     });
   } catch (e: any) {
-    console.log("Stats error:", e.message);
+    console.error("Stats error:", e.message);
     return c.json({ error: e.message }, 500);
   }
 });

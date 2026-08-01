@@ -1,5 +1,6 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate, Outlet } from "react-router";
+import { Loader2 } from "lucide-react";
 import { LoginWrapper, SignupWrapper, ProtectedRoute, AdminRoute } from "./components/auth/AuthGuards";
 import { RootLayout } from "./layouts/RootLayout";
 import { RouteErrorBoundary } from "./components/ui/RouteErrorBoundary";
@@ -9,29 +10,45 @@ import { Profile } from "./pages/Profile";
 import { Settings } from "./pages/Settings";
 import { Notifications } from "./pages/Notifications";
 import { AdminLayout } from "./layouts/AdminLayout";
-import { AdminDashboard } from "./pages/admin/AdminDashboard";
-import { AdminItems } from "./pages/admin/AdminItems";
-import { AdminMenu } from "./pages/admin/AdminMenu";
-import { AdminSettings } from "./pages/admin/AdminSettings";
-import { KitchenDashboard } from "./pages/admin/KitchenDashboard";
-import { AdminCheckin } from "./pages/admin/AdminCheckin";
-import { AdminReviews } from "./pages/admin/AdminReviews";
-import { AdminNotifications } from "./pages/admin/AdminNotifications";
-import { AdminOrders } from "./pages/admin/AdminOrders";
-import { AdminUsers } from "./pages/admin/AdminUsers";
-import { AdminReports } from "./pages/admin/AdminReports";
-import { AdminCheckinReport } from "./pages/admin/AdminCheckinReport";
 import { CompleteProfile } from "./pages/CompleteProfile";
 import { Measurements } from "./pages/Measurements";
 import { FoodCare } from "./pages/FoodCare";
 import { Team } from "./pages/Team";
 import { Rate } from "./pages/Rate";
-import { AdminBanners } from "./pages/admin/AdminBanners";
-import { WasteControl } from "./pages/admin/WasteControl";
-import { AdminLogs } from "./pages/admin/AdminLogs";
 import { Recipes } from "./pages/Recipes";
-import { AdminRecipes } from "./pages/admin/AdminRecipes";
+
+// Admin pages are lazy-loaded: regular employees ordering lunch never open
+// these, so they shouldn't pay for them in the initial bundle.
+const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard").then(m => ({ default: m.AdminDashboard })));
+const AdminItems = lazy(() => import("./pages/admin/AdminItems").then(m => ({ default: m.AdminItems })));
+const AdminMenu = lazy(() => import("./pages/admin/AdminMenu").then(m => ({ default: m.AdminMenu })));
+const AdminSettings = lazy(() => import("./pages/admin/AdminSettings").then(m => ({ default: m.AdminSettings })));
+const KitchenDashboard = lazy(() => import("./pages/admin/KitchenDashboard").then(m => ({ default: m.KitchenDashboard })));
+const AdminCheckin = lazy(() => import("./pages/admin/AdminCheckin").then(m => ({ default: m.AdminCheckin })));
+const AdminReviews = lazy(() => import("./pages/admin/AdminReviews").then(m => ({ default: m.AdminReviews })));
+const AdminNotifications = lazy(() => import("./pages/admin/AdminNotifications").then(m => ({ default: m.AdminNotifications })));
+const AdminOrders = lazy(() => import("./pages/admin/AdminOrders").then(m => ({ default: m.AdminOrders })));
+const AdminUsers = lazy(() => import("./pages/admin/AdminUsers").then(m => ({ default: m.AdminUsers })));
+const AdminReports = lazy(() => import("./pages/admin/AdminReports").then(m => ({ default: m.AdminReports })));
+const AdminCheckinReport = lazy(() => import("./pages/admin/AdminCheckinReport").then(m => ({ default: m.AdminCheckinReport })));
+const AdminBanners = lazy(() => import("./pages/admin/AdminBanners").then(m => ({ default: m.AdminBanners })));
+const WasteControl = lazy(() => import("./pages/admin/WasteControl").then(m => ({ default: m.WasteControl })));
+const AdminLogs = lazy(() => import("./pages/admin/AdminLogs").then(m => ({ default: m.AdminLogs })));
+const AdminRecipes = lazy(() => import("./pages/admin/AdminRecipes").then(m => ({ default: m.AdminRecipes })));
 // AdminPermissions removed – route now uses AdminUsers with defaultTab="permissions"
+
+// Shown briefly while an admin page chunk downloads (fast on repeat visits — cached by the browser).
+function AdminPageFallback() {
+  return (
+    <div className="flex items-center justify-center py-24">
+      <Loader2 className="animate-spin text-muted-foreground" size={28} />
+    </div>
+  );
+}
+
+function LazyAdminPage({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<AdminPageFallback />}>{children}</Suspense>;
+}
 
 // Wrapper to add per-route error boundaries
 function WithBoundary({ children, name }: { children: React.ReactNode; name: string }) {
@@ -105,28 +122,28 @@ export const router = createBrowserRouter([
         errorElement: <WithBoundary name="Admin"><div /></WithBoundary>,
         children: [
           // Operational Group (First Priority)
-          { index: true, element: <WithBoundary name="Dashboard"><AdminDashboard /></WithBoundary> },
-          { path: "orders", element: <WithBoundary name="Pedidos"><AdminOrders /></WithBoundary> },
-          { path: "kitchen", element: <WithBoundary name="Cozinha KDS"><KitchenDashboard /></WithBoundary> },
-          { path: "checkin", element: <WithBoundary name="Check-in"><AdminCheckin /></WithBoundary> },
-          { path: "waste", element: <WithBoundary name="Controle de Desperdício"><WasteControl /></WithBoundary> },
-          
+          { index: true, element: <WithBoundary name="Dashboard"><LazyAdminPage><AdminDashboard /></LazyAdminPage></WithBoundary> },
+          { path: "orders", element: <WithBoundary name="Pedidos"><LazyAdminPage><AdminOrders /></LazyAdminPage></WithBoundary> },
+          { path: "kitchen", element: <WithBoundary name="Cozinha KDS"><LazyAdminPage><KitchenDashboard /></LazyAdminPage></WithBoundary> },
+          { path: "checkin", element: <WithBoundary name="Check-in"><LazyAdminPage><AdminCheckin /></LazyAdminPage></WithBoundary> },
+          { path: "waste", element: <WithBoundary name="Controle de Desperdício"><LazyAdminPage><WasteControl /></LazyAdminPage></WithBoundary> },
+
           // Management Group
-          { path: "menu-planner", element: <WithBoundary name="Cardápio"><AdminMenu /></WithBoundary> },
-          { path: "items", element: <WithBoundary name="Itens"><AdminItems /></WithBoundary> },
-          { path: "reviews", element: <WithBoundary name="Avaliações"><AdminReviews /></WithBoundary> },
-          { path: "reports", element: <WithBoundary name="Relatórios"><AdminReports /></WithBoundary> },
-          { path: "checkin-report", element: <WithBoundary name="Relatório de Check-in"><AdminCheckinReport /></WithBoundary> },
-          { path: "users", element: <WithBoundary name="Usuários & Permissões"><AdminUsers /></WithBoundary> },
+          { path: "menu-planner", element: <WithBoundary name="Cardápio"><LazyAdminPage><AdminMenu /></LazyAdminPage></WithBoundary> },
+          { path: "items", element: <WithBoundary name="Itens"><LazyAdminPage><AdminItems /></LazyAdminPage></WithBoundary> },
+          { path: "reviews", element: <WithBoundary name="Avaliações"><LazyAdminPage><AdminReviews /></LazyAdminPage></WithBoundary> },
+          { path: "reports", element: <WithBoundary name="Relatórios"><LazyAdminPage><AdminReports /></LazyAdminPage></WithBoundary> },
+          { path: "checkin-report", element: <WithBoundary name="Relatório de Check-in"><LazyAdminPage><AdminCheckinReport /></LazyAdminPage></WithBoundary> },
+          { path: "users", element: <WithBoundary name="Usuários & Permissões"><LazyAdminPage><AdminUsers /></LazyAdminPage></WithBoundary> },
           // permissions route → same component, opens the Permissions tab
-          { path: "permissions", element: <WithBoundary name="Funções & Permissões"><AdminUsers defaultTab="permissions" /></WithBoundary> },
+          { path: "permissions", element: <WithBoundary name="Funções & Permissões"><LazyAdminPage><AdminUsers defaultTab="permissions" /></LazyAdminPage></WithBoundary> },
 
           // Admin/System Group
-          { path: "banners", element: <WithBoundary name="Banners"><AdminBanners /></WithBoundary> },
-          { path: "notifications", element: <WithBoundary name="Notificacoes Admin"><AdminNotifications /></WithBoundary> },
-          { path: "settings", element: <WithBoundary name="Configuracoes"><AdminSettings /></WithBoundary> },
-          { path: "logs", element: <WithBoundary name="Log de Auditoria"><AdminLogs /></WithBoundary> },
-          { path: "recipe-suggestions", element: <WithBoundary name="Sugestões de Receita"><AdminRecipes /></WithBoundary> },
+          { path: "banners", element: <WithBoundary name="Banners"><LazyAdminPage><AdminBanners /></LazyAdminPage></WithBoundary> },
+          { path: "notifications", element: <WithBoundary name="Notificacoes Admin"><LazyAdminPage><AdminNotifications /></LazyAdminPage></WithBoundary> },
+          { path: "settings", element: <WithBoundary name="Configuracoes"><LazyAdminPage><AdminSettings /></LazyAdminPage></WithBoundary> },
+          { path: "logs", element: <WithBoundary name="Log de Auditoria"><LazyAdminPage><AdminLogs /></LazyAdminPage></WithBoundary> },
+          { path: "recipe-suggestions", element: <WithBoundary name="Sugestões de Receita"><LazyAdminPage><AdminRecipes /></LazyAdminPage></WithBoundary> },
         ],
       },
       {

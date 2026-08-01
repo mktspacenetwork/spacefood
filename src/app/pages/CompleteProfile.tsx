@@ -15,10 +15,10 @@ export function CompleteProfile() {
   const [units, setUnits] = useState<string[]>([]);
   
   const [formData, setFormData] = useState({
-    department: user?.user_metadata?.department || "",
-    age: user?.user_metadata?.age || "",
-    lunch_location: user?.user_metadata?.lunch_location || "",
-    dietary_restrictions: user?.user_metadata?.dietary_restrictions || ""
+    department: user?.department || "",
+    age: user?.age || "",
+    lunch_location: user?.lunchLocation || "",
+    dietary_restrictions: user?.dietaryRestrictions || ""
   });
 
   useEffect(() => {

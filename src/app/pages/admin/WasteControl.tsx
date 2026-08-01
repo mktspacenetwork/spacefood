@@ -82,8 +82,8 @@ export function WasteControl() {
 
       // 3. Get units from settings (optional)
       const settings = await api.get("/admin/settings").catch(() => ({}));
-      const currentUnits = Array.isArray(settings?.units) 
-        ? settings.units.map((u: any) => typeof u === "string" ? u : u.name)
+      const currentUnits: string[] = Array.isArray(settings?.units)
+        ? settings.units.map((u: any): string => typeof u === "string" ? u : u.name)
         : ["Sede Damasceno", "Sede Taipas", "Externo (Marmita)"];
       
       setUnits(currentUnits);

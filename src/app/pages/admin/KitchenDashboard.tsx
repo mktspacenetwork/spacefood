@@ -45,6 +45,10 @@ const MODE_CONFIG: Record<string, { label: string; icon: any }> = {
 export function KitchenDashboard() {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [isStale, setIsStale] = useState(false);
+  // Counts consecutive failed polls — one blip shouldn't alarm the kitchen,
+  // but the list silently going quiet for tens of seconds should.
+  const consecutiveFailures = useRef(0);
   const [items, setItems] = useState<KitchenItemSummary[]>([]);
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -129,8 +133,19 @@ export function KitchenDashboard() {
 
       setItems(aggregated.sort((a, b) => b.totalQuantity - a.totalQuantity));
       setLastUpdated(new Date());
+      if (consecutiveFailures.current > 0) {
+        consecutiveFailures.current = 0;
+        setIsStale(false);
+        toast.success("Conexão restabelecida — lista atualizada.");
+      }
     } catch (error) {
       console.error("Erro ao atualizar KDS:", error);
+      consecutiveFailures.current += 1;
+      // 2 misses on a 5s poll = ~10s out of date — worth a heads-up, not every miss.
+      if (consecutiveFailures.current === 2) {
+        setIsStale(true);
+        toast.error("Sem conexão com o servidor — a lista pode estar desatualizada.", { duration: 6000 });
+      }
     } finally {
       setLoading(false);
     }
@@ -220,9 +235,13 @@ export function KitchenDashboard() {
                   </span>
                 )}
               </div>
-              <p className="text-muted-foreground text-[11px] flex items-center gap-1.5">
+              <p className={cn("text-[11px] flex items-center gap-1.5", isStale ? "text-red-500 dark:text-red-400 font-semibold" : "text-muted-foreground")}>
                 <Clock size={11} />
-                Atualizado às {format(lastUpdated, "HH:mm:ss", { locale: ptBR })}
+                {isStale ? (
+                  <>Sem atualizar desde {format(lastUpdated, "HH:mm:ss", { locale: ptBR })} — verifique a conexão</>
+                ) : (
+                  <>Atualizado às {format(lastUpdated, "HH:mm:ss", { locale: ptBR })}</>
+                )}
                 <span className="text-foreground font-semibold ml-2">
                   {recentOrders.length} pedido{recentOrders.length !== 1 ? "s" : ""}{isToday ? " ativos" : ""}
                 </span>

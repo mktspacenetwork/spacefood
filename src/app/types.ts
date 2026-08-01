@@ -33,6 +33,7 @@ export interface User {
   avatar: string;
   role: "admin" | "user" | "kitchen" | "master";
   department?: string;
+  age?: string;
   phone?: string;
   onboardingCompleted?: boolean;
   customRoleId?: string;

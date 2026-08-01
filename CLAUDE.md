@@ -16,7 +16,7 @@ Backend (toda vez que `supabase/functions/server/index.tsx` muda):
 ```bash
 npx supabase functions deploy make-server-c3078087 --project-ref revxdizgphrntekspvkm --use-api --no-verify-jwt
 ```
-Frontend: build via Vite (`npm run build`), sem pipeline de deploy automático confirmado neste projeto — confirmar com o usuário como o build chega a produção antes de assumir que um push já é suficiente.
+Frontend: automático via GitHub Actions (`.github/workflows/deploy.yml`) — todo push em `main` builda com `npm run build` e publica via `./scripts/deploy.sh` (swap atômico de symlink no nginx, runner self-hosted `spacefood`). Ou seja, um `git push` para `main` já é suficiente para ir a produção; não precisa de passo manual. Confirmar via `gh run list --workflow=deploy.yml` se precisar verificar se um deploy específico rodou/passou.
 
 ## Sistema de permissões — cuidado com isso
 
@@ -24,6 +24,8 @@ Frontend: build via Vite (`npm run build`), sem pipeline de deploy automático c
 - **Nenhum usuário real tem role customizada atribuída hoje** — todo mundo resolve pelo fallback bruto por `auth.role`. Isso é o caminho que realmente importa em produção, não as roles nomeadas (Master/Admin/Cozinha/Cozinha Taipas) que aparecem em Usuários & Permissões.
 - **Regra crítica ao adicionar qualquer permKey nova**: sempre grave `true`/`false` explícito para TODAS as chaves em `ALL_PERM_KEYS`, nunca deixe uma chave ausente do objeto. Já existiu um bug sério onde "ausente" era silenciosamente tratado como "permitido" — isso fazia roles aparentemente restritas (ex: Cozinha com 7/17 marcadas) terem acesso de fato a tudo mais (Usuários, Configurações, Banners, Logs). Corrigido em 2026-07-29, mas qualquer novo permKey precisa continuar seguindo essa regra nos dois lados (frontend `PERM_GROUPS` em `AdminUsers.tsx` e backend `ALL_PERM_KEYS` em `index.tsx` — as duas listas precisam ficar em sincronia).
 - Ao criar uma página/feature admin nova: adicionar o item em `AdminLayout.tsx` (MENU_GROUPS) E em `AdminUsers.tsx` (PERM_GROUPS) E no backend `ALL_PERM_KEYS`. Fazer só um dos três já causou inconsistência antes.
+- **(2026-07-30) O backend agora também confere `permKey`, não só o frontend.** Antes, as rotas `/admin/*` só checavam `role` genérico (`requireAdmin`/`requireAdminOrKitchen`) — a página podia estar escondida no menu, mas a API por trás continuava aberta pra quem soubesse chamar direto. Agora a maioria usa `requirePermission(c, 'permKey')` (ver `resolveUserPermissions` em `index.tsx`, mesma lógica de `/admin/my-permissions`, então os dois nunca divergem). Ao adicionar uma rota admin nova, use `requirePermission` com o `permKey` correspondente, não `requireAdmin` puro — a não ser que a rota seja genuinamente sem permKey (utilitária, ex: upload de imagem, CSV import, cleanup, inbox interno — essas ficaram só com `requireAdmin`/`requireAdminOrKitchen` mesmo, mapeamento de permKey pra elas era ambíguo demais pra arriscar).
+- `AdminLayout.tsx`: se a chamada a `/admin/my-permissions` falhar de vez (não só durante o carregamento inicial), o comportamento agora é negar por padrão (`permStatus === 'error'`), não liberar tudo — antes uma instabilidade de rede escondida atrás de um `.catch(() => null)` tinha o mesmo efeito de "sem permissões configuradas".
 
 ## Preferências de trabalho do usuário (Cleiton)
 
@@ -33,14 +35,17 @@ Frontend: build via Vite (`npm run build`), sem pipeline de deploy automático c
 - Prefere que eu analise pedidos de mudança quanto a conflitos com a dinâmica do sistema ANTES de implementar, e pergunte se encontrar problema — não simplesmente implementar ao pé da letra.
 - Projeto tem dados reais de produção (nomes de colaboradores reais) — qualquer teste que altere estado (ex: testar "Alterar Sede") deve ser revertido depois de verificado.
 
-## Pendências conhecidas (não solicitadas ainda nesta fase, mas mapeadas)
+## Ferramentas de qualidade (adicionadas 2026-07-30)
 
-Havia um plano (`wild-bouncing-wall.md`, não versionado) com itens ainda não implementados:
-- Pedidos cancelados possivelmente contados em algumas KPIs do Dashboard (verificar se ainda se aplica após as correções de 2026-07).
-- Bug: `user?.name.split(" ")` sem optional chaining em `Menu.tsx` (~linha 626) — risco de crash se `user.name` for undefined.
-- Bug: `OrderBanner.tsx` (~linha 71) `order.items.map()` sem fallback para `items` undefined.
-- Melhorias do diário alimentar da Taipas: ocultar badge de "Encerrado" pra quem não tem cutoff, permitir registro retroativo (dias anteriores), avaliação adaptada pro fluxo de registro.
-- Banners por unidade (`unitRestrictions` no Banner, hoje só existe em MenuItem).
-- AdminOrders sem separação visual clara entre "Pedidos" e "Registros" (Taipas) na mesma lista.
+- `npm run typecheck` (`tsc --noEmit`) — projeto passa limpo (0 erros) e roda no CI (`pr-checks.yml` e `deploy.yml`), antes do build. Rodar localmente antes de mudanças grandes em tipos/props.
+- Ainda não há ESLint/Prettier nem testes automatizados — nenhum dos dois foi configurado (decisão consciente: exigem escolhas de estilo/framework que não foram validadas com o usuário, e rodar lint pela primeira vez tende a estourar um volume grande de avisos pra triar). Considerar como próximo passo se o projeto crescer.
+- Dependências mortas removidas: `@mui/material`, `@mui/icons-material`, `@emotion/*`, `@popperjs/core`, `react-popper` (0 usos reais — o projeto usa Radix + Tailwind). Se algo precisar de um popover/tooltip posicionado, já existe `@radix-ui/react-popover`/`@radix-ui/react-tooltip` — não reinstalar Popper.
+- Rotas admin (`src/app/routes.tsx`) são `React.lazy` — cada página de admin vira um chunk separado, baixado só quando o usuário navega até lá. Cardápio/Carrinho (uso diário de todo mundo) continuam eager.
 
-Confirmar com o usuário se algum desses já foi resolvido antes de assumir que ainda é válido — este arquivo pode ficar desatualizado.
+## Pendências conhecidas
+
+- `react-router` e `vite` têm CVEs conhecidas que exigem bump de versão maior (fora do range declarado em `package.json`) — não apliquei `npm audit fix --force` sem testar; avaliar upgrade dedicado depois.
+- Ligar "Leaked Password Protection" no Supabase Auth (Authentication → Policies) — não há ferramenta de MCP pra isso, é manual no dashboard.
+- Rotas admin utilitárias sem `permKey` (mapeamento ambíguo demais pra arriscar): `/admin/abstentions`, `/admin/menu/published`, `/admin/upload`, `/admin/generate-ai-image`, `/admin/pwa-icon`, `/admin/inbox/*`, `/admin/cleanup`, `/admin/export`, `/admin/menu/import-csv` — continuam só com `requireAdmin`/`requireAdminOrKitchen` genérico, sem regressão em relação ao que já era antes.
+
+Os itens antigos desta seção (pedidos cancelados nas KPIs, crash em `user?.name.split`, fallback do `OrderBanner`, diário da Taipas, banners por unidade, separação Pedidos/Registros no AdminOrders) foram todos confirmados corrigidos em 2026-07-30.

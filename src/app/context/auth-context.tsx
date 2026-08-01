@@ -69,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       avatar: authUser.user_metadata?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(authUser.user_metadata?.name || "U")}&background=random`,
       role: authUser.user_metadata?.role || "user",
       department: authUser.user_metadata?.department || "",
+      age: authUser.user_metadata?.age || "",
       phone: authUser.user_metadata?.phone || "",
       onboardingCompleted: authUser.user_metadata?.onboarding_completed === true,
       lunchLocation: authUser.user_metadata?.lunch_location || "",

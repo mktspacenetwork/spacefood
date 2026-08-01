@@ -502,7 +502,7 @@ export function Profile() {
                         <Search className="mx-auto h-12 w-12 opacity-20 mb-4" />
                         <p className="font-medium">Nenhum pedido encontrado com esses filtros.</p>
                         <Button
-                          variant="link"
+                          variant="ghost"
                           onClick={() => { setSearchQuery(""); setStatusFilter("Todos"); }}
                           className="mt-2 text-primary"
                         >
@@ -518,7 +518,7 @@ export function Profile() {
                         <p className="text-sm max-w-xs mx-auto mb-4">
                           Seu histórico de refeições aparecerá aqui. Que tal fazer seu primeiro pedido?
                         </p>
-                        <Button variant="link" onClick={() => navigate("/")} className="text-primary">
+                        <Button variant="ghost" onClick={() => navigate("/")} className="text-primary">
                           Fazer meu primeiro pedido
                         </Button>
                       </>

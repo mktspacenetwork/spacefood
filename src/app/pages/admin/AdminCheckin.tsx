@@ -541,7 +541,7 @@ export function AdminCheckin() {
           )}
           <Button
             size="sm"
-            variant={status === true ? "default" : "outline"}
+            variant={status === true ? "primary" : "outline"}
             disabled={!isCheckinDay}
             onClick={() => handleCheckin({ orderId: order.id, userId: order.userId, userName: order.userName || "Usuario", unit: effUnit }, true)}
             className={cn("gap-1", status === true && "bg-green-600 hover:bg-green-700")}
@@ -609,7 +609,7 @@ export function AdminCheckin() {
           )}
           <Button
             size="sm"
-            variant={status === true ? "default" : "outline"}
+            variant={status === true ? "primary" : "outline"}
             disabled={!isCheckinDay}
             onClick={() => handleCheckin({ userId: user.id, userName, unit: effUnit, isManual: true }, true)}
             className={cn("gap-1", status === true && "bg-green-600 hover:bg-green-700")}

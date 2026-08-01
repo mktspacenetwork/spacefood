@@ -37,6 +37,11 @@ export function AdminSettings() {
   
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  // True when loadAll() couldn't fetch the real settings — the form is showing
+  // hardcoded defaults, not what's actually saved. Saving in this state would
+  // overwrite the real cutoff/unit config with those defaults, so Save stays
+  // disabled until a reload succeeds.
+  const [loadError, setLoadError] = useState(false);
   const dragUnitIdx = useRef<number | null>(null);
   const dragOverUnitIdx = useRef<number | null>(null);
 
@@ -49,6 +54,7 @@ export function AdminSettings() {
   useEffect(() => { loadAll(); }, []);
 
   const loadAll = async () => {
+    setLoadError(false);
     try {
       const settings = await api.get("/admin/settings");
       if (settings.cutoffTime) setCutoffTime(settings.cutoffTime);
@@ -70,12 +76,18 @@ export function AdminSettings() {
       if (settings.pwaIconUrl) setPwaIconUrl(settings.pwaIconUrl);
     } catch (e) {
       console.error(e);
+      setLoadError(true);
+      toast.error("Não foi possível carregar as configurações reais — o formulário está mostrando valores padrão. Recarregue antes de salvar.");
     } finally {
       setLoading(false);
     }
   };
 
   const handleSave = async () => {
+    if (loadError) {
+      toast.error("As configurações não foram carregadas corretamente. Recarregue a página antes de salvar, pra não sobrescrever os valores reais.");
+      return;
+    }
     setSaving(true);
     try {
       await api.authPost("/admin/settings", {
@@ -504,8 +516,20 @@ export function AdminSettings() {
           </CardContent>
         </Card>
 
+        {loadError && (
+          <div className="md:col-span-2 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3">
+            <p className="text-sm text-destructive flex items-center gap-2">
+              <AlertCircle size={16} />
+              Não foi possível carregar as configurações reais. O que está na tela são valores padrão — salvar agora sobrescreveria os dados reais.
+            </p>
+            <Button variant="outline" size="sm" onClick={loadAll} className="gap-1.5 shrink-0">
+              <RefreshCw size={14} /> Recarregar
+            </Button>
+          </div>
+        )}
+
         <div className="md:col-span-2 flex justify-end">
-          <Button onClick={handleSave} disabled={saving} className="gap-2">
+          <Button onClick={handleSave} disabled={saving || loadError} className="gap-2">
             {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
             Salvar Alterações
           </Button>
