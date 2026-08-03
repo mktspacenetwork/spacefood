@@ -33,9 +33,9 @@ const CART_STORAGE_KEY = "space-food-cart";
 // ── Prato Principal rules ──────────────────────────────────────────────────
 // Ovo/Omelete são tratados como "substituição": só um deles (nem entre si)
 // pode estar no pedido, e nenhum outro Prato Principal combina com eles.
-// Os demais Pratos Principais podem ser combinados livremente entre si, mas
-// no máximo 1 porção de cada — o campo `limit` cadastrado no item não se
-// aplica nesse caso.
+// Para os demais Pratos Principais:
+//   • escolhendo UM só → vale o `limit` cadastrado no item (ex: 2 porções);
+//   • combinando pratos DIFERENTES → 1 porção de cada, não mais que isso.
 export const PRATO_PRINCIPAL = "Prato Principal";
 
 const SUBSTITUTION_KEYWORDS = ["ovo", "ovos", "omelete", "omeletes"];
@@ -74,11 +74,33 @@ export function canAddPratoPrincipal(
     return { allowed: true };
   }
 
+  const others = ppItems.filter((i) => i.id !== item.id);
   const currentQty = existing ? existing.quantity : 0;
-  if (currentQty + delta > 1) {
+  const newQty = currentQty + delta;
+
+  // Um único Prato Principal escolhido — vale o limite cadastrado no item.
+  if (others.length === 0) {
+    if (newQty > item.limit) {
+      return {
+        allowed: false,
+        message: `Limite de ${item.limit} porção(ões) de "${item.name}" atingido.`,
+      };
+    }
+    return { allowed: true };
+  }
+
+  // A partir daqui há mais de um Prato Principal distinto: 1 porção de cada.
+  if (newQty > 1) {
     return {
       allowed: false,
-      message: `Você já escolheu "${item.name}". Prato Principal permite no máximo 1 porção de cada opção.`,
+      message: `Ao combinar Pratos Principais diferentes é 1 porção de cada. Remova os outros para pedir mais de "${item.name}".`,
+    };
+  }
+  const otherOverOne = others.find((i) => i.quantity > 1);
+  if (otherOverOne) {
+    return {
+      allowed: false,
+      message: `Você já tem ${otherOverOne.quantity} porções de "${otherOverOne.name}". Reduza para 1 porção para combinar com outro Prato Principal.`,
     };
   }
 

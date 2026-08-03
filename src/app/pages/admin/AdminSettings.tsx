@@ -575,7 +575,7 @@ export function AdminSettings() {
                   icon: UtensilsCrossed,
                   color: "text-indigo-500",
                   title: "Pratos Principais — combinação",
-                  desc: "Fora Ovo/Omelete, o usuário pode combinar quantos Pratos Principais distintos quiser no mesmo pedido, mas no máximo 1 porção de cada opção — o campo \"Limite\" cadastrado no item não se aplica nesse caso.",
+                  desc: "Fora Ovo/Omelete: escolhendo um único Prato Principal, vale o \"Limite\" cadastrado no item (ex: 2 porções). Ao combinar Pratos Principais diferentes no mesmo pedido, passa a ser 1 porção de cada.",
                 },
                 {
                   icon: Package,

@@ -735,14 +735,21 @@ app.post("/make-server-c3078087/orders", async (c) => {
     if (mainDishHasSubstitution && mainDishOrderItems.length > 1) {
       return c.json({ error: "Ovo/Omelete é uma opção exclusiva de Prato Principal — não combina com outro Prato Principal no mesmo pedido." }, 400);
     }
+    // Um único Prato Principal escolhido vale o `limit` cadastrado nele (ex: 2
+    // porções de Frango à Milanesa). O teto de 1 porção só entra quando a pessoa
+    // combina Pratos Principais DIFERENTES no mesmo pedido.
+    const isCombiningMainDishes = mainDishOrderItems.length > 1;
     for (const oi of orderData.items) {
       const catalogItem = catalogById.get(oi.id);
       if (!catalogItem) continue;
       const qty = oi.quantity || 1;
       const isNonSubstitutionMainDish = catalogItem.category === PRATO_PRINCIPAL && !isSubstitutionItem(catalogItem.name);
-      const cap = isNonSubstitutionMainDish ? 1 : catalogItem.limit;
+      const cap = isNonSubstitutionMainDish && isCombiningMainDishes ? 1 : catalogItem.limit;
       if (typeof cap === 'number' && qty > cap) {
-        return c.json({ error: `Limite de ${cap} porção(ões) de "${catalogItem.name}" atingido.` }, 400);
+        const reason = isNonSubstitutionMainDish && isCombiningMainDishes
+          ? `Ao combinar Pratos Principais diferentes é 1 porção de cada — "${catalogItem.name}" veio com ${qty}.`
+          : `Limite de ${cap} porção(ões) de "${catalogItem.name}" atingido.`;
+        return c.json({ error: reason }, 400);
       }
     }
 

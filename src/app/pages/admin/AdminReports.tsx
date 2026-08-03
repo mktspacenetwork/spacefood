@@ -168,9 +168,13 @@ export function AdminReports() {
   const dailyBalance = useMemo(() => {
     const targetDate = balanceDate;
     const todayOrders = allOrders.filter(o => {
-      if (!o.date) return false;
-      const orderDate = o.date.split("T")[0];
-      return orderDate === targetDate;
+      // Filtra pelo dia da REFEIÇÃO (menuDate), não pela data de criação do
+      // pedido — senão os pedidos antecipados feitos hoje para os próximos
+      // dias entram no balanço de hoje e inflam a produção. `date` fica como
+      // fallback para pedidos antigos, anteriores ao campo menuDate.
+      const mealDate = o.menuDate || (o.date ? o.date.split("T")[0] : "");
+      if (!mealDate) return false;
+      return mealDate === targetDate;
     });
 
     const balanceMap: Record<string, Record<string, number>> = {};
