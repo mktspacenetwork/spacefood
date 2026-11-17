@@ -52,7 +52,7 @@ export function CampaignRanking() {
         <EmptyState
           icon={<Lock size={22} aria-hidden="true" />}
           title="O ranking ainda não está disponível"
-          description="Ele é liberado de acordo com as regras da campanha. Volte depois do encerramento da votação ou da confirmação do vencedor."
+          description="Ele aparece depois que o resultado for divulgado."
         />
         <CampaignTour steps={RANKING_TOUR} tour={tour} />
       </div>
@@ -92,7 +92,7 @@ export function CampaignRanking() {
           {data.official ? "Resultado oficial" : "Parcial"}
         </Badge>
         {!data.official && (
-          <p className="text-xs text-muted-foreground">Contagem parcial: pode mudar até a confirmação oficial do vencedor.</p>
+          <p className="text-xs text-muted-foreground">Contagem parcial: pode mudar.</p>
         )}
       </div>
 

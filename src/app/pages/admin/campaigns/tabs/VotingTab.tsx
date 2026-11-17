@@ -1,49 +1,37 @@
 import { useState } from "react";
-import { BellRing, CalendarPlus, ListChecks, Loader2, Pause, Play, SlidersHorizontal, Trophy, Users } from "lucide-react";
+import { CalendarDays, Loader2, Lock, Square, Trophy } from "lucide-react";
 import { Badge } from "../../../../components/ui/Badge";
 import { Button } from "../../../../components/ui/Button";
 import { Card, CardContent } from "../../../../components/ui/Card";
 import { ConfirmDialog } from "../../../../components/ui/ConfirmDialog";
-import { Input } from "../../../../components/ui/input";
-import { Label } from "../../../../components/ui/label";
 import { Progress } from "../../../../components/ui/progress";
-import { Textarea } from "../../../../components/ui/textarea";
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "../../../../components/ui/dialog";
 import { cn } from "../../../../lib/utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
-import { PHASE_STATE, fmtDateTime, fromInputValue, plural, toInputValue } from "../../../../lib/campaigns/format";
-import type { AdminDashboard, AdminResults, TallyRow } from "../../../../lib/campaigns/types";
+import { PHASE_STATE, fmtDate, fmtPeriod, plural } from "../../../../lib/campaigns/format";
+import type { AdminDashboard, AdminResults } from "../../../../lib/campaigns/types";
 import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
-import { ErrorBox, LoadingBox, Notice, ReasonDialog, SectionLabel, stageState, useBusy, useLoader } from "../shared";
-import { ResultFlow } from "./VoteFlow";
+import { ErrorBox, LoadingBox, Notice, SectionLabel, stageState, useBusy, useLoader } from "../shared";
+import { ResultView } from "./VoteFlow";
 import type { TabProps } from "./types";
-import { Fold, TabIntro } from "./ui";
+import { TabIntro } from "./ui";
 import { useTabTour } from "./useTabTour";
 
 /**
- * VOTAÇÃO — o único lugar para: situação da votação, controles, ranking e o caminho até o resultado.
- *  - Quem votou em quem (votos individuais) e a ação de invalidar ficam em PARTICIPANTES.
- *  - Datas da votação (início/fim) ficam em CONFIGURAÇÕES; aqui só se pausa, prorroga e encerra.
+ * VOTAÇÃO — situação da votação e o caminho até o resultado.
+ *  - Durante a votação: só a participação (quantas pessoas já votaram). Nada de contagem por receita.
+ *  - Depois do encerramento: botão "Ver resultado" → vencedor, conferência, confirmar e divulgar.
+ *  - O período (início e encerramento) é editado em Configurações; aqui só há "Encerrar votação agora".
+ *  - Quem votou em quem fica em Participantes.
  */
-export function VotingTab({ campaignId, results, perms, onChanged, goTab, tourUserId, tourSignal }: TabProps) {
+export function VotingTab(props: TabProps) {
+  const { campaignId, results, perms, onChanged, tourUserId, tourSignal } = props;
   const dash = useLoader<AdminDashboard>(() => campaignsApi.get(`/admin/campaigns/${campaignId}/dashboard`), [campaignId]);
   const { busy, run } = useBusy();
-  // A tour desta aba abre sozinha (uma vez) quando os dados já carregaram.
   const tour = useTabTour("voting", { tourUserId, tourSignal, ready: !!dash.data });
-  // null = "automático" (depende da fase); depois que a pessoa abre/fecha à mão, vale a escolha dela.
-  const [ctrlOpen, setCtrlOpen] = useState<boolean | null>(null);
-  const [flowOpen, setFlowOpen] = useState<boolean | null>(null);
-
-  const [pauseOpen, setPauseOpen] = useState(false);
-  const [extendOpen, setExtendOpen] = useState(false);
+  // null = automático (mostra o resultado quando já existe apuração); depois que a pessoa pede, vale a escolha dela.
+  const [shown, setShown] = useState<boolean | null>(null);
   const [endNowOpen, setEndNowOpen] = useState(false);
-  const [tallyOpen, setTallyOpen] = useState(false);
-  const [notifyOpen, setNotifyOpen] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [announceOpen, setAnnounceOpen] = useState(false);
 
   if (dash.loading && !dash.data) return <LoadingBox />;
   if (dash.error && !dash.data) return <ErrorBox message={dash.error} onRetry={dash.reload} />;
@@ -58,92 +46,51 @@ export function VotingTab({ campaignId, results, perms, onChanged, goTab, tourUs
   const res = { ...(results ?? {}), ...(d.results ?? {}) } as Partial<AdminResults>;
   const resultsStatus = res.status ?? "none";
   const finalized = resultsStatus === "confirmed" || resultsStatus === "announced";
-  const official = finalized;
+  const ended = state === "closed";
   const canSchedule = !!perms.campaigns_schedule;
-  const canSeeTally = !!perms.campaigns_results;
-  const tally: TallyRow[] | null = canSeeTally ? d.tally ?? [] : null;
+  const canSeeResult = !!perms.campaigns_results;
+  const isBusy = busy !== null;
+  const endsAt = vs?.ends_at ?? d.voting_ends_at ?? null;
+  const resultShown = shown ?? resultsStatus !== "none";
   const refresh = () => { dash.reload(); onChanged(); };
 
-  // ── ações ───────────────────────────────────────────────────────────────
-  const pauseToggle = async (reason: string) => {
-    const pause = state !== "paused";
-    const r = await run("pause", () => campaignsApi.post(`${base}/stages/voting/pause`, { pause, reason: reason || null }), pause ? "Votação pausada." : "Votação reaberta.");
-    if (r.ok) { setPauseOpen(false); refresh(); }
-  };
   const endNow = async () => {
     setEndNowOpen(false);
-    const r = await run("end", () => campaignsApi.post(`${base}/voting/close`, { end_now: true }), "Votação encerrada e apurada.");
-    if (r.ok) refresh();
-  };
-  const tallyNow = async () => {
-    setTallyOpen(false);
-    const r = await run("tally", () => campaignsApi.post(`${base}/voting/close`, { end_now: false }), "Votação apurada.");
-    if (r.ok) refresh();
-  };
-  const notify = async () => {
-    setNotifyOpen(false);
-    await run("notify", () => campaignsApi.post<{ queued: number }>(`${base}/notify`, { event: "voting_open" }), "Aviso enviado aos colaboradores elegíveis.");
-  };
-  const decideTie = async (submissionId: string, justification: string) => {
-    const r = await run("tie", () => campaignsApi.post(`${base}/results/tiebreak`, { submission_id: submissionId, justification }), "Desempate registrado.");
-    if (r.ok) refresh();
-    return r.ok;
-  };
-  const confirmWinner = async () => {
-    setConfirmOpen(false);
-    const r = await run("confirm", () => campaignsApi.post(`${base}/results/confirm`), "Vencedor confirmado.");
-    if (r.ok) refresh();
-  };
-  const announce = async () => {
-    setAnnounceOpen(false);
-    const r = await run("announce", () => campaignsApi.post(`${base}/results/announce`), "Resultado divulgado aos colaboradores.");
-    if (r.ok) refresh();
+    const r = await run("end", () => campaignsApi.post(`${base}/voting/close`, { end_now: true }), "Votação encerrada.");
+    if (r.ok) { setShown(true); refresh(); }
   };
 
-  // ── controles: sempre visíveis; os que não se aplicam ficam desligados COM o motivo ──
-  const isBusy = busy !== null;
-  const canPause = state === "open" || state === "upcoming";
-  const canReopen = state === "paused";
-  const canExtend = !!vs?.ends_at && (state === "open" || state === "paused" || state === "closed");
-  const canNotify = state === "open";
-  const whyNot: string[] = [];
-  if (!canPause && !canReopen) whyNot.push("Pausar: só com a votação aberta ou prestes a abrir.");
-  if (!canExtend) whyNot.push(vs?.ends_at ? "Prorrogar: só depois que a votação começa." : "Prorrogar: defina uma data de término em Configurações.");
-  if (!canNotify) whyNot.push("Avisar: só com a votação aberta.");
-
-  // Controles abertos com a votação em andamento; "resultado" aberto quando a votação terminou ou já há apuração.
-  const ctrlIsOpen = ctrlOpen ?? (state === "open" || state === "paused");
-  const flowIsOpen = flowOpen ?? (state === "closed" || resultsStatus !== "none");
-
-  const winnerRow = tally?.find((t) => t.submission_id === res.winner_submission_id);
-  const total = d.tally ? d.tally.reduce((acc, t) => acc + t.votes, 0) : d.votes_valid;
-  const maxVotes = Math.max(1, ...(tally ?? []).map((t) => t.votes));
-  const rankOf = (t: TallyRow) => 1 + (tally ?? []).filter((x) => x.votes > t.votes).length;
+  // "Ver resultado": se ainda não foi apurado, apura agora (o servidor só libera depois do encerramento) e mostra.
+  const seeResult = async () => {
+    if (resultsStatus === "none") {
+      const r = await run("tally", () => campaignsApi.post(`${base}/voting/close`, { end_now: false }));
+      if (!r.ok) return;
+      refresh();
+    }
+    setShown(true);
+  };
 
   return (
-    <div className="space-y-5">
-      <TabIntro>Acompanhe a votação, veja o ranking e siga o passo a passo até divulgar o resultado.</TabIntro>
+    <div className="space-y-4">
+      <TabIntro>Acompanhe quem já votou. O resultado fica disponível depois do encerramento.</TabIntro>
 
-      {/* 1 — Situação */}
+      {/* Situação */}
       <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-vote-status">
         <CardContent className="grid gap-5 p-5 md:grid-cols-2">
           <div className="space-y-2">
             <SectionLabel>Situação da votação</SectionLabel>
             <Badge className={cn("border px-3 py-1 text-sm", phase.className)}>Votação {phase.label.toLowerCase()}</Badge>
-            <p className="text-xs text-muted-foreground">
-              {vs?.starts_at || vs?.ends_at
-                ? `${fmtDateTime(vs?.starts_at)} → ${fmtDateTime(vs?.ends_at)}`
-                : "Defina as datas da votação na aba Configurações."}
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <CalendarDays size={13} aria-hidden="true" /> {vs?.starts_at || vs?.ends_at ? fmtPeriod(vs?.starts_at, vs?.ends_at) : "Defina o período em Configurações."}
             </p>
-            {state === "open" && vs?.ends_at && <p className="text-xs font-medium text-foreground">Fecha em {fmtDateTime(vs.ends_at)}.</p>}
-            {state === "paused" && <p className="text-xs font-medium text-foreground">Pausada: ninguém consegue votar até a reabertura.</p>}
-            {state === "closed" && vs?.ends_at && <p className="text-xs text-muted-foreground">Encerrada em {fmtDateTime(vs.ends_at)}.</p>}
+            {state === "open" && endsAt && <p className="text-xs font-medium text-foreground">Encerra em {fmtDate(endsAt)} (fim do dia).</p>}
+            {state === "paused" && <p className="text-xs font-medium text-foreground">Pausada: ninguém consegue votar por enquanto.</p>}
           </div>
 
           <div className="space-y-3">
             <div className="flex items-end justify-between gap-4">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Votos válidos</p>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Votos</p>
                 <p className="text-3xl font-bold tabular-nums text-foreground">{d.votes_valid}</p>
               </div>
               <div className="text-right">
@@ -156,246 +103,72 @@ export function VotingTab({ campaignId, results, perms, onChanged, goTab, tourUs
               <p className="text-[11px] text-muted-foreground">{d.voting_pct}% dos elegíveis já votaram.</p>
             </div>
             {d.votes_invalidated > 0 && (
-              <p className="text-[11px] text-muted-foreground">
-                {plural(d.votes_invalidated, "voto invalidado", "votos invalidados")} (não entram na contagem). Veja em Participantes.
-              </p>
+              <p className="text-[11px] text-muted-foreground">{plural(d.votes_invalidated, "voto invalidado", "votos invalidados")} (não entram na contagem).</p>
             )}
           </div>
         </CardContent>
       </Card>
 
-      {/* 2 — Ranking (votos por receita) */}
-      <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-vote-ranking">
+      {/* Resultado */}
+      <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-vote-result">
         <CardContent className="space-y-4 p-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <SectionLabel>Ranking — votos por receita</SectionLabel>
-            {tally && (
-              <Badge className={cn("border text-[10px]", official
-                ? "border-green-200 bg-green-100 text-green-700 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300"
-                : "border-yellow-200 bg-yellow-100 text-yellow-700 dark:border-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300")}>
-                {official ? "Oficial" : "Parcial"}
-              </Badge>
-            )}
-          </div>
+          <SectionLabel>Resultado</SectionLabel>
 
-          {!tally ? (
-            <Notice tone="info">A contagem de votos por receita aparece para quem tem a permissão “Ver apuração”.</Notice>
-          ) : tally.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Ainda não há receitas aprovadas para receber votos.</p>
+          {!ended && resultsStatus === "none" ? (
+            <div className="space-y-3">
+              <Button size="lg" className="w-full gap-2 rounded-2xl sm:w-auto" disabled>
+                <Lock size={16} /> Ver resultado
+              </Button>
+              <p className="text-sm text-muted-foreground">
+                Disponível depois do encerramento da votação{endsAt ? ` (${fmtDate(endsAt)})` : ""}. Até lá, ninguém vê a contagem por receita — nem a gestão —, para o resultado não influenciar os votos.
+              </p>
+              {canSchedule && state === "open" && (
+                <div className="space-y-1 border-t pt-3">
+                  <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => setEndNowOpen(true)} disabled={isBusy}>
+                    {busy === "end" ? <Loader2 size={13} className="animate-spin" /> : <Square size={13} />} Encerrar votação agora
+                  </Button>
+                  <p className="text-[11px] text-muted-foreground">Só se quiser antecipar o fim. Encerra também o envio de receitas e ninguém mais vota.</p>
+                </div>
+              )}
+            </div>
+          ) : !canSeeResult ? (
+            <Notice tone="info">A votação encerrou. Para ver o resultado é preciso a permissão “Ver apuração”.</Notice>
+          ) : !resultShown ? (
+            <div className="space-y-3">
+              {resultsStatus === "none" && !canSchedule ? (
+                <Notice tone="info">A votação encerrou, mas o resultado ainda não foi apurado. Peça a quem gerencia as datas da campanha para apurar.</Notice>
+              ) : (
+                <>
+                  <Button size="lg" className="w-full gap-2 rounded-2xl sm:w-auto" onClick={seeResult} disabled={isBusy}>
+                    {busy === "tally" ? <Loader2 size={16} className="animate-spin" /> : <Trophy size={16} />} Ver resultado
+                  </Button>
+                  <p className="text-sm text-muted-foreground">A votação encerrou. Veja quem ganhou e confira os números.</p>
+                </>
+              )}
+            </div>
           ) : (
-            <>
-              {total === 0 && <p className="text-xs text-muted-foreground">Nenhum voto válido registrado ainda.</p>}
-              <ol className="space-y-3">
-                {tally.map((t) => (
-                  <li key={t.submission_id} className="space-y-1">
-                    <div className="flex items-center justify-between gap-3 text-sm">
-                      <span className="min-w-0 truncate">
-                        <b className="mr-2 text-muted-foreground">{total > 0 ? `${rankOf(t)}º` : "—"}</b>
-                        {t.dish_name} <span className="text-muted-foreground">— {t.author}</span>
-                        {official && res.winner_submission_id === t.submission_id && (
-                          <Trophy size={13} className="ml-2 inline text-amber-500" aria-label="Vencedora" />
-                        )}
-                      </span>
-                      <b className="shrink-0 tabular-nums">{t.votes}</b>
-                    </div>
-                    <Progress value={(t.votes / maxVotes) * 100} aria-label={`${t.votes} votos`} />
-                  </li>
-                ))}
-              </ol>
-            </>
+            <ResultView
+              {...props}
+              totals={{ votesValid: d.votes_valid, voters: d.voters, eligible: d.eligible, invalidated: d.votes_invalidated }}
+              onChanged={refresh}
+            />
           )}
 
-          {goTab && (
-            <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => goTab("participants")}>
-              <Users size={13} /> Ver quem votou em cada receita
-            </Button>
-          )}
+          {finalized && <p className="text-[11px] text-muted-foreground">O vencedor já foi confirmado: a votação não pode mais ser alterada.</p>}
         </CardContent>
       </Card>
 
-      {/* 3 — Controles: aberto enquanto a votação está em andamento; recolhido nas outras fases */}
-      <Fold
-        title="Controles da votação"
-        hint="Pausar, prorrogar e avisar os colaboradores."
-        icon={<SlidersHorizontal size={18} />}
-        open={ctrlIsOpen}
-        onOpenChange={setCtrlOpen}
-        tutorial="camp-vote-controls"
-      >
-        <div className="space-y-3">
-          {finalized ? (
-            <Notice tone="info">O vencedor já foi confirmado: a votação não pode mais ser alterada.</Notice>
-          ) : !canSchedule ? (
-            <p className="text-xs text-muted-foreground">Você não tem permissão para pausar, prorrogar ou avisar sobre a votação.</p>
-          ) : (
-            <>
-              <div className="flex flex-wrap gap-2">
-                {canReopen ? (
-                  <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => setPauseOpen(true)} disabled={isBusy}>
-                    {busy === "pause" ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Reabrir votação
-                  </Button>
-                ) : (
-                  <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => setPauseOpen(true)} disabled={!canPause || isBusy}>
-                    {busy === "pause" ? <Loader2 size={13} className="animate-spin" /> : <Pause size={13} />} Pausar votação
-                  </Button>
-                )}
-                <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => setExtendOpen(true)} disabled={!canExtend || isBusy}>
-                  <CalendarPlus size={13} /> Prorrogar
-                </Button>
-                <Button variant="ghost" size="sm" className="gap-2 rounded-xl" onClick={() => setNotifyOpen(true)} disabled={!canNotify || isBusy}>
-                  {busy === "notify" ? <Loader2 size={13} className="animate-spin" /> : <BellRing size={13} />} Avisar que a votação começou
-                </Button>
-              </div>
-              {whyNot.length > 0 && <p className="text-[11px] text-muted-foreground">Indisponível agora — {whyNot.join(" ")}</p>}
-            </>
-          )}
-          <p className="text-[11px] text-muted-foreground">
-            Quando a votação começa, as receitas ficam travadas para sempre. Pausar ou prorrogar não libera a edição nem apaga votos. Para encerrar, use o passo 1 do resultado.
-          </p>
-        </div>
-      </Fold>
-
-      {/* 4 — Do fim da votação ao resultado: aberto quando a votação terminou ou já há resultado */}
-      <Fold
-        title="Do fim da votação ao resultado"
-        hint="Encerrar, apurar, decidir empate, confirmar o vencedor e divulgar."
-        icon={<ListChecks size={18} />}
-        open={flowIsOpen}
-        onOpenChange={setFlowOpen}
-        tutorial="camp-vote-flow"
-      >
-        <ResultFlow
-          phase={state}
-          res={res}
-          tally={tally}
-          perms={perms}
-          busy={busy}
-          votesValid={d.votes_valid}
-          onEndNow={() => setEndNowOpen(true)}
-          onTally={() => setTallyOpen(true)}
-          onTie={decideTie}
-          onConfirm={() => setConfirmOpen(true)}
-          onAnnounce={() => setAnnounceOpen(true)}
-        />
-      </Fold>
-
-      {/* Diálogos */}
-      <ReasonDialog
-        open={pauseOpen}
-        onOpenChange={setPauseOpen}
-        title={state === "paused" ? "Reabrir a votação?" : "Pausar a votação?"}
-        description={state === "paused" ? "Os colaboradores voltam a poder votar." : "Enquanto estiver pausada, ninguém consegue votar. Nenhum voto é apagado."}
-        placeholder="Motivo (opcional)"
-        confirmLabel={state === "paused" ? "Reabrir votação" : "Pausar votação"}
-        pending={busy === "pause"}
-        onConfirm={pauseToggle}
-      />
-      {extendOpen && vs?.ends_at && (
-        <ExtendDialog
-          stage="voting"
-          title="Prorrogar a votação"
-          currentEnd={vs.ends_at}
-          base={base}
-          onClose={() => setExtendOpen(false)}
-          onDone={() => { setExtendOpen(false); refresh(); }}
-        />
-      )}
       <ConfirmDialog
         open={endNowOpen}
         onOpenChange={setEndNowOpen}
         title="Encerrar a votação agora?"
-        description="Ninguém mais poderá votar e a votação será apurada. Você ainda poderá registrar o desempate, confirmar o vencedor e divulgar o resultado depois."
+        description="A campanha termina agora: ninguém mais poderá enviar receitas nem votar. Depois você poderá ver o resultado, confirmar o vencedor e divulgar."
         confirmLabel="Encerrar votação"
         variant="destructive"
         onConfirm={endNow}
       />
-      <ConfirmDialog
-        open={tallyOpen}
-        onOpenChange={setTallyOpen}
-        title="Apurar a votação?"
-        description={plural(d.votes_valid, "voto válido será contado", "votos válidos serão contados") + ". O resultado preliminar fica visível só para a gestão até você confirmar o vencedor."}
-        confirmLabel="Apurar"
-        onConfirm={tallyNow}
-      />
-      <ConfirmDialog
-        open={notifyOpen}
-        onOpenChange={setNotifyOpen}
-        title="Avisar que a votação começou?"
-        description="Cada colaborador elegível recebe uma notificação. O envio não pode ser desfeito (e ninguém recebe duas vezes)."
-        confirmLabel="Enviar aviso"
-        onConfirm={notify}
-      />
-      <ConfirmDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        title="Confirmar o vencedor?"
-        description={`${winnerRow?.dish_name ?? "A receita"} será registrada como vencedora. Depois disso, votos e datas da votação não podem mais ser alterados.`}
-        confirmLabel="Confirmar vencedor"
-        onConfirm={confirmWinner}
-      />
-      <ConfirmDialog
-        open={announceOpen}
-        onOpenChange={setAnnounceOpen}
-        title="Divulgar o resultado?"
-        description="Os colaboradores elegíveis passam a ver o vencedor e recebem uma notificação. A divulgação não pode ser desfeita."
-        confirmLabel="Divulgar resultado"
-        variant="destructive"
-        onConfirm={announce}
-      />
 
       <CampaignTour steps={ADMIN_TOUR_TABS.voting} tour={tour} />
     </div>
-  );
-}
-
-/** Prorrogação: novo fim (sempre depois do atual) + motivo opcional. Usada aqui e na aba Configurações (calendário). */
-export function ExtendDialog({
-  stage, title, currentEnd, base, onClose, onDone,
-}: {
-  stage: string;
-  title: string;
-  currentEnd: string;
-  base: string;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [value, setValue] = useState(toInputValue(currentEnd));
-  const [reason, setReason] = useState("");
-  const { busy, run } = useBusy();
-  const iso = fromInputValue(value);
-  const valid = !!iso && new Date(iso) > new Date(currentEnd);
-
-  const submit = async () => {
-    if (!valid) return;
-    const r = await run("extend", () => campaignsApi.post(`${base}/stages/${stage}/extend`, { ends_at: iso, reason: reason.trim() || null }), "Prazo prorrogado.");
-    if (r.ok) onDone();
-  };
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>Prazo atual: {fmtDateTime(currentEnd)} (Brasília). O novo prazo precisa ser depois do atual.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Novo prazo final</Label>
-            <Input type="datetime-local" value={value} onChange={(e) => setValue(e.target.value)} className="h-10 rounded-xl" disabled={!!busy} />
-            {!valid && <p className="text-[11px] text-destructive">Escolha uma data e hora depois do prazo atual.</p>}
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Motivo (opcional)</Label>
-            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={1000} className="rounded-xl" disabled={!!busy} />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" className="rounded-xl" onClick={onClose} disabled={!!busy}>Cancelar</Button>
-          <Button className="gap-2 rounded-xl" onClick={submit} disabled={!valid || !!busy}>
-            {busy && <Loader2 size={14} className="animate-spin" />} Prorrogar
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

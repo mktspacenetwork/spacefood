@@ -31,13 +31,8 @@ export function VoteConfirmDialog({
     <AlertDialog open={open} onOpenChange={(o) => { if (!loading) onOpenChange(o); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <div className="mx-auto mb-1 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary sm:mx-0">
-            <Vote size={22} aria-hidden="true" />
-          </div>
-          <AlertDialogTitle>Confirmar o seu voto?</AlertDialogTitle>
-          <AlertDialogDescription>
-            Você está votando em <strong className="text-foreground">“{dishName}”</strong>. Seu voto é definitivo e não poderá ser alterado.
-          </AlertDialogDescription>
+          <AlertDialogTitle>Votar em “{dishName}”?</AlertDialogTitle>
+          <AlertDialogDescription>Seu voto é definitivo.</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="gap-2 sm:gap-2">
           <AlertDialogCancel disabled={loading} className="h-11 rounded-xl">

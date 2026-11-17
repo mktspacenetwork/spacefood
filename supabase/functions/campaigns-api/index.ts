@@ -32,8 +32,10 @@ const ERR: Record<string, [number, string]> = {
   NOT_ELIGIBLE: [403, "Você não está autorizado a participar desta campanha."],
   REGISTRATION_CLOSED: [409, "As inscrições não estão abertas."],
   REGISTRATION_PAUSED: [409, "As inscrições estão pausadas no momento."],
-  EDIT_LOCKED: [409, "A votação já começou: as receitas não podem mais ser alteradas."],
+  EDIT_LOCKED: [409, "Esta receita já foi aprovada e não pode mais ser alterada."],
+  RESULTS_LOCKED: [409, "O resultado só fica disponível depois que a votação for encerrada."],
   VOTING_CLOSED: [409, "A votação não está aberta."],
+  HAS_VOTES: [409, "Esta receita já recebeu votos e não pode ser reprovada. Invalide os votos dela antes, se for mesmo necessário."],
   VOTING_PAUSED: [409, "A votação está pausada no momento."],
   VOTING_NOT_STARTED: [409, "A votação ainda não começou."],
   VOTING_STARTED: [409, "A votação já começou: não é mais possível aprovar ou reprovar receitas."],
@@ -269,6 +271,33 @@ async function getCampaignById(id: string): Promise<Row> {
 async function getStages(id: string): Promise<Row[]> {
   const { data } = await sb.from("campaign_stages").select("stage_key,starts_at,ends_at,paused").eq("campaign_id", id);
   return data ?? [];
+}
+/**
+ * Resultado (contagem por receita, ranking, votos individuais) só aparece para a gestão DEPOIS que a votação
+ * encerra. `locked` = a campanha tem votação e a data de encerramento ainda não passou. Contagens gerais de
+ * participação (quantas pessoas já votaram) NÃO são resultado e continuam visíveis.
+ */
+async function resultsGate(camp: Row, stages?: Row[]): Promise<{ hasVoting: boolean; locked: boolean; endsAt: string | null }> {
+  const st = stages ?? await getStages(camp.id);
+  const vs = st.find((s) => s.stage_key === "voting");
+  const hasVoting = !!camp.features?.voting;
+  const endsAt: string | null = vs?.ends_at ?? null;
+  const closed = !!endsAt && new Date(endsAt).getTime() <= Date.now();
+  return { hasVoting, locked: hasVoting && !closed, endsAt };
+}
+/** No contexto de ANÁLISE de receitas, "votação encerrada" tem mensagem própria (para o eleitor continua "não está aberta"). */
+function reviewErr(e: unknown): unknown {
+  if (e instanceof AppError && e.code === "VOTING_CLOSED") {
+    return new AppError(409, "VOTING_CLOSED", "A votação já foi encerrada: não é mais possível analisar receitas.");
+  }
+  return e;
+}
+/** Data ISO válida ou null; qualquer outra coisa vira erro 422 (em vez de erro de banco). */
+function isoOrNull(v: unknown): string | null {
+  if (v === null || v === undefined || v === "") return null;
+  const d = new Date(String(v));
+  if (Number.isNaN(d.getTime())) throw new AppError(422, "INVALID_DATES", ERR.INVALID_DATES[1]);
+  return d.toISOString();
 }
 async function collab(c: unknown, slug: string) {
   const user = await requireUser(c);
@@ -633,6 +662,14 @@ for (const [route, key] of [["stages/:key", "campaigns_schedule"]] as const) {
     return c.json({ ok: true });
   });
 }
+// Período único da campanha: início + encerramento. Inscrições = [início, encerramento]; com votação, a
+// votação usa a MESMA janela (tudo no banco, em uma transação, com uma linha de auditoria SET_PERIOD).
+app.put("/admin/campaigns/:id/period", async (c) => {
+  const a = await requireAdmin(c, "campaigns_schedule");
+  const b = await body(c);
+  await rpc("campaign_set_period", { p_actor: a.actor, p_campaign: c.req.param("id"), p_starts: isoOrNull(b.starts_at), p_ends: isoOrNull(b.ends_at) });
+  return c.json({ ok: true });
+});
 app.post("/admin/campaigns/:id/stages/:key/extend", async (c) => {
   const a = await requireAdmin(c, "campaigns_schedule");
   const b = await body(c);
@@ -726,7 +763,11 @@ app.get("/admin/campaigns/:id/dashboard", async (c) => {
     voting_pct: eligible ? Math.round((new Set(vRows.filter((v) => !v.invalidated_at).map((v) => v.voter_id)).size / eligible) * 100) : 0,
     results: results.data, stages, locked: !!camp.edit_locked_at,
   };
-  if (a.perms.campaigns_results) out.tally = (await rpc<Row[]>("campaign_tally", { p_campaign: id })).map((t) => ({ submission_id: t.submission_id, dish_name: t.dish_name, author: t.user_name, votes: Number(t.votes) }));
+  // Resultado oculto até a votação encerrar: sem ranking nem contagem por receita antes da data limite.
+  const gate = await resultsGate(camp, stages);
+  out.results_locked = gate.locked;
+  out.voting_ends_at = gate.endsAt;
+  if (a.perms.campaigns_results && !gate.locked) out.tally = (await rpc<Row[]>("campaign_tally", { p_campaign: id })).map((t) => ({ submission_id: t.submission_id, dish_name: t.dish_name, author: t.user_name, votes: Number(t.votes) }));
   return c.json(out);
 });
 
@@ -754,7 +795,7 @@ app.get("/admin/campaigns/:id/submissions/:sid", async (c) => {
 app.post("/admin/campaigns/:id/submissions/:sid/approve", async (c) => {
   const a = await requireAdmin(c, "campaigns_review");
   const id = c.req.param("id");
-  const r = await rpc<Row>("campaign_review", { p_actor: a.actor, p_campaign: id, p_submission: c.req.param("sid"), p_decision: "approve", p_reason: null });
+  const r = await rpc<Row>("campaign_review", { p_actor: a.actor, p_campaign: id, p_submission: c.req.param("sid"), p_decision: "approve", p_reason: null }).catch((e) => { throw reviewErr(e); });
   const camp = await getCampaignById(id);
   wait(notifyUser(id, r.user_id, "submission_approved", c.req.param("sid"), "Receita aprovada", `Sua receita ${r.dish_name} foi aprovada na campanha ${camp.name}.`));
   return c.json({ status: r.status });
@@ -763,7 +804,7 @@ app.post("/admin/campaigns/:id/submissions/:sid/reject", async (c) => {
   const a = await requireAdmin(c, "campaigns_review");
   const id = c.req.param("id");
   const b = await body(c);
-  const r = await rpc<Row>("campaign_review", { p_actor: a.actor, p_campaign: id, p_submission: c.req.param("sid"), p_decision: "reject", p_reason: strOrUndef(b.reason) ?? "" });
+  const r = await rpc<Row>("campaign_review", { p_actor: a.actor, p_campaign: id, p_submission: c.req.param("sid"), p_decision: "reject", p_reason: strOrUndef(b.reason) ?? "" }).catch((e) => { throw reviewErr(e); });
   const camp = await getCampaignById(id);
   wait(notifyUser(id, r.user_id, "submission_rejected", c.req.param("sid"), "Receita reprovada", `Sua receita ${r.dish_name} não foi aprovada na campanha ${camp.name}. Veja o motivo em Minha participação.`));
   return c.json({ status: r.status });
@@ -787,10 +828,13 @@ app.get("/admin/campaigns/:id/participants", async (c) => {
 app.get("/admin/campaigns/:id/votes", async (c) => {
   await requireAdmin(c, "campaigns_votes_view");
   const id = c.req.param("id");
+  // Quem votou em qual receita é resultado parcial: só depois que a votação encerra.
+  const gate = await resultsGate(await getCampaignById(id));
+  if (gate.locked) return c.json({ locked: true, items: [], voting_ends_at: gate.endsAt });
   const { data: votes } = await sb.from("campaign_votes").select("id,voter_name,submission_id,created_at,invalidated_at,invalidated_by_name,invalidation_reason").eq("campaign_id", id).order("created_at", { ascending: false });
   const { data: subs } = await sb.from("campaign_submissions").select("id,dish_name").eq("campaign_id", id);
   const names = Object.fromEntries((subs ?? []).map((s) => [s.id, s.dish_name]));
-  return c.json((votes ?? []).map((v) => ({ ...v, dish_name: names[v.submission_id] })));
+  return c.json({ locked: false, items: (votes ?? []).map((v) => ({ ...v, dish_name: names[v.submission_id] })), voting_ends_at: gate.endsAt });
 });
 app.post("/admin/campaigns/:id/votes/:vid/invalidate", async (c) => {
   const a = await requireAdmin(c, "campaigns_votes_invalidate");
@@ -807,9 +851,12 @@ app.post("/admin/campaigns/:id/voting/close", async (c) => {
 app.get("/admin/campaigns/:id/results", async (c) => {
   await requireAdmin(c, "campaigns_results");
   const id = c.req.param("id");
+  const gate = await resultsGate(await getCampaignById(id));
   const { data: res } = await sb.from("campaign_results").select("*").eq("campaign_id", id).maybeSingle();
+  // Antes do encerramento oficial da votação não há resultado a mostrar (nem parcial).
+  if (gate.locked) return c.json({ results: res, tally: [], tally_locked: true, voting_ends_at: gate.endsAt });
   const tally = await rpc<Row[]>("campaign_tally", { p_campaign: id });
-  return c.json({ results: res, tally: tally.map((t) => ({ submission_id: t.submission_id, dish_name: t.dish_name, author: t.user_name, votes: Number(t.votes) })) });
+  return c.json({ results: res, tally: tally.map((t) => ({ submission_id: t.submission_id, dish_name: t.dish_name, author: t.user_name, votes: Number(t.votes) })), tally_locked: false, voting_ends_at: gate.endsAt });
 });
 app.post("/admin/campaigns/:id/results/tiebreak", async (c) => {
   const a = await requireAdmin(c, "campaigns_tiebreak");
@@ -847,7 +894,9 @@ app.get("/admin/campaigns/:id/audit", async (c) => {
   const a = await requireAdmin(c, "campaigns");
   const { data } = await sb.from("campaign_audit_log").select("id,occurred_at,actor_name,actor_role,action,entity_type,entity_id,before,after,reason")
     .eq("campaign_id", c.req.param("id")).order("occurred_at", { ascending: false }).limit(500);
-  const seeVotes = a.perms.campaigns_votes_view === true;
+  // Linhas de voto (CAST_VOTE) revelam o resultado parcial: só aparecem depois do encerramento da votação.
+  const gate = await resultsGate(await getCampaignById(c.req.param("id")));
+  const seeVotes = a.perms.campaigns_votes_view === true && !gate.locked;
   return c.json((data ?? []).filter((r) => seeVotes || r.entity_type !== "vote"));
 });
 
@@ -856,6 +905,8 @@ app.get("/admin/campaigns/:id/export/:kind", async (c) => {
   const id = c.req.param("id");
   const kind = c.req.param("kind");
   const camp = await getCampaignById(id);
+  const gate = await resultsGate(camp);
+  const assertResultsOpen = () => { if (gate.locked) throw new AppError(409, "RESULTS_LOCKED", ERR.RESULTS_LOCKED[1]); };
   const sub = async (statuses?: string[]) => {
     let q = sb.from("campaign_submissions").select("user_name,user_department,user_unit,dish_name,description,ingredients,preparation,status,rejection_reason,submitted_at,reviewed_by_name,reviewed_at").eq("campaign_id", id).neq("status", "pending_media").order("submitted_at");
     if (statuses) q = q.in("status", statuses);
@@ -874,21 +925,24 @@ app.get("/admin/campaigns/:id/export/:kind", async (c) => {
     rows = s.map((x) => [x.user_name, x.user_department, x.dish_name, x.description, x.ingredients, x.preparation, stOf[x.status], x.rejection_reason ?? "", x.submitted_at, x.reviewed_by_name ?? "", x.reviewed_at ?? ""]);
   } else if (kind === "voting" || kind === "ranking") {
     if (!a.perms.campaigns_results) throw new AppError(403, "FORBIDDEN", "Você não tem permissão para esta ação.");
+    assertResultsOpen();
     const t = await rpc<Row[]>("campaign_tally", { p_campaign: id });
     columns = ["Posição", "Prato", "Autor", "Votos válidos"];
     rows = t.map((x, i) => [i + 1, x.dish_name, x.user_name, Number(x.votes)]);
   } else if (kind === "result") {
     if (!a.perms.campaigns_results) throw new AppError(403, "FORBIDDEN", "Você não tem permissão para esta ação.");
+    assertResultsOpen();
     const { data: r } = await sb.from("campaign_results").select("*").eq("campaign_id", id).maybeSingle();
     columns = ["Campanha", "Situação", "Votos válidos", "Vencedor (id da receita)", "Votos do vencedor", "Confirmado por", "Confirmado em", "Divulgado em"];
     rows = [[camp.name, r?.status ?? "", r?.total_valid_votes ?? 0, r?.winner_submission_id ?? "", r?.winner_votes ?? "", r?.confirmed_by_name ?? "", r?.confirmed_at ?? "", r?.announced_at ?? ""]];
   } else if (kind === "history") {
     const { data } = await sb.from("campaign_audit_log").select("occurred_at,actor_name,action,entity_type,reason").eq("campaign_id", id).order("occurred_at");
-    const seeVotes = a.perms.campaigns_votes_view === true;
+    const seeVotes = a.perms.campaigns_votes_view === true && !gate.locked;
     columns = ["Quando", "Quem", "Ação", "Tipo", "Justificativa"];
     rows = (data ?? []).filter((r) => seeVotes || r.entity_type !== "vote").map((r) => [r.occurred_at, r.actor_name, r.action, r.entity_type, r.reason ?? ""]);
   } else if (kind === "votes") {
     if (!a.perms.campaigns_export_votes || !a.perms.campaigns_votes_view) throw new AppError(403, "FORBIDDEN", "Você não tem permissão para exportar votos individuais.");
+    assertResultsOpen();
     const { data: votes } = await sb.from("campaign_votes").select("voter_name,submission_id,created_at,invalidated_at,invalidation_reason").eq("campaign_id", id).order("created_at");
     const { data: subs } = await sb.from("campaign_submissions").select("id,dish_name").eq("campaign_id", id);
     const names = Object.fromEntries((subs ?? []).map((s) => [s.id, s.dish_name]));

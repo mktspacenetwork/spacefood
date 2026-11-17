@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
-  ArrowLeft, BarChart3, Check, ChefHat, Compass, Copy, EyeOff, Loader2, Megaphone, MoreHorizontal, Pencil, Play, Rocket,
+  ArrowLeft, BarChart3, CalendarDays, ChefHat, Compass, Copy, EyeOff, Loader2, Megaphone, MoreHorizontal, Pencil, Play, Rocket,
   Send, Settings, Users, Vote,
 } from "lucide-react";
 import { Badge } from "../../../components/ui/Badge";
@@ -15,7 +15,7 @@ import { cn } from "../../../lib/utils";
 import { useAuth } from "../../../context/auth-context";
 import { campaignsApi } from "../../../lib/campaigns/api";
 import {
-  DISPLAY_STATE, PHASE_STATE, RESULT_STATUS, campaignDisplayState, fmtDateTime, fmtShort, plural,
+  DISPLAY_STATE, PHASE_STATE, RESULT_STATUS, campaignDisplayState, fmtDateTime, fmtPeriod, fmtShort, plural,
 } from "../../../lib/campaigns/format";
 import type { DisplayState } from "../../../lib/campaigns/format";
 import type {
@@ -44,7 +44,7 @@ const YELLOW = "bg-yellow-100 text-yellow-700 dark:bg-yellow-950/40 dark:text-ye
 const LEGACY_TABS: Record<string, { tab: string; section?: string }> = {
   overview: { tab: "summary" },
   results: { tab: "voting" },
-  schedule: { tab: "settings", section: "schedule" },
+  schedule: { tab: "settings", section: "period" },
   history: { tab: "settings", section: "history" },
   reports: { tab: "settings", section: "reports" },
 };
@@ -56,120 +56,62 @@ const stageOf = (stages: AdminStageRow[], k: AdminStageRow["stage_key"]) => stag
 function phaseBadge(
   c: AdminCampaign, display: DisplayState, results: AdminResults | null, regState: Phase, votState: Phase,
 ): { label: string; className: string } | null {
-  if (display === "closed" || display === "archived") return null;
-  const f = c.features;
+  if (display === "closed" || display === "archived" || display === "unpublished") return null;
+  if (display === "draft") return regState === "unset" ? { label: "Sem datas", className: PHASE_STATE.unset.className } : null;
   const rs = results?.status ?? "none";
-  if (f.voting) {
+  if (c.features.voting) {
     if (rs === "announced") return { label: "Resultado divulgado", className: RESULT_STATUS.announced.className };
     if (rs === "confirmed") return { label: "Vencedor confirmado", className: RESULT_STATUS.confirmed.className };
     if (rs === "tie_pending") return { label: "Empate a decidir", className: RESULT_STATUS.tie_pending.className };
-    if (rs === "preliminary") return { label: "Apuração pronta", className: RESULT_STATUS.preliminary.className };
-    if (votState === "open") return { label: "Votação aberta", className: PHASE_STATE.open.className };
-    if (votState === "paused") return { label: "Votação pausada", className: PHASE_STATE.paused.className };
+    if (rs === "preliminary") return { label: "Resultado pronto", className: RESULT_STATUS.preliminary.className };
     if (votState === "closed") return { label: "Votação encerrada", className: PHASE_STATE.closed.className };
+    if (votState === "open") return { label: "Em andamento", className: PHASE_STATE.open.className };
+    if (votState === "paused") return { label: "Votação pausada", className: PHASE_STATE.paused.className };
   }
-  if (f.submission) {
-    if (regState === "open") return { label: "Inscrições abertas", className: PHASE_STATE.open.className };
-    if (regState === "paused") return { label: "Inscrições pausadas", className: PHASE_STATE.paused.className };
-    if (regState === "closed") return f.approval ? { label: "Em análise", className: YELLOW } : { label: "Inscrições encerradas", className: PHASE_STATE.closed.className };
-    if (regState === "upcoming") return { label: "Inscrições em breve", className: PHASE_STATE.upcoming.className };
-  }
-  if (regState === "unset" && votState === "unset") return { label: "Sem datas", className: PHASE_STATE.unset.className };
-  return null;
+  if (regState === "open") return { label: "Em andamento", className: PHASE_STATE.open.className };
+  if (regState === "paused") return { label: "Pausada", className: PHASE_STATE.paused.className };
+  if (regState === "closed") return { label: "Período encerrado", className: PHASE_STATE.closed.className };
+  if (regState === "upcoming") return { label: "Começa em breve", className: PHASE_STATE.upcoming.className };
+  return { label: "Sem datas", className: PHASE_STATE.unset.className };
 }
 
-// ─────────────────────────────── Ciclo da campanha ───────────────────────────────
+// ─────────────────────────────── Período (uma linha) ───────────────────────────────
 
-type CycleStep = { key: string; label: string; status: "done" | "current" | "upcoming"; lines: string[] };
+/** "faltam 3 dias" / "termina hoje" (o encerramento vale até o fim do dia). */
+function daysLeftText(ends: string): string | null {
+  const ms = new Date(ends).getTime() - Date.now();
+  if (ms <= 0) return null;
+  const days = Math.ceil(ms / 86_400_000);
+  return days <= 1 ? "termina hoje" : `faltam ${days} dias`;
+}
 
-function buildCycle(
-  c: AdminCampaign, display: DisplayState, stages: AdminStageRow[], results: AdminResults | null, dash: AdminDashboard | null,
-): CycleStep[] {
-  const f = c.features;
-  const finished = display === "closed" || display === "archived";
-  const draft = display === "draft"; // nada começou de verdade enquanto é rascunho
+function PeriodLine({
+  display, stages, canEdit, goTab,
+}: { display: DisplayState; stages: AdminStageRow[]; canEdit: boolean; goTab: (tab: string, section?: string) => void }) {
   const reg = stageOf(stages, "registration");
-  const vot = stageOf(stages, "voting");
-  const ann = stageOf(stages, "announcement");
   const regState = stageState(reg);
-  const votState = stageState(vot);
-  const rs = results?.status ?? "none";
-  const locked = !!c.edit_locked_at || !!dash?.locked;
-  const range = (s?: AdminStageRow): string[] =>
-    !s?.starts_at ? ["Sem datas"] : s.ends_at ? [fmtShort(s.starts_at), `→ ${fmtShort(s.ends_at)}`] : [fmtShort(s.starts_at)];
-  const pick = (st: CycleStep["status"]): CycleStep["status"] => (draft ? "upcoming" : st);
+  let status: string;
+  if (display === "closed") status = "Encerrada";
+  else if (display === "archived") status = "Arquivada";
+  else if (display === "draft") status = reg?.starts_at ? "Rascunho" : "Defina o período";
+  else if (display === "unpublished") status = "Não publicada";
+  else if (regState === "unset") status = "Sem datas";
+  else if (regState === "upcoming") status = `Começa em ${fmtShort(reg?.starts_at)}`;
+  else if (regState === "open") status = "Em andamento";
+  else if (regState === "paused") status = "Pausada";
+  else status = "Período encerrado";
+  const left = (display === "published" || display === "scheduled") && (regState === "open" || regState === "paused") && reg?.ends_at ? daysLeftText(reg.ends_at) : null;
 
-  const steps: CycleStep[] = [];
-  if (f.submission) {
-    steps.push({
-      key: "registration", label: "Inscrições", lines: range(reg),
-      status: finished ? "done" : pick(regState === "closed" ? "done" : regState === "open" || regState === "paused" ? "current" : "upcoming"),
-    });
-  }
-  if (f.approval) {
-    const pending = dash?.pending ?? 0;
-    steps.push({
-      key: "review", label: "Análise",
-      lines: locked ? ["Concluída"] : pending > 0 ? [plural(pending, "pendente", "pendentes")] : ["Até a votação"],
-      status: finished || locked ? "done" : pick(regState === "closed" ? "current" : "upcoming"),
-    });
-  }
-  if (f.voting) {
-    steps.push({
-      key: "voting", label: "Votação", lines: range(vot),
-      status: finished ? "done" : pick(votState === "closed" ? "done" : votState === "open" || votState === "paused" ? "current" : "upcoming"),
-    });
-  }
-  if (f.results) {
-    steps.push({
-      key: "results", label: "Resultado",
-      lines: [rs === "none" ? "Apuração" : rs === "tie_pending" ? "Empate" : rs === "preliminary" ? "Preliminar" : "Confirmado"],
-      status: finished || rs === "confirmed" || rs === "announced" ? "done" : pick(votState === "closed" ? "current" : "upcoming"),
-    });
-  }
-  if (f.announcement) {
-    steps.push({
-      key: "announcement", label: "Divulgação",
-      lines: [rs === "announced" ? "Divulgado" : ann?.starts_at ? fmtShort(ann.starts_at) : "Após confirmar"],
-      status: finished || rs === "announced" ? "done" : pick(rs === "confirmed" ? "current" : "upcoming"),
-    });
-  }
-  return steps;
-}
-
-function CycleStepper({ steps }: { steps: CycleStep[] }) {
-  const n = steps.length;
-  if (n === 0) return null;
-  const lastActive = steps.reduce((acc, s, i) => (s.status !== "upcoming" ? i : acc), -1);
-  const fill = n > 1 && lastActive > 0 ? lastActive / (n - 1) : 0;
-  const inset = 50 / n; // o traço vai do centro do 1º ao centro do último passo
   return (
-    <Card className="rounded-3xl border p-4 pb-5 hover:shadow-sm" data-tutorial="camp-panel-cycle">
-      <div className="relative">
-        <div className="absolute h-0.5 rounded bg-border" style={{ top: 13, left: `${inset}%`, right: `${inset}%` }} aria-hidden="true" />
-        <div className="absolute h-0.5 rounded bg-primary transition-all" style={{ top: 13, left: `${inset}%`, width: `${fill * (100 - 2 * inset)}%` }} aria-hidden="true" />
-        <ol className="relative grid" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }} aria-label="Ciclo da campanha">
-          {steps.map((s, i) => (
-            <li key={s.key} className="flex min-w-0 flex-col items-center gap-1.5 px-0.5 text-center" aria-current={s.status === "current" ? "step" : undefined}>
-              <span
-                className={cn(
-                  "relative z-10 flex h-7 w-7 items-center justify-center rounded-full border-2 text-[11px] font-bold",
-                  s.status === "done" && "border-primary bg-primary text-primary-foreground",
-                  s.status === "current" && "border-primary bg-background text-primary ring-4 ring-primary/15",
-                  s.status === "upcoming" && "border-border bg-background text-muted-foreground",
-                )}
-              >
-                {s.status === "done" ? <Check size={13} strokeWidth={3} /> : i + 1}
-              </span>
-              <span className={cn("max-w-full truncate text-[11px] font-semibold sm:text-xs", s.status === "upcoming" ? "text-muted-foreground" : "text-foreground")}>{s.label}</span>
-              <span className="space-y-0 text-[10px] leading-tight text-muted-foreground">
-                {s.lines.map((l) => <span key={l} className="block truncate">{l}</span>)}
-              </span>
-              <span className="sr-only">{s.status === "done" ? "concluída" : s.status === "current" ? "em andamento" : "ainda não começou"}</span>
-            </li>
-          ))}
-        </ol>
-      </div>
+    <Card className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border p-3.5 hover:shadow-sm" data-tutorial="camp-panel-cycle">
+      <CalendarDays size={18} className="shrink-0 text-primary" aria-hidden="true" />
+      <p className="min-w-0 flex-1 text-sm text-foreground">
+        <b>{fmtPeriod(reg?.starts_at, reg?.ends_at)}</b>
+        <span className="text-muted-foreground"> · {status}{left ? ` · ${left}` : ""}</span>
+      </p>
+      {!reg?.starts_at && canEdit && (
+        <Button size="sm" variant="outline" className="rounded-xl" onClick={() => goTab("settings", "period")}>Definir período</Button>
+      )}
     </Card>
   );
 }
@@ -199,8 +141,8 @@ function buildNext(x: {
   const rs = results?.status ?? "none";
   const pending = dash?.pending ?? 0;
   const canPublish = !!perms.campaigns_publish;
-  const goVoting: NextAction = { label: "Abrir Votação", onClick: () => goTab("voting"), primary: true };
-  const setDates: NextAction = { label: "Definir datas", onClick: () => goTab("settings", "schedule"), primary: true };
+  const setPeriod: NextAction = { label: "Definir período", onClick: () => goTab("settings", "period"), primary: true };
+  const seeResult = (label: string): NextAction => ({ label, onClick: () => goTab("voting"), primary: true });
   const analyze: NextAction[] = perms.campaigns_review ? [{ label: "Analisar receitas", onClick: () => goTab("submissions"), primary: true }] : [];
 
   if (display === "closed" || display === "archived") {
@@ -212,25 +154,25 @@ function buildNext(x: {
     if (check && missing.length === 0) {
       return {
         tone: "ok", title: "Tudo pronto para publicar",
-        text: `Os itens obrigatórios estão em ordem. Ao publicar, ${plural(check.eligible_count, "colaborador elegível passa", "colaboradores elegíveis passam")} a ver a campanha.`,
+        text: `Ao publicar, ${plural(check.eligible_count, "colaborador elegível passa", "colaboradores elegíveis passam")} a ver a campanha.`,
         actions: canPublish ? [{ label: "Publicar", onClick: openPublish, primary: true }] : [],
       };
     }
     if (check) {
       const dates = missing.some((i) => i.key === "registration_dates" || i.key === "voting_dates");
       return {
-        tone: "warn", title: `${plural(missing.length, "item falta", "itens faltam")} para publicar`,
-        text: `${missing[0].message}${missing.length > 1 ? ` (e mais ${missing.length - 1})` : ""}. A lista completa está em Resumo.`,
-        actions: dates ? [setDates] : perms.campaigns_edit ? [{ label: "Editar informações", onClick: edit, primary: true }] : [],
+        tone: "warn", title: dates ? "Faltam as datas" : `${plural(missing.length, "item falta", "itens faltam")} para publicar`,
+        text: dates ? "Defina o início e o encerramento para poder publicar." : `${missing[0].message}${missing.length > 1 ? ` (e mais ${missing.length - 1})` : ""}.`,
+        actions: dates ? [setPeriod] : perms.campaigns_edit ? [{ label: "Editar informações", onClick: edit, primary: true }] : [],
       };
     }
-    return { tone: "info", title: "Rascunho em construção", text: "Complete as informações e as datas; depois a campanha pode ser publicada.", actions: canPublish ? [{ label: "Publicar", onClick: openPublish, primary: true }] : [] };
+    return { tone: "info", title: "Rascunho em construção", text: "Complete as informações e o período; depois a campanha pode ser publicada.", actions: canPublish ? [{ label: "Publicar", onClick: openPublish, primary: true }] : [] };
   }
 
   if (display === "unpublished") {
     return {
       tone: "warn", title: "Campanha não publicada",
-      text: "Está fora de exibição para os colaboradores. Nada foi apagado: receitas, votos e histórico continuam salvos.",
+      text: "Está fora de exibição. Nada foi apagado: receitas, votos e histórico continuam salvos.",
       actions: canPublish ? [{ label: "Republicar", onClick: openResume, primary: true }] : [],
     };
   }
@@ -243,42 +185,30 @@ function buildNext(x: {
     if (rs === "announced") return { tone: "ok", title: "Campanha concluída", text: "O resultado foi divulgado aos colaboradores.", actions: [] };
     if (rs === "confirmed") {
       return f.announcement
-        ? { tone: "warn", title: "Divulgue o resultado", text: "O vencedor está confirmado. Divulgue para os colaboradores verem.", actions: [goVoting] }
+        ? { tone: "warn", title: "Divulgue o resultado", text: "O vencedor está confirmado. Divulgue para os colaboradores verem.", actions: [seeResult("Abrir resultado")] }
         : { tone: "ok", title: "Campanha concluída", text: "O vencedor está confirmado.", actions: [] };
     }
-    if (rs === "tie_pending") return { tone: "warn", title: "Há empate: decida o vencedor", text: "Duas ou mais receitas têm o mesmo número de votos. Registre a decisão, com justificativa, para continuar.", actions: [goVoting] };
-    if (rs === "preliminary") return { tone: "warn", title: "Confirme o vencedor", text: "A apuração está pronta. Confira o ranking e confirme o vencedor.", actions: [goVoting] };
-    if (votState === "closed") return { tone: "warn", title: "Apure a votação", text: "A votação terminou. Apure para gerar o resultado preliminar.", actions: [goVoting] };
-    if (votState === "open" || votState === "paused") {
-      const until = vot?.ends_at ? ` até ${fmtDateTime(vot.ends_at)}` : "";
-      return {
-        tone: "info", title: votState === "paused" ? "Votação pausada" : `Votação aberta${until}`,
-        text: dash ? `${dash.voting_pct}% dos elegíveis já votaram (${dash.voters} de ${dash.eligible}).` : undefined,
-        actions: [{ label: "Ver votação", onClick: () => goTab("voting"), primary: true }],
-      };
-    }
+    if (rs === "tie_pending") return { tone: "warn", title: "Há empate: decida o vencedor", text: "Registre a decisão, com justificativa, para continuar.", actions: [seeResult("Decidir empate")] };
+    if (rs === "preliminary") return { tone: "warn", title: "Confirme o vencedor", text: "Confira o resultado e confirme quem ganhou.", actions: [seeResult("Ver resultado")] };
+    if (votState === "closed") return { tone: "warn", title: "Votação encerrada — Ver resultado", text: "Veja quem ganhou e confira os números.", actions: [seeResult("Ver resultado")] };
   }
 
-  // Votação ainda não começou (ou a campanha não tem votação)
-  if (f.submission && regState === "unset") return { tone: "warn", title: "Defina as datas das inscrições", text: "Sem datas, os colaboradores não conseguem enviar receitas.", actions: [setDates] };
-  if (f.submission && regState === "upcoming") return { tone: "info", title: "Inscrições ainda não abriram", text: reg?.starts_at ? `Abrem em ${fmtDateTime(reg.starts_at)}.` : undefined, actions: [] };
   if (pending > 0) {
     return {
       tone: "warn", title: `${plural(pending, "receita aguarda", "receitas aguardam")} análise`,
-      text: f.voting && vot?.starts_at ? `Aprove ou reprove antes de a votação começar, em ${fmtDateTime(vot.starts_at)}. As pendentes ficam de fora da votação.` : "Aprove ou reprove as receitas pendentes.",
+      text: f.voting ? "As aprovadas já podem receber votos; as pendentes ficam de fora até a análise." : "Aprove ou reprove as receitas pendentes.",
       actions: analyze,
     };
   }
-  if (f.submission && regState === "open") {
-    return {
-      tone: "info", title: "Inscrições abertas",
-      text: `${plural(dash?.submissions ?? 0, "receita enviada", "receitas enviadas")}${reg?.ends_at ? ` · encerram em ${fmtDateTime(reg.ends_at)}` : ""}.`,
-      actions: [],
-    };
+  if (regState === "unset") return { tone: "warn", title: "Defina o período", text: "Sem datas, os colaboradores não conseguem participar.", actions: [setPeriod] };
+  if (regState === "upcoming") return { tone: "info", title: "Ainda não começou", text: reg?.starts_at ? `Abre em ${fmtDateTime(reg.starts_at)}.` : undefined, actions: [] };
+  if (regState === "open" || regState === "paused") {
+    const bits = [plural(dash?.submissions ?? 0, "receita enviada", "receitas enviadas")];
+    if (f.voting && dash) bits.push(`${dash.voting_pct}% já votaram`);
+    if (reg?.ends_at) bits.push(`encerra em ${fmtDateTime(reg.ends_at)}`);
+    return { tone: "info", title: regState === "paused" ? "Pausada" : "Em andamento", text: `${bits.join(" · ")}.`, actions: [] };
   }
-  if (f.voting && votState === "unset") return { tone: "warn", title: "Defina as datas da votação", text: "Sem datas, a votação não começa.", actions: [setDates] };
-  if (f.voting) return { tone: "info", title: "Aguardando o início da votação", text: vot?.starts_at ? `Começa em ${fmtDateTime(vot.starts_at)}.` : undefined, actions: [] };
-  return { tone: "ok", title: "Inscrições encerradas", text: "Todas as receitas já foram analisadas.", actions: [] };
+  return { tone: "ok", title: "Período encerrado", text: "Nenhuma receita aguardando análise. Quando quiser, encerre a campanha em Configurações.", actions: [] };
 }
 
 function NextStepCard({ next, busy }: { next: NextStep; busy: boolean }) {
@@ -449,7 +379,7 @@ export function AdminCampaignPanel() {
       {display === "scheduled" && (
         <Notice tone="info">Os colaboradores passam a ver esta campanha em {fmtDateTime(c.visible_from)}.</Notice>
       )}
-      <CycleStepper steps={buildCycle(c, display, stages, results, dashboard.data)} />
+      <PeriodLine display={display} stages={stages} canEdit={!!perms.campaigns_schedule} goTab={goTab} />
       <NextStepCard next={next} busy={busy !== null} />
     </div>
   );

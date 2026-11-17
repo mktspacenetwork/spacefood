@@ -10,11 +10,11 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../../../components/ui/table";
 import { cn } from "../../../../lib/utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
-import { SUBMISSION_STATUS, fmtDateTime, plural } from "../../../../lib/campaigns/format";
-import type { AdminParticipant, AdminResults, AdminSubmissionRow, AdminVote, TallyRow } from "../../../../lib/campaigns/types";
+import { SUBMISSION_STATUS, fmtDate, fmtDateTime, plural } from "../../../../lib/campaigns/format";
+import type { AdminParticipant, AdminResults, AdminSubmissionRow, AdminVote, AdminVotesPayload, TallyRow } from "../../../../lib/campaigns/types";
 import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
-import { EmptyBox, ErrorBox, LoadingBox, Notice, ReasonDialog, SectionLabel, useBusy, useLoader } from "../shared";
+import { EmptyBox, ErrorBox, LoadingBox, Notice, ReasonDialog, SectionLabel, stageState, useBusy, useLoader } from "../shared";
 import type { TabProps } from "./types";
 import { TabIntro } from "./ui";
 import { useTabTour } from "./useTabTour";
@@ -27,7 +27,7 @@ import { useTabTour } from "./useTabTour";
  */
 
 type PartPayload = { with_votes: boolean; items: AdminParticipant[] };
-type ResPayload = { results: AdminResults | null; tally: TallyRow[] };
+type ResPayload = { results: AdminResults | null; tally: TallyRow[]; tally_locked?: boolean };
 type Seg = "all" | "sent" | "not_sent" | "voted" | "not_voted";
 type SortKey = "auto" | "votes" | "name";
 
@@ -41,7 +41,7 @@ type Row = {
 
 const byName = (a: Row, b: Row) => a.p.user_name.localeCompare(b.p.user_name, "pt-BR");
 
-export function ParticipantsTab({ campaignId, campaign, results, perms, onChanged, tourUserId, tourSignal }: TabProps) {
+export function ParticipantsTab({ campaignId, campaign, results, stages, perms, onChanged, tourUserId, tourSignal }: TabProps) {
   const hasVoting = !!campaign.features.voting;
   const canResults = hasVoting && !!perms.campaigns_results;
   const canVotes = hasVoting && !!perms.campaigns_votes_view;
@@ -54,8 +54,11 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
     () => (canResults ? campaignsApi.get<ResPayload>(`${base}/results`) : Promise.resolve(null)),
     [campaignId, canResults],
   );
-  const votes = useLoader<AdminVote[] | null>(
-    () => (canVotes ? campaignsApi.get<AdminVote[]>(`${base}/votes`) : Promise.resolve(null)),
+  // O servidor devolve { locked, items }; versões antigas devolviam só a lista.
+  const votes = useLoader<AdminVotesPayload | null>(
+    () => (canVotes
+      ? campaignsApi.get<AdminVote[] | AdminVotesPayload>(`${base}/votes`).then((p) => (Array.isArray(p) ? { locked: false, items: p } : p))
+      : Promise.resolve(null)),
     [campaignId, canVotes],
   );
   // Só para mostrar o nome do prato também de receitas ainda não aprovadas.
@@ -73,9 +76,14 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [invalidateTarget, setInvalidateTarget] = useState<AdminVote | null>(null);
 
+  // Enquanto a votação não encerra, não há contagem por receita nem "quem votou em quem" (o servidor também não envia).
+  const votingStage = stages.find((s) => s.stage_key === "voting");
+  const locked = hasVoting && (stageState(votingStage) !== "closed" || !!res.data?.tally_locked || !!votes.data?.locked);
+  const votingEnds = votingStage?.ends_at ?? null;
+  const showVotesCols = canResults && !locked;
   const items = people.data?.items ?? [];
   const withVotes = !!people.data?.with_votes;
-  const tally = res.data?.tally ?? [];
+  const tally = locked ? [] : res.data?.tally ?? [];
   const totalVotes = tally.reduce((acc, t) => acc + t.votes, 0);
   const maxVotes = Math.max(1, ...tally.map((t) => t.votes));
   const resultsStatus = results?.status ?? res.data?.results?.status ?? "none";
@@ -91,7 +99,7 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
   }, [tally, totalVotes]);
   const votesBySub = useMemo(() => {
     const m = new Map<string, AdminVote[]>();
-    for (const v of votes.data ?? []) {
+    for (const v of votes.data?.items ?? []) {
       const list = m.get(v.submission_id);
       if (list) list.push(v);
       else m.set(v.submission_id, [v]);
@@ -114,7 +122,7 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
     [items, tallyBySub, dishBySub, rankBySub],
   );
 
-  const effectiveSort: Exclude<SortKey, "auto"> = sort === "auto" ? (canResults && totalVotes > 0 ? "votes" : "name") : sort;
+  const effectiveSort: Exclude<SortKey, "auto"> = sort === "auto" ? (showVotesCols && totalVotes > 0 ? "votes" : "name") : sort;
 
   const rows = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -180,13 +188,13 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
   };
 
   const missing: string[] = [];
-  if (hasVoting && !canResults) missing.push("a contagem de votos por pessoa precisa da permissão “Ver apuração”");
-  if (hasVoting && !withVotes) missing.push("saber quem votou (e em quem) precisa da permissão “Ver votos individuais”");
+  if (hasVoting && !locked && !canResults) missing.push("a contagem de votos por pessoa precisa da permissão “Ver apuração”");
+  if (hasVoting && !locked && !withVotes) missing.push("saber quem votou (e em quem) precisa da permissão “Ver votos individuais”");
 
   return (
     <div className="space-y-4">
       <TabIntro>
-        Veja quem participa{hasVoting ? ", quantos votos cada pessoa recebeu e de quem vieram" : ""}. Clique em uma pessoa para abrir o detalhe.
+        Veja quem participa{hasVoting && !locked ? ", quantos votos cada pessoa recebeu e de quem vieram" : ""}. Clique em uma pessoa para abrir o detalhe.
       </TabIntro>
       <p className="-mt-2 text-xs text-muted-foreground">
         <b className="text-foreground">{sent}</b> de {total} enviaram receita ({pct(sent)}%)
@@ -206,7 +214,7 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
               aria-label="Buscar participante"
             />
           </div>
-          {canResults && (
+          {showVotesCols && (
             <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
               <SelectTrigger className="h-10 w-[10.5rem] rounded-xl" aria-label="Ordenar participantes"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -233,6 +241,11 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
             </button>
           ))}
         </div>
+        {locked && (
+          <Notice tone="info">
+            Os votos por receita e quem votou em quem aparecem depois do encerramento da votação{votingEnds ? ` (${fmtDate(votingEnds)})` : ""}. Até lá, só a participação.
+          </Notice>
+        )}
         {missing.length > 0 && <Notice tone="info">Nesta tela, {missing.join("; ")}.</Notice>}
         {(res.error && !res.data) && <Notice tone="warn" title="Não foi possível carregar os votos recebidos">{res.error} <button type="button" className="underline" onClick={res.reload}>Tentar de novo</button></Notice>}
       </div>
@@ -254,8 +267,8 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
                   <TableRow>
                     <TableHead className="px-4">Participante</TableHead>
                     <TableHead>Receita</TableHead>
-                    {canResults && <TableHead>Votos recebidos</TableHead>}
-                    {canResults && <TableHead>Posição</TableHead>}
+                    {showVotesCols && <TableHead>Votos recebidos</TableHead>}
+                    {showVotesCols && <TableHead>Posição</TableHead>}
                     {showVoted && <TableHead>Votou?</TableHead>}
                     <TableHead className="w-8"><span className="sr-only">Detalhes</span></TableHead>
                   </TableRow>
@@ -288,7 +301,7 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
                             <span className="text-xs text-muted-foreground">Não enviou</span>
                           )}
                         </TableCell>
-                        {canResults && (
+                        {showVotesCols && (
                           <TableCell>
                             {r.votes !== null ? (
                               <div className="flex min-w-[7rem] items-center gap-2">
@@ -302,7 +315,7 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
                             )}
                           </TableCell>
                         )}
-                        {canResults && (
+                        {showVotesCols && (
                           <TableCell className="text-sm tabular-nums">
                             {r.rank ? <span className="inline-flex items-center gap-1">{r.rank === 1 && <Trophy size={12} className="text-amber-500" aria-hidden="true" />}{r.rank}º</span> : <span className="text-muted-foreground">—</span>}
                           </TableCell>
@@ -329,7 +342,9 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
             <ParticipantDetail
               row={selectedRow}
               hasVoting={hasVoting}
-              canResults={canResults}
+              locked={locked}
+              votingEnds={votingEnds}
+              canResults={showVotesCols}
               canVotes={canVotes}
               canInvalidate={canInvalidate}
               showVoted={showVoted}
@@ -371,10 +386,12 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
 // ─────────────────────────────── Detalhe da pessoa ───────────────────────────────
 
 function ParticipantDetail({
-  row, hasVoting, canResults, canVotes, canInvalidate, showVoted, finalized, totalApproved, maxVotes, voters, votesState, busy, onInvalidate,
+  row, hasVoting, locked, votingEnds, canResults, canVotes, canInvalidate, showVoted, finalized, totalApproved, maxVotes, voters, votesState, busy, onInvalidate,
 }: {
   row: Row;
   hasVoting: boolean;
+  locked: boolean;
+  votingEnds: string | null;
   canResults: boolean;
   canVotes: boolean;
   canInvalidate: boolean;
@@ -414,8 +431,16 @@ function ParticipantDetail({
         )}
       </section>
 
-      {/* Votos recebidos */}
-      {hasVoting && p.submission_id && (
+      {/* Votos recebidos (só depois do encerramento da votação) */}
+      {hasVoting && locked && p.submission_id && (
+        <section className="space-y-2">
+          <SectionLabel>Votos recebidos</SectionLabel>
+          <p className="text-sm text-muted-foreground">
+            A contagem e quem votou aparecem depois do encerramento da votação{votingEnds ? ` (${fmtDate(votingEnds)})` : ""}.
+          </p>
+        </section>
+      )}
+      {hasVoting && !locked && p.submission_id && (
         <section className="space-y-3">
           <SectionLabel>Votos recebidos</SectionLabel>
           {!row.approved ? (
@@ -442,7 +467,7 @@ function ParticipantDetail({
       )}
 
       {/* De quem vieram os votos */}
-      {hasVoting && p.submission_id && row.approved && (
+      {hasVoting && !locked && p.submission_id && row.approved && (
         <section className="space-y-3">
           <SectionLabel>De quem vieram os votos</SectionLabel>
           {!canVotes ? (

@@ -4,6 +4,8 @@ import "slick-carousel/slick/slick.css";
 import "slick-carousel/slick/slick-theme.css";
 import { api } from "../../lib/api";
 import { Link } from "react-router";
+import { useAuth } from "../../context/Store";
+import { fetchHomeCampaignBanners } from "../../lib/campaigns/homeBanners";
 // @ts-ignore
 import exampleBanner from "figma:asset/5791843b5a574f8adc2665f1e6dc54ea3d4302e6.png";
 
@@ -19,6 +21,10 @@ interface Banner {
   textColor?: string;
   buttonText?: string;
   unitRestrictions?: string[];
+  /** texto alternativo da imagem (slides de campanha usam o nome da campanha) */
+  alt?: string;
+  /** recorte da imagem; padrão dos banners é "center right" */
+  objectPosition?: string;
 }
 
 const BannerItem = ({ banner }: { banner: Banner }) => {
@@ -35,11 +41,11 @@ const BannerItem = ({ banner }: { banner: Banner }) => {
       {banner.imageUrl && (
         <img 
           src={banner.imageUrl} 
-          alt={banner.title || "Banner"} 
+          alt={banner.alt || banner.title || "Banner"} 
           draggable={false}
           className={`absolute inset-0 w-full h-full object-cover select-none transition-opacity duration-500 ${hasContent ? 'opacity-90' : 'opacity-100'}`}
           style={{ 
-            objectPosition: 'center right',
+            objectPosition: banner.objectPosition ?? 'center right',
             // If text content exists, create a gradient mask so text is readable on the left
             maskImage: hasContent ? 'linear-gradient(to right, transparent 0%, black 60%)' : 'none',
             WebkitMaskImage: hasContent ? 'linear-gradient(to right, transparent 0%, black 60%)' : 'none'
@@ -90,15 +96,27 @@ const BannerItem = ({ banner }: { banner: Banner }) => {
   );
 };
 
-export function BannerCarousel({ userUnit }: { userUnit?: string }) {
+/**
+ * `campaignsOnly`: mostra APENAS os banners de campanhas publicadas (sem os banners comuns nem o padrão).
+ * Usado na Home quando já existe o banner do pedido do dia — que antes escondia o carrossel inteiro —,
+ * para uma campanha com prazo não ficar invisível justamente para quem já pediu o almoço.
+ * Sem campanhas, não renderiza nada.
+ */
+export function BannerCarousel({ userUnit, campaignsOnly = false }: { userUnit?: string; campaignsOnly?: boolean }) {
+  const { user } = useAuth();
   const [banners, setBanners] = useState<Banner[]>([]);
+  const [campaignBanners, setCampaignBanners] = useState<Banner[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let stale = false;
     setLoading(true);
     const unitParam = userUnit ? `?unit=${encodeURIComponent(userUnit)}` : "";
-    api.get(`/banners${unitParam}`)
+    // Banners de campanhas publicadas (nunca lança erro; falha = nenhum slide extra)
+    const campaigns = fetchHomeCampaignBanners(user?.id ?? "anon")
+      .then((list) => { if (!stale) setCampaignBanners(list as Banner[]); })
+      .catch(() => { if (!stale) setCampaignBanners([]); });
+    const regular = (campaignsOnly ? Promise.resolve() : api.get(`/banners${unitParam}`))
       .then((data) => {
         if (stale) return;
         if (Array.isArray(data)) {
@@ -113,10 +131,10 @@ export function BannerCarousel({ userUnit }: { userUnit?: string }) {
         if (stale) return;
         console.error("Failed to load banners", err);
         setBanners([]);
-      })
-      .finally(() => { if (!stale) setLoading(false); });
+      });
+    Promise.all([regular, campaigns]).finally(() => { if (!stale) setLoading(false); });
     return () => { stale = true; };
-  }, [userUnit]);
+  }, [userUnit, user?.id, campaignsOnly]);
 
   const defaultBanner: Banner = {
     id: "default",
@@ -126,7 +144,12 @@ export function BannerCarousel({ userUnit }: { userUnit?: string }) {
     backgroundColor: "#FF5A1F",
   };
 
-  const displayBanners = banners.length > 0 ? banners : [defaultBanner];
+  // Campanhas publicadas entram na frente; o banner padrão só aparece se não houver nenhum slide.
+  const allBanners = campaignsOnly ? campaignBanners : [...campaignBanners, ...banners];
+  const displayBanners = allBanners.length > 0 ? allBanners : [defaultBanner];
+
+  // Modo "só campanhas": nada a mostrar enquanto carrega ou quando não há campanha visível.
+  if (campaignsOnly && (loading || campaignBanners.length === 0)) return null;
 
   if (loading) {
     return (

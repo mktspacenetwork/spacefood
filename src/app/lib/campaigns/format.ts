@@ -27,6 +27,16 @@ export function fromInputValue(v: string | null | undefined): string | null {
   const d = fromZonedTime(v, TIMEZONE);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
+/** Período em poucas palavras: "05 a 15 nov" (mesmo mês) ou "28 out a 03 nov". */
+export function fmtPeriod(starts: string | null | undefined, ends: string | null | undefined): string {
+  if (!starts && !ends) return "Sem datas";
+  const p = (iso: string, pattern: string) => formatInTimeZone(new Date(iso), TIMEZONE, pattern, { locale: ptBR });
+  if (starts && ends) {
+    const sameMonth = p(starts, "yyyy-MM") === p(ends, "yyyy-MM");
+    return sameMonth ? `${p(starts, "dd")} a ${p(ends, "dd MMM")}` : `${p(starts, "dd MMM")} a ${p(ends, "dd MMM")}`;
+  }
+  return starts ? `a partir de ${p(starts, "dd MMM")}` : `até ${p(ends as string, "dd MMM")}`;
+}
 export function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
@@ -133,7 +143,7 @@ export const AUDIT_ACTION: Record<string, string> = {
   PUBLISH_CAMPAIGN: "Campanha publicada", SUSPEND_CAMPAIGN: "Campanha suspensa", RESUME_CAMPAIGN: "Campanha retomada",
   BACK_TO_DRAFT: "Voltou a rascunho", CLOSE_CAMPAIGN: "Campanha encerrada", ARCHIVE_CAMPAIGN: "Campanha arquivada",
   DELETE_EMPTY_DRAFT: "Rascunho excluído", DUPLICATE_CAMPAIGN: "Campanha duplicada",
-  SET_ELIGIBLE_USERS: "Público (lista de pessoas) alterado", SET_STAGE: "Datas da etapa alteradas",
+  SET_ELIGIBLE_USERS: "Público (lista de pessoas) alterado", SET_STAGE: "Datas da etapa alteradas", SET_PERIOD: "Período alterado",
   EXTEND_STAGE: "Etapa prorrogada", PAUSE_STAGE: "Etapa pausada", REOPEN_STAGE: "Etapa reaberta",
   SUBMIT_RECIPE: "Receita enviada", FINALIZE_SUBMISSION: "Envio da receita concluído", UPDATE_SUBMISSION: "Receita editada",
   ADMIN_EDIT_SUBMISSION: "Receita corrigida pela administração", APPROVE_SUBMISSION: "Receita aprovada",
@@ -150,7 +160,7 @@ export const PERMISSION_LABEL: Record<string, { label: string; hint: string; sen
   campaigns_edit: { label: "Editar campanhas", hint: "Alterar dados, público e funcionalidades; arquivar; excluir rascunho vazio" },
   campaigns_duplicate: { label: "Duplicar campanhas", hint: "Criar uma nova campanha a partir de outra" },
   campaigns_publish: { label: "Publicar e suspender", hint: "Publicar, suspender, retomar, encerrar e ligar/desligar o módulo", sensitive: true },
-  campaigns_schedule: { label: "Gerir datas e etapas", hint: "Datas, prorrogar, pausar, reabrir e encerrar a votação" },
+  campaigns_schedule: { label: "Gerir período", hint: "Início e encerramento da campanha e encerrar a votação" },
   campaigns_participants: { label: "Ver participantes", hint: "Lista de participantes e quem enviou receita" },
   campaigns_review: { label: "Analisar receitas", hint: "Aprovar, reprovar e corrigir receitas" },
   campaigns_results: { label: "Ver apuração", hint: "Contagem de votos por receita e ranking" },

@@ -56,7 +56,7 @@ export function CampaignResults() {
         <EmptyState
           icon={<Lock size={22} aria-hidden="true" />}
           title="Resultado ainda não divulgado"
-          description="Assim que a campanha divulgar o resultado oficial, ele aparece aqui."
+          description="Ele aparece aqui quando for divulgado."
         />
         <CampaignTour steps={RESULTS_TOUR} tour={tour} />
       </div>
@@ -135,6 +135,15 @@ export function CampaignResults() {
             ))}
           </ol>
         </Card>
+      )}
+
+      {state.ranking_visible && (
+        <Link
+          to={`/campanhas/${slug}/ranking`}
+          className="flex h-12 items-center justify-center rounded-2xl border border-border text-sm font-semibold text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          Ver classificação
+        </Link>
       )}
 
       <p className="text-center text-xs text-muted-foreground">

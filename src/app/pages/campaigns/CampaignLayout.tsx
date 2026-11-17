@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { NavLink, Outlet, useNavigate, useOutletContext, useParams } from "react-router";
-import { BookOpen, ChevronLeft, ClipboardList, Home, ListOrdered, Send, Trophy, Vote } from "lucide-react";
+import { NavLink, Outlet, useLocation, useNavigate, useOutletContext, useParams } from "react-router";
+import { ChevronLeft } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Skeleton } from "../../components/ui/skeleton";
-import { StageBadge } from "../../components/campaigns/StageBadge";
 import { ErrorState } from "../../components/campaigns/ErrorState";
 import { campaignsApi, CampaignApiError, errMsg } from "../../lib/campaigns/api";
 import { cn } from "../../lib/utils";
@@ -27,6 +26,7 @@ type Loaded = { campaign: PublicCampaign; state: CollabState };
 export function CampaignLayout() {
   const { slug = "" } = useParams();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [data, setData] = useState<Loaded | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
@@ -65,20 +65,17 @@ export function CampaignLayout() {
 
   const toList = (
     <Button variant="outline" size="sm" className="h-11 rounded-xl px-4" onClick={() => navigate("/campanhas")}>
-      Ver todas as campanhas
+      Ver campanhas
     </Button>
   );
 
   if (loading && !data) {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-4 pt-2" aria-busy="true" aria-live="polite">
-        <div className="flex items-center gap-3">
-          <Skeleton className="h-10 w-10 rounded-full" />
-          <Skeleton className="h-6 w-48" />
-        </div>
-        <Skeleton className="h-11 w-full rounded-full" />
-        <Skeleton className="aspect-video w-full rounded-3xl" />
-        <Skeleton className="h-24 w-full rounded-3xl" />
+        <Skeleton className="h-11 w-11 rounded-full" />
+        <Skeleton className="aspect-[2/1] w-full rounded-3xl" />
+        <Skeleton className="h-7 w-2/3" />
+        <Skeleton className="h-14 w-full rounded-2xl" />
         <span className="sr-only">Carregando a campanha…</span>
       </div>
     );
@@ -89,7 +86,7 @@ export function CampaignLayout() {
     return (
       <div className="mx-auto w-full max-w-2xl pt-2">
         {unavailable ? (
-          <ErrorState title="Campanha indisponível" message="Esta campanha não está disponível para você agora. Ela pode ter sido encerrada ou ainda não ter sido aberta.">
+          <ErrorState title="Campanha indisponível" message="Ela não está aberta para você agora.">
             {toList}
           </ErrorState>
         ) : (
@@ -103,35 +100,39 @@ export function CampaignLayout() {
 
   const { campaign, state } = ctx;
   const base = `/campanhas/${slug}`;
-  const sections: { to: string; label: string; icon: React.ElementType; end?: boolean }[] = [
-    { to: base, label: "Início", icon: Home, end: true },
-  ];
-  if (state.gallery_visible) sections.push({ to: `${base}/receitas`, label: "Receitas", icon: BookOpen });
-  if (state.can_submit && !state.my_submission_id) sections.push({ to: `${base}/enviar`, label: "Enviar receita", icon: Send });
-  if (state.my_submission_id) sections.push({ to: `${base}/participacao`, label: "Minha participação", icon: ClipboardList });
-  if (campaign.features.voting && state.released) sections.push({ to: `${base}/votacao`, label: "Votação", icon: Vote });
-  if (state.ranking_visible) sections.push({ to: `${base}/ranking`, label: "Ranking", icon: ListOrdered });
-  if (state.results_visible) sections.push({ to: `${base}/resultado`, label: "Resultado", icon: Trophy });
+  const isHome = pathname.replace(/\/+$/, "") === base;
+  const isForm = pathname.endsWith("/enviar");
+
+  // Seções: só as que existem para esta campanha e esta pessoa agora.
+  const sections: { to: string; label: string; end?: boolean }[] = [{ to: base, label: "Início", end: true }];
+  if (state.gallery_visible) sections.push({ to: `${base}/receitas`, label: "Receitas" });
+  if (state.my_submission_id) sections.push({ to: `${base}/participacao`, label: "Meu envio" });
+  if (state.results_visible) sections.push({ to: `${base}/resultado`, label: "Resultado" });
+  else if (campaign.features.voting && state.released && (state.voting === "open" || state.has_voted || state.voting === "closed")) {
+    sections.push({ to: `${base}/votacao`, label: state.can_vote ? "Votar" : "Votação" });
+  }
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4 pt-2">
-      <header className="flex items-start gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/campanhas")} className="h-11 w-11 shrink-0 rounded-full" aria-label="Voltar para a lista de campanhas">
+    <div className="mx-auto w-full max-w-2xl space-y-4 pt-1">
+      <header className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => navigate(isHome ? "/campanhas" : base)}
+          className="h-11 w-11 shrink-0 rounded-full"
+          aria-label={isHome ? "Voltar para as campanhas" : "Voltar para a campanha"}
+        >
           <ChevronLeft size={24} />
         </Button>
-        <div className="min-w-0 flex-1 pt-0.5">
-          <h1 className="text-xl font-bold leading-tight text-foreground">{campaign.name}</h1>
-          <div className="mt-1.5">
-            <StageBadge stage={state.stage} />
-          </div>
-        </div>
+        {!isHome && <p className="min-w-0 flex-1 truncate text-base font-bold text-foreground">{campaign.name}</p>}
       </header>
 
-      {sections.length > 1 && (
+      {sections.length > 1 && !isForm && (
         <nav
           aria-label="Seções da campanha"
           data-tutorial="camp-sections"
-          className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] md:mx-0 md:px-0 [&::-webkit-scrollbar]:hidden"
+          className="grid gap-1 rounded-2xl bg-muted p-1"
+          style={{ gridTemplateColumns: `repeat(${sections.length}, minmax(0, 1fr))` }}
         >
           {sections.map((s) => (
             <NavLink
@@ -140,14 +141,11 @@ export function CampaignLayout() {
               end={s.end}
               className={({ isActive }) =>
                 cn(
-                  "inline-flex h-11 shrink-0 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-                  isActive
-                    ? "border-primary bg-primary text-primary-foreground shadow-md shadow-primary/20"
-                    : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
+                  "flex h-10 items-center justify-center truncate rounded-xl px-1 text-[13px] font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                  isActive ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground",
                 )
               }
             >
-              <s.icon size={16} aria-hidden="true" />
               {s.label}
             </NavLink>
           ))}

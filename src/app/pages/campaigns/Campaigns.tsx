@@ -33,7 +33,7 @@ export function Campaigns() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const tourEnabled = !!items && items.some((c) => c.features?.tour?.enabled);
+  const tourEnabled = !!items && items.length > 0 && items.some((c) => c.features?.tour?.enabled);
   const tourVersion = items ? Math.max(1, ...items.map((c) => c.features?.tour?.version ?? 1)) : 1;
   const tour = useTour({
     storageKey: tourKey("collab", user?.id, "list", undefined, tourVersion),
@@ -41,18 +41,15 @@ export function Campaigns() {
   });
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-6 pt-2">
-      <header className="flex items-center gap-3">
+    <div className="mx-auto w-full max-w-2xl space-y-4 pt-1">
+      <header className="flex items-center gap-2">
         <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="h-11 w-11 shrink-0 rounded-full" aria-label="Voltar">
           <ChevronLeft size={24} />
         </Button>
-        <div className="min-w-0 flex-1">
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
-            <Megaphone size={22} className="text-primary" aria-hidden="true" />
-            Campanhas
-          </h1>
-          <p className="text-sm text-muted-foreground">Participe dos concursos e ações do Space Food</p>
-        </div>
+        <h1 className="flex min-w-0 flex-1 items-center gap-2 text-xl font-bold text-foreground">
+          <Megaphone size={20} className="shrink-0 text-primary" aria-hidden="true" />
+          Campanhas
+        </h1>
         <TourButton onClick={tour.start} />
       </header>
 
@@ -63,22 +60,17 @@ export function Campaigns() {
           <div className="space-y-4" aria-busy="true" aria-live="polite">
             {[0, 1].map((i) => (
               <Card key={i} className="overflow-hidden rounded-3xl hover:shadow-sm">
-                <Skeleton className="aspect-video w-full rounded-none" />
+                <Skeleton className="aspect-[2/1] w-full rounded-none" />
                 <div className="space-y-2 p-4">
                   <Skeleton className="h-5 w-2/3" />
-                  <Skeleton className="h-4 w-full" />
-                  <Skeleton className="h-6 w-40 rounded-full" />
+                  <Skeleton className="h-4 w-1/2" />
                 </div>
               </Card>
             ))}
             <span className="sr-only">Carregando campanhas…</span>
           </div>
         ) : items.length === 0 ? (
-          <EmptyState
-            icon={<Megaphone size={24} aria-hidden="true" />}
-            title="Nenhuma campanha disponível no momento"
-            description="Quando houver uma campanha para você, ela aparece aqui. Fique de olho nos avisos."
-          />
+          <EmptyState icon={<Megaphone size={24} aria-hidden="true" />} title="Nenhuma campanha por enquanto" description="Quando houver uma para você, ela aparece aqui." />
         ) : (
           items.map((c, i) => <CampaignCard key={c.id} campaign={c} first={i === 0} />)
         )}

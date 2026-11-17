@@ -1,8 +1,7 @@
 import { createElement } from "react";
 import {
-  Megaphone, Power, BarChart3, FilePlus2, ListChecks, IdCard, Users, SlidersHorizontal, CalendarClock,
-  ClipboardCheck, ChefHat, Vote, MousePointerClick, Route, LayoutList, Search, Trophy, FileDown, ShieldAlert,
-  ListFilter, Gauge,
+  Megaphone, Power, BarChart3, FilePlus2, ListChecks, IdCard, Users, ClipboardCheck, ChefHat, Vote, MousePointerClick,
+  LayoutList, Search, Trophy, FileDown, ShieldAlert, ListFilter, Gauge, ImagePlus, CalendarDays, ThumbsUp, Compass, BadgeCheck,
 } from "lucide-react";
 import type { TourStep } from "../../components/campaigns/CampaignTour";
 
@@ -49,47 +48,47 @@ export const ADMIN_TOUR_OVERVIEW: TourStep[] = [
   },
 ];
 
-/** Assistente de criação/edição. Os passos apontam para o indicador de etapas, sempre visível. */
+/** Cadastro da campanha (uma página só). Cada passo aponta para um bloco do formulário. */
 export const ADMIN_TOUR_WIZARD: TourStep[] = [
   {
-    selector: "camp-wiz-step-identity",
-    title: "1. Identidade",
+    selector: "camp-wiz-about",
+    title: "Nome e descrição",
     description:
-      "Nome, endereço, descrição, objetivo, orientações e capa. Na criação, você pode usar o modelo do Café Especial para começar mais rápido.",
+      "Só o essencial: o nome e uma descrição curta, que aparece no cartão e no banner da Home. Regras e orientações são opcionais, em “Mais detalhes”.",
     icon: icon(IdCard),
     placement: "bottom",
   },
   {
-    selector: "camp-wiz-step-audience",
-    title: "2. Público",
+    selector: "camp-wiz-cover",
+    title: "A capa é o banner da Home",
     description:
-      "Escolha quem pode participar: todos, certas unidades, departamentos ou pessoas específicas. Só elas veem a campanha depois de publicada.",
+      "A mesma imagem vira o banner da Home quando a campanha for publicada — não precisa cadastrar outra. Ela é cortada na proporção do banner; confira a prévia no celular e no computador.",
+    icon: icon(ImagePlus),
+    placement: "bottom",
+  },
+  {
+    selector: "camp-wiz-voting",
+    title: "Tem votação?",
+    description:
+      "Ligue se os colaboradores vão votar nas receitas. Sem votação, a campanha só recebe participações e nada sobre votos aparece.",
+    icon: icon(Vote),
+    placement: "bottom",
+  },
+  {
+    selector: "camp-wiz-period",
+    title: "Início e encerramento",
+    description:
+      "É só isso: a participação (e a votação, se houver) abre no início e fecha sozinha no encerramento.",
+    icon: icon(CalendarDays),
+    placement: "top",
+  },
+  {
+    selector: "camp-wiz-audience",
+    title: "Quem participa",
+    description:
+      "Todos os colaboradores, ou pessoas específicas — ótimo para testar antes de abrir para todos. Salvar nunca publica: para isso há o botão Publicar no painel.",
     icon: icon(Users),
-    placement: "bottom",
-  },
-  {
-    selector: "camp-wiz-step-features",
-    title: "3. Funcionalidades e regras",
-    description:
-      "Ligue só o que a campanha precisa (fotos, vídeo, votação, ranking...). As regras protegidas — 1 receita e 1 voto por pessoa, voto definitivo, edição travada na votação — valem sempre e não podem ser desligadas.",
-    icon: icon(SlidersHorizontal),
-    placement: "bottom",
-  },
-  {
-    selector: "camp-wiz-step-schedule",
-    title: "4. Calendário",
-    description:
-      "Datas e horários de Brasília para inscrições, votação, apuração e divulgação. As inscrições precisam terminar antes de a votação começar.",
-    icon: icon(CalendarClock),
-    placement: "bottom",
-  },
-  {
-    selector: "camp-wiz-step-review",
-    title: "5. Revisão",
-    description:
-      "Confira o resumo e salve como rascunho. Depois, no painel da campanha, o botão Publicar libera tudo para os colaboradores.",
-    icon: icon(ClipboardCheck),
-    placement: "bottom",
+    placement: "top",
   },
 ];
 
@@ -114,16 +113,16 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-panel-tabs",
       title: "As áreas da campanha",
       description:
-        "Resumo, Receitas, Participantes, Votação e Configurações ficam sempre aqui no topo, fixas enquanto você rola. Cada área abre a sua própria tour na primeira visita.",
+        "Resumo, Receitas, Participantes, Votação e Configurações ficam sempre aqui no topo, fixas enquanto você rola. Cada área abre a própria tour na primeira visita.",
       icon: icon(LayoutList),
       placement: "bottom",
     },
     {
       selector: "camp-panel-cycle",
-      title: "Ciclo e próximo passo",
+      title: "Período e próximo passo",
       description:
-        "O ciclo mostra em que etapa a campanha está (inscrições, análise, votação, resultado e divulgação) e o cartão logo abaixo diz a única coisa que vale fazer agora, com um botão direto.",
-      icon: icon(Route),
+        "Uma linha mostra o período e a situação. O cartão logo abaixo diz a única coisa que vale fazer agora, com um botão direto.",
+      icon: icon(Compass),
       placement: "bottom",
     },
     {
@@ -138,7 +137,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-summary-cards",
       title: "Os números que importam",
       description:
-        "Participação, receitas por situação, votos e resultado. O que ainda não faz sentido (como votos antes da votação) nem aparece. Mais abaixo vêm o ranking e, em \"Mais indicadores\", o ritmo de envios e a participação por unidade.",
+        "Participação, receitas por situação, votos e resultado. Antes de a votação encerrar, a contagem por receita não aparece — nem para a gestão —, para não influenciar os votos.",
       icon: icon(Gauge),
       placement: "bottom",
     },
@@ -157,7 +156,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-sub-list",
       title: "O que precisa de ação vem primeiro",
       description:
-        "As receitas aguardando análise ficam no topo da lista. Depois que a votação começa, as pendentes ficam de fora dela e o grupo de receitas é fechado.",
+        "As receitas aguardando análise ficam no topo. Receitas aprovadas já podem receber votos e não podem mais ser editadas pelo colaborador.",
       icon: icon(ChefHat),
       placement: "top",
     },
@@ -165,8 +164,8 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-sub-open",
       title: "Abrir para analisar",
       description:
-        "No detalhe você vê fotos, vídeo e texto, e aprova ou reprova. Para reprovar, a justificativa precisa ter pelo menos 10 caracteres: o colaborador a lê e pode ajustar a receita.",
-      icon: icon(ClipboardCheck),
+        "No detalhe você vê a foto e o texto, e aprova ou reprova. Para reprovar, a justificativa precisa ter pelo menos 10 caracteres: o colaborador a lê e pode ajustar e reenviar.",
+      icon: icon(BadgeCheck),
       placement: "top",
     },
   ],
@@ -184,7 +183,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-part-table",
       title: "Uma tabela só",
       description:
-        "Cada linha é uma pessoa, com a receita, quantos votos recebeu, a posição e se já votou. As colunas de votos aparecem de acordo com a sua permissão.",
+        "Cada linha é uma pessoa, com a receita e se já votou. Depois do encerramento da votação aparecem também os votos recebidos e a posição.",
       icon: icon(Users),
       placement: "top",
     },
@@ -192,7 +191,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-part-row",
       title: "Abra uma linha",
       description:
-        "Toque em uma pessoa para ver a receita dela e, com a permissão certa, de quem vieram os votos. É aqui também que um voto pode ser invalidado, sempre com justificativa.",
+        "Toque em uma pessoa para ver a receita dela e, depois do encerramento e com a permissão certa, de quem vieram os votos. Um voto só pode ser invalidado com justificativa.",
       icon: icon(Trophy),
       placement: "top",
     },
@@ -203,32 +202,24 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-vote-status",
       title: "A votação está aberta ou encerrada?",
       description:
-        "A situação, o período, quando ela fecha e quantos elegíveis já votaram ficam juntos aqui, sem números repetidos em outras telas.",
-      icon: icon(Vote),
+        "A situação, o período e quantas pessoas já votaram ficam juntos aqui. A contagem por receita fica de fora até o encerramento.",
+      icon: icon(ThumbsUp),
       placement: "bottom",
     },
     {
-      selector: "camp-vote-ranking",
-      title: "Ranking parcial ou oficial",
+      selector: "camp-vote-result",
+      title: "Ver resultado",
       description:
-        "Votos por receita. Enquanto o vencedor não é confirmado ele aparece como Parcial, e só a gestão vê. Para saber quem votou em quem, use Participantes.",
+        "O botão fica bloqueado até a votação encerrar: antes disso ninguém vê quem está na frente. Depois, um clique mostra o vencedor, o ranking e o que conferir.",
       icon: icon(Trophy),
       placement: "top",
     },
     {
-      selector: "camp-vote-controls",
-      title: "Pausar, prorrogar, avisar",
+      selector: "camp-result-actions",
+      title: "Confirmar e divulgar",
       description:
-        "Controles da votação em andamento. Pausar ou prorrogar nunca apaga votos nem libera a edição das receitas.",
-      icon: icon(SlidersHorizontal),
-      placement: "top",
-    },
-    {
-      selector: "camp-vote-flow",
-      title: "Do fim da votação ao resultado",
-      description:
-        "Passo a passo: encerrar, apurar, decidir empate se houver, confirmar o vencedor e divulgar. O passo que você pode fazer agora fica destacado, e a divulgação não pode ser desfeita.",
-      icon: icon(ListChecks),
+        "Confirme o vencedor e, quando quiser, divulgue para os colaboradores. Em caso de empate, a decisão vem antes, com justificativa. A divulgação não pode ser desfeita.",
+      icon: icon(BadgeCheck),
       placement: "top",
     },
   ],
@@ -238,16 +229,16 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-sec-info",
       title: "Informações e edição",
       description:
-        "O que os colaboradores leem sobre a campanha. O botão Editar leva ao assistente, e salvar nunca publica nada.",
+        "O que os colaboradores leem sobre a campanha. O botão Editar leva ao cadastro, e salvar nunca publica nada.",
       icon: icon(IdCard),
       placement: "bottom",
     },
     {
-      selector: "camp-sec-schedule",
-      title: "Calendário",
+      selector: "camp-sec-period",
+      title: "Período",
       description:
-        "Datas e horários de Brasília de cada etapa. Para a votação em andamento, pausar e prorrogar ficam na aba Votação.",
-      icon: icon(CalendarClock),
+        "Início e encerramento da campanha. Para prorrogar, é só escolher uma nova data de encerramento.",
+      icon: icon(CalendarDays),
       placement: "bottom",
     },
     {

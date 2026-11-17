@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
-import { CheckCircle2, Clock, Lock, PauseCircle, ShieldCheck, User, UtensilsCrossed, Vote, Flag } from "lucide-react";
+import { CheckCircle2, Clock, Flag, Lock, PauseCircle, User, UtensilsCrossed, Vote } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { Button } from "../../components/ui/Button";
@@ -13,7 +13,7 @@ import { CampaignTour, TourButton, tourKey, useTour } from "../../components/cam
 import { useCampaignCtx } from "./CampaignLayout";
 import { useAuth } from "../../context/Store";
 import { campaignsApi, errMsg } from "../../lib/campaigns/api";
-import { fmtDateTime, plural } from "../../lib/campaigns/format";
+import { fmtDateTime } from "../../lib/campaigns/format";
 import { VOTE_TOUR } from "../../lib/campaigns/tours-collab";
 import { cn } from "../../lib/utils";
 import type { AdminStageRow, CollabState, VoteCandidate } from "../../lib/campaigns/types";
@@ -44,8 +44,7 @@ export function CampaignVote() {
 
   useEffect(() => { void load(false); }, [load]);
 
-  // Abre sozinha uma vez, quando a votação está aberta (é quando as regras e o botão Votar existem na tela).
-  // O botão "Ver tour" fica sempre visível e, fora desse período, explica a tela.
+  // Abre sozinha uma vez, quando a votação está aberta; "Ver tour" fica sempre visível.
   const tour = useTour({
     storageKey: tourKey("collab", user?.id, "vote", campaign.id, ctxState.tour?.version),
     enabled: !!ctxState.tour?.enabled && !!user && !!data && data.state.voting === "open",
@@ -56,9 +55,9 @@ export function CampaignVote() {
     inflight.current = true;
     setVoting(true);
     try {
-      const r = await campaignsApi.post<{ created_at: string; dish_name: string }>(`${api}/votes`, { submission_id: pick.id, confirm: true });
+      await campaignsApi.post<{ created_at: string; dish_name: string }>(`${api}/votes`, { submission_id: pick.id, confirm: true });
       setPick(null);
-      toast.success(`Voto registrado em ${fmtDateTime(r.created_at)}.`);
+      toast.success("Voto registrado!");
     } catch (e) {
       setPick(null);
       toast.error(errMsg(e));
@@ -70,18 +69,16 @@ export function CampaignVote() {
     }
   };
 
-  const firstVotableId = useMemo(
-    () => data?.candidates.find((c) => !c.mine)?.id ?? null,
-    [data],
-  );
+  const firstVotableId = useMemo(() => data?.candidates.find((c) => !c.mine)?.id ?? null, [data]);
 
   if (error) return <ErrorState message={error} onRetry={() => void load(false)} />;
 
   if (!data) {
     return (
       <div className="space-y-4" aria-busy="true" aria-live="polite">
-        <Skeleton className="h-28 w-full rounded-3xl" />
-        {[0, 1].map((i) => <Skeleton key={i} className="h-32 w-full rounded-3xl" />)}
+        <div className="grid grid-cols-2 gap-3">
+          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-52 w-full rounded-2xl" />)}
+        </div>
         <span className="sr-only">Carregando a votação…</span>
       </div>
     );
@@ -91,125 +88,114 @@ export function CampaignVote() {
   const phase = state.voting ?? "unset";
   const hasVoted = !!state.has_voted;
   const canVoteNow = phase === "open" && !hasVoted && !!state.can_vote;
+  const votedFor = candidates.find((c) => c.voted);
 
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-bold text-foreground">Votação</h2>
         <TourButton onClick={tour.start} />
       </div>
 
-      {phase === "unset" && (
-        <EmptyState icon={<Clock size={22} aria-hidden="true" />} title="A votação ainda não tem data definida" description="Assim que a data for definida, ela aparece aqui." />
-      )}
+      {phase === "unset" && <EmptyState icon={<Clock size={22} aria-hidden="true" />} title="A votação ainda não tem data" />}
       {phase === "upcoming" && (
         <EmptyState
           icon={<Clock size={22} aria-hidden="true" />}
           title="A votação ainda não começou"
-          description={stage?.starts_at ? `Ela começa em ${fmtDateTime(stage.starts_at)} (horário de Brasília).` : "Em breve você poderá votar na sua receita favorita."}
+          description={stage?.starts_at ? `Começa em ${fmtDateTime(stage.starts_at)}.` : undefined}
         />
       )}
       {phase === "paused" && (
-        <Card role="status" className="rounded-3xl border-yellow-200 bg-yellow-50 p-4 hover:shadow-sm dark:border-yellow-900/50 dark:bg-yellow-950/20">
+        <Card role="status" className="rounded-2xl border-yellow-200 bg-yellow-50 p-4 hover:shadow-sm dark:border-yellow-900/50 dark:bg-yellow-950/20">
           <p className="flex items-start gap-2 text-sm font-medium text-yellow-900 dark:text-yellow-100">
             <PauseCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-            <span>A votação está em pausa no momento. Volte mais tarde para votar.</span>
+            <span>A votação está em pausa. Volte mais tarde.</span>
           </p>
         </Card>
       )}
       {phase === "closed" && (
-        <Card role="status" className="rounded-3xl p-4 hover:shadow-sm">
+        <Card role="status" className="rounded-2xl p-4 hover:shadow-sm">
           <p className="flex items-start gap-2 text-sm font-medium text-foreground">
             <Flag size={16} className="mt-0.5 shrink-0 text-primary" aria-hidden="true" />
-            <span>A votação foi encerrada. Aguarde a divulgação do resultado.</span>
+            <span>Votação encerrada. O resultado será divulgado aqui.</span>
           </p>
         </Card>
       )}
 
-      {phase === "open" && (
-        <Card className="rounded-3xl p-5 hover:shadow-sm" data-tutorial="camp-vote-rules">
-          <p className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            <ShieldCheck size={14} className="text-primary" aria-hidden="true" />
-            Como funciona
-          </p>
-          <ul className="space-y-2 text-sm text-foreground">
-            <li className="flex gap-2.5"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" /><span><strong>1 voto por pessoa.</strong></span></li>
-            <li className="flex gap-2.5"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" /><span>O voto é <strong>definitivo</strong>: depois de confirmado não pode ser alterado.</span></li>
-            <li className="flex gap-2.5"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" /><span>Não é possível votar na <strong>própria receita</strong>.</span></li>
-          </ul>
-          {stage?.ends_at && <p className="mt-3 text-xs text-muted-foreground">A votação termina em {fmtDateTime(stage.ends_at)} (horário de Brasília).</p>}
-        </Card>
+      {phase === "open" && !hasVoted && (
+        <p className="text-xs text-muted-foreground" data-tutorial="camp-vote-rules">
+          1 voto por pessoa, definitivo e não vale na própria receita
+          {stage?.ends_at ? ` · até ${fmtDateTime(stage.ends_at)}` : ""}.
+        </p>
       )}
 
       {hasVoted && (
-        <Card role="status" className="rounded-3xl border-green-200 bg-green-50 p-4 hover:shadow-sm dark:border-green-900/50 dark:bg-green-950/20">
+        <Card role="status" className="rounded-2xl border-green-200 bg-green-50 p-4 hover:shadow-sm dark:border-green-900/50 dark:bg-green-950/20" data-tutorial={phase !== "open" ? "camp-vote-rules" : undefined}>
           <p className="flex items-start gap-2 text-sm font-medium text-green-900 dark:text-green-100">
             <CheckCircle2 size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
-            <span>Seu voto foi registrado{state.voted_at ? ` em ${fmtDateTime(state.voted_at)}` : ""}. Obrigado por participar!</span>
+            <span>{votedFor ? <>Você votou em <strong>“{votedFor.dish_name}”</strong>.</> : "Seu voto foi registrado."}</span>
           </p>
         </Card>
       )}
 
       {candidates.length > 0 && (
-        <section className="space-y-3" aria-label="Receitas concorrentes">
-          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{plural(candidates.length, "receita concorrente", "receitas concorrentes")}</p>
-          {candidates.map((c) => (
-            <Card key={c.id} className={cn("overflow-hidden rounded-3xl hover:shadow-sm", c.voted && "border-primary/50 ring-1 ring-primary/30")}>
-              <div className="flex gap-3 p-3">
-                <div className="h-24 w-24 shrink-0 overflow-hidden rounded-2xl bg-muted">
-                  {c.photo_url ? (
-                    <img src={c.photo_url} alt="" loading="lazy" className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-orange-100 to-amber-100 text-orange-400 dark:from-orange-950/40 dark:to-amber-950/30">
-                      <UtensilsCrossed size={26} aria-hidden="true" />
-                    </div>
-                  )}
-                </div>
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-bold leading-snug text-foreground">{c.dish_name}</p>
-                    {c.voted && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">Seu voto</span>}
+        <section className="grid grid-cols-2 gap-3" aria-label="Receitas">
+          {candidates.map((c) => {
+            const photo = (
+              <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
+                {c.photo_url ? (
+                  <img src={c.photo_url} alt="" loading="lazy" className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-orange-100 to-amber-100 text-orange-400 dark:from-orange-950/40 dark:to-amber-950/30">
+                    <UtensilsCrossed size={28} aria-hidden="true" />
                   </div>
-                  <p className="flex items-center gap-1 text-xs text-muted-foreground"><User size={11} aria-hidden="true" /> {c.mine ? "Você" : c.author}</p>
-                  {c.description && <p className="line-clamp-2 text-xs text-muted-foreground">{c.description}</p>}
-                </div>
+                )}
+                {c.voted && (
+                  <span className="absolute left-2 top-2 rounded-full bg-primary px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-primary-foreground shadow">Seu voto</span>
+                )}
               </div>
-              {(state.gallery_visible || canVoteNow) && (
-                <div className="flex items-center gap-2 border-t border-border/60 p-3">
-                  {state.gallery_visible && (
-                    <Link
-                      to={`/campanhas/${slug}/receitas/${c.id}`}
-                      className="inline-flex h-11 items-center rounded-xl border border-border px-4 text-sm font-semibold text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                    >
-                      Ver receita
-                    </Link>
-                  )}
+            );
+            return (
+              <Card key={c.id} className={cn("flex flex-col overflow-hidden rounded-2xl hover:shadow-sm", c.voted && "border-primary/50 ring-1 ring-primary/30")}>
+                {state.gallery_visible ? (
+                  <Link to={`/campanhas/${slug}/receitas/${c.id}`} aria-label={`Ver a receita ${c.dish_name}`} className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
+                    {photo}
+                  </Link>
+                ) : photo}
+                <div className="flex flex-1 flex-col gap-2 p-3">
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <p className="line-clamp-2 text-sm font-bold leading-snug text-foreground">{c.dish_name}</p>
+                    <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+                      <User size={11} aria-hidden="true" className="shrink-0" />
+                      <span className="truncate">{c.mine ? "Você" : c.author}</span>
+                    </p>
+                  </div>
                   {canVoteNow && (
                     c.mine ? (
-                      <Button disabled variant="secondary" className="ml-auto h-11 gap-2 rounded-xl px-4" aria-label="Você não pode votar na sua própria receita">
-                        <Lock size={14} aria-hidden="true" /> Sua receita
+                      <Button disabled variant="secondary" className="h-11 w-full gap-1.5 rounded-xl text-sm" aria-label="Você não pode votar na sua própria receita">
+                        <Lock size={13} aria-hidden="true" /> Sua receita
                       </Button>
                     ) : (
                       <Button
                         onClick={() => setPick(c)}
                         disabled={voting}
                         data-tutorial={c.id === firstVotableId ? "camp-vote-button" : undefined}
-                        className="ml-auto h-11 gap-2 rounded-xl px-5 font-bold"
+                        className="h-11 w-full gap-1.5 rounded-xl text-sm font-bold"
                         aria-label={`Votar em ${c.dish_name}`}
                       >
-                        <Vote size={16} aria-hidden="true" /> Votar
+                        <Vote size={15} aria-hidden="true" /> Votar
                       </Button>
                     )
                   )}
                 </div>
-              )}
-            </Card>
-          ))}
+              </Card>
+            );
+          })}
         </section>
       )}
 
       {phase === "open" && candidates.length === 0 && (
-        <EmptyState icon={<UtensilsCrossed size={22} aria-hidden="true" />} title="Ainda não há receitas para votar" description="Assim que houver receitas aprovadas, elas aparecem aqui." />
+        <EmptyState icon={<UtensilsCrossed size={22} aria-hidden="true" />} title="Ainda não há receitas para votar" description="Quando houver receitas aprovadas, elas aparecem aqui." />
       )}
 
       <VoteConfirmDialog

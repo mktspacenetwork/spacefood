@@ -7,7 +7,7 @@ import type { DisplayState } from "../../../../lib/campaigns/format";
 import type { AdminCampaign, AdminDashboard } from "../../../../lib/campaigns/types";
 import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
-import { ScheduleTab } from "./ScheduleTab";
+import { PeriodSection } from "./PeriodSection";
 import { ReportsTab } from "./ReportsTab";
 import { HistoryTab } from "./HistoryTab";
 import type { TabProps } from "./types";
@@ -17,23 +17,12 @@ import { useTabTour } from "./useTabTour";
 export type RiskKind = "draft" | "close" | "archive" | "delete";
 
 export type SettingsTabProps = TabProps & {
-  /** Seção a abrir (e rolar até ela) — info | schedule | reports | history | danger. */
+  /** Seção a abrir (e rolar até ela) — info | period | reports | history | danger ("schedule" também vale, como atalho antigo). */
   section?: string | null;
   /** Abre o diálogo de confirmação correspondente no painel. */
   onAction: (kind: RiskKind) => void;
   display: DisplayState;
   dashboard: AdminDashboard | null;
-};
-
-const FEATURE_LABEL: [keyof AdminCampaign["features"], string][] = [
-  ["submission", "Formulário"], ["photos", "Fotos"], ["video", "Vídeo"], ["approval", "Aprovação"],
-  ["gallery", "Galeria"], ["voting", "Votação"], ["ranking", "Ranking"], ["results", "Resultado"], ["announcement", "Divulgação"],
-];
-const RANKING_MODE: Record<string, string> = {
-  hidden_until_confirmed: "só depois de confirmar o vencedor", after_close: "ao encerrar a votação", live: "em tempo real",
-};
-const GALLERY_MODE: Record<string, string> = {
-  on_approval: "assim que a receita é aprovada", on_voting_start: "quando a votação começa", on_results: "na divulgação do resultado",
 };
 
 function audienceText(c: AdminCampaign, eligible: number | undefined): string {
@@ -99,13 +88,14 @@ export function SettingsTab(props: SettingsTabProps) {
 
   const available = useMemo(() => {
     const ids = ["info", "history"];
-    if (perms.campaigns_schedule) ids.push("schedule");
+    if (perms.campaigns_schedule) ids.push("period");
     if (perms.campaigns_export) ids.push("reports");
     if (risk.length > 0) ids.push("danger");
     return ids;
   }, [perms.campaigns_schedule, perms.campaigns_export, risk.length]);
 
-  const wanted = section && available.includes(section) ? section : "info";
+  const alias = section === "schedule" ? "period" : section;
+  const wanted = alias && available.includes(alias) ? alias : "info";
   const [open, setOpen] = useState<string | null>(wanted);
 
   // Link direto para uma seção: abre o item e rola até ele (depois de a animação começar).
@@ -118,7 +108,6 @@ export function SettingsTab(props: SettingsTabProps) {
 
   const tour = useTabTour("settings", { tourUserId, tourSignal, ready: true });
 
-  const enabledFeatures = FEATURE_LABEL.filter(([k]) => !!c.features[k]).map(([, l]) => l);
   const lines = c.instructions.split("\n").filter((l) => l.trim()).length;
   const foldProps = (id: string) => ({
     anchorId: `camp-sec-${id}`,
@@ -129,7 +118,7 @@ export function SettingsTab(props: SettingsTabProps) {
 
   return (
     <div className="space-y-4">
-      <TabIntro>Ajuste as informações e o calendário, baixe relatórios e consulte o histórico. O que muda o destino da campanha fica na zona de risco.</TabIntro>
+      <TabIntro>Ajuste as informações e o período, baixe relatórios e consulte o histórico. O que muda o destino da campanha fica na zona de risco.</TabIntro>
 
       <Fold {...foldProps("info")} icon={<IdCard size={18} />} title="Informações" hint="O que os colaboradores leem sobre a campanha.">
         {perms.campaigns_edit && !finished && (
@@ -144,35 +133,16 @@ export function SettingsTab(props: SettingsTabProps) {
           <Row label="Endereço"><span className="font-mono text-xs">/campanhas/{c.slug}</span></Row>
           <Row label="Situação">{DISPLAY_STATE[display].label} — {DISPLAY_STATE[display].hint}</Row>
           <Row label="Descrição"><span className="line-clamp-4 whitespace-pre-line">{c.description || "—"}</span></Row>
-          <Row label="Objetivo">{c.objective || "—"}</Row>
-          <Row label="Orientações">{lines > 0 ? `${plural(lines, "linha", "linhas")} de orientação` : "—"}</Row>
+          <Row label="Detalhes">{lines > 0 ? `${plural(lines, "linha", "linhas")} de regras e orientações` : "—"}</Row>
+          <Row label="Votação">{c.features.voting ? "Com votação" : "Sem votação"}</Row>
+          <Row label="Capa e banner">{c.cover_url ? "Imagem cadastrada (a mesma do banner da Home)" : "Sem imagem — o banner usa o fundo laranja com o nome"}</Row>
           <Row label="Público">{audienceText(c, dashboard?.eligible)}</Row>
-          <Row label="Funcionalidades">
-            <span className="flex flex-wrap gap-1.5">
-              {enabledFeatures.map((l) => (
-                <span key={l} className="rounded-full border border-border bg-muted/50 px-2.5 py-0.5 text-[11px] font-medium">{l}</span>
-              ))}
-            </span>
-          </Row>
-          {(c.features.photos || c.features.video) && (
-            <Row label="Mídia">
-              {c.features.photos && <>Até {c.media_limits.max_photos} foto(s) extra(s) de {c.media_limits.max_photo_mb} MB{c.media_limits.require_main_photo ? " · foto principal obrigatória" : ""}</>}
-              {c.features.photos && c.features.video && c.media_limits.allow_video && " · "}
-              {c.features.video && c.media_limits.allow_video && <>vídeo de até {c.media_limits.max_video_mb} MB</>}
-            </Row>
-          )}
-          {(c.features.gallery || c.features.ranking) && (
-            <Row label="Visibilidade">
-              {c.features.gallery && <>Galeria: {GALLERY_MODE[c.visibility.gallery_visibility]}. </>}
-              {c.features.ranking && <>Ranking: {RANKING_MODE[c.visibility.ranking_mode]}.</>}
-            </Row>
-          )}
         </dl>
       </Fold>
 
       {perms.campaigns_schedule && (
-        <Fold {...foldProps("schedule")} icon={<CalendarClock size={18} />} title="Calendário" hint="Quando cada etapa começa e termina.">
-          <ScheduleTab {...tabProps} />
+        <Fold {...foldProps("period")} icon={<CalendarClock size={18} />} title="Período" hint="Início e encerramento da campanha.">
+          <PeriodSection {...tabProps} />
         </Fold>
       )}
 

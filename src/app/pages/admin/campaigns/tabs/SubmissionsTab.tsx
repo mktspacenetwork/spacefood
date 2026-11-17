@@ -23,7 +23,7 @@ import { TabIntro } from "./ui";
 import { useTabTour } from "./useTabTour";
 
 const FIELD_LIMITS = {
-  dish_name: [3, 120], description: [10, 600], ingredients: [5, 3000], preparation: [10, 6000],
+  dish_name: [3, 120], description: [0, 600], ingredients: [0, 3000], preparation: [0, 6000],
 } as const;
 type FieldKey = keyof typeof FIELD_LIMITS;
 const FIELD_LABEL: Record<FieldKey, string> = {
@@ -257,7 +257,7 @@ function SubmissionDetail({
 
           {d.data.media.length > 0 && (
             <div className="space-y-2">
-              <SectionLabel>Mídias</SectionLabel>
+              <SectionLabel>{d.data.media.some((m) => m.kind === "video") ? "Mídias" : "Foto"}</SectionLabel>
               <div className="grid grid-cols-2 gap-2">
                 {d.data.media.map((m) =>
                   m.kind === "video" ? (
@@ -273,19 +273,22 @@ function SubmissionDetail({
           )}
 
           <div className="space-y-4">
-            {(["description", "ingredients", "preparation"] as const).map((k) => (
+            {(["description", "ingredients", "preparation"] as const).filter((k) => !!sub[k]?.trim()).map((k) => (
               <div key={k} className="space-y-1">
                 <SectionLabel>{FIELD_LABEL[k]}</SectionLabel>
                 <p className="text-sm whitespace-pre-wrap leading-relaxed">{sub[k]}</p>
               </div>
             ))}
+            {!sub.description?.trim() && !sub.ingredients?.trim() && !sub.preparation?.trim() && (
+              <p className="text-sm text-muted-foreground">O colaborador não escreveu descrição.</p>
+            )}
           </div>
 
           {/* Ações */}
           {perms.campaigns_review && (
             <div className="space-y-3 border-t pt-4">
               {d.data.locked ? (
-                <Notice tone="info" title="A votação já começou">
+                <Notice tone="info" title="Análise encerrada">
                   <span className="inline-flex items-center gap-1.5"><Lock size={12} /> Não é mais possível aprovar ou reprovar receitas. A correção de texto continua disponível, com justificativa.</span>
                 </Notice>
               ) : (
@@ -327,7 +330,7 @@ function SubmissionDetail({
             open={rejectOpen}
             onOpenChange={setRejectOpen}
             title="Reprovar receita"
-            description="O colaborador verá esta justificativa e poderá ajustar a receita antes do início da votação."
+            description="O colaborador verá esta justificativa e poderá ajustar e reenviar a receita."
             label="Justificativa da reprovação"
             placeholder="Explique o motivo com clareza (mínimo de 10 caracteres)"
             minLength={10}
@@ -364,11 +367,16 @@ function EditDialog({
   const [reason, setReason] = useState("");
   const { busy, run } = useBusy();
 
-  const changed = useMemo(
-    () => (Object.keys(FIELD_LIMITS) as FieldKey[]).filter((k) => vals[k].trim() !== sub[k]),
-    [vals, sub],
+  // Descrição sempre; ingredientes e preparo só se a receita (antiga) tiver esse conteúdo.
+  const keys = useMemo<FieldKey[]>(
+    () => ["dish_name", "description", ...(sub.ingredients?.trim() ? (["ingredients"] as const) : []), ...(sub.preparation?.trim() ? (["preparation"] as const) : [])],
+    [sub],
   );
-  const invalid = (Object.keys(FIELD_LIMITS) as FieldKey[]).filter((k) => {
+  const changed = useMemo(
+    () => keys.filter((k) => vals[k].trim() !== sub[k]),
+    [vals, sub, keys],
+  );
+  const invalid = keys.filter((k) => {
     const [min, max] = FIELD_LIMITS[k];
     const n = vals[k].trim().length;
     return n < min || n > max;
@@ -390,7 +398,7 @@ function EditDialog({
           <DialogDescription>A correção fica registrada no histórico com o antes e o depois, e exige justificativa.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          {(Object.keys(FIELD_LIMITS) as FieldKey[]).map((k) => {
+          {keys.map((k) => {
             const [min, max] = FIELD_LIMITS[k];
             const n = vals[k].trim().length;
             return (
@@ -401,7 +409,7 @@ function EditDialog({
                 ) : (
                   <Textarea value={vals[k]} onChange={(e) => setVals((v) => ({ ...v, [k]: e.target.value }))} maxLength={max} rows={k === "description" ? 3 : 5} className="rounded-xl" disabled={!!busy} />
                 )}
-                <p className={cn("text-[11px]", n < min ? "text-destructive" : "text-muted-foreground")}>{n}/{max} (mínimo {min})</p>
+                <p className={cn("text-[11px]", n < min ? "text-destructive" : "text-muted-foreground")}>{n}/{max}{min > 0 ? ` (mínimo ${min})` : ""}</p>
               </div>
             );
           })}

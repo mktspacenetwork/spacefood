@@ -1,24 +1,32 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
-  Plus, Search, Edit2, Trash2, Loader2, User, Shield,
-  Check, X, ShieldCheck, Pencil, Users, ChevronDown, ChevronUp,
+  Plus, Search, Loader2, User, Check, ShieldCheck, Pencil, Users, ChevronDown, ChevronUp,
   LayoutDashboard, ClipboardList, ChefHat, ClipboardCheck, CalendarDays,
   UtensilsCrossed, MessageSquare, BarChart3, Image as ImageIcon, Bell,
-  Settings, Info, AlertTriangle, UserCog, MapPin, Crown, KeyRound, Phone, ScrollText,
-  ClipboardPlus, BookMarked,
+  Settings, AlertTriangle, MapPin, Crown, KeyRound, Phone, ScrollText,
+  ClipboardPlus, BookMarked, MoreHorizontal, Trash2, Megaphone, RotateCcw, Info, Trash2 as TrashIcon,
 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/input";
-import { Badge } from "../../components/ui/Badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription, DialogClose } from "../../components/ui/dialog";
 import { Label } from "../../components/ui/label";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
+import { Switch } from "../../components/ui/switch";
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "../../components/ui/sheet";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "../../components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
 import { cn } from "../../lib/utils";
 import { useForm } from "react-hook-form";
 import { SkeletonTable, SkeletonRoleCards } from "../../components/ui/SkeletonCard";
+import { useAuth } from "../../context/auth-context";
+import { campaignsApi, errMsg as campaignErrMsg } from "../../lib/campaigns/api";
+import { invalidateCampaignPerms, useCampaignPerms } from "./campaigns/useCampaignPerms";
+import {
+  CAMPAIGN_PERM_KEYS, CampaignAccessSection, campaignLevelOf, campaignLevelShort, campaignPermsFromKeys,
+} from "../../components/campaigns/CampaignAccessSection";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface AppUser {
@@ -46,23 +54,9 @@ export interface PermRole {
   createdAt: string;
 }
 
-interface UserRoleAssignment {
-  userId: string;
-  userName: string;
-  email: string;
-  avatar: string;
-  systemRole: string;
-  customRoleId: string | null;
-  assignedAt: string | null;
-}
+type Perms = Record<string, boolean>;
 
 // ─── Consts ───────────────────────────────────────────────────────────────────
-const ROLES = [
-  { value: "user", label: "Usuário (Padrão)" },
-  { value: "kitchen", label: "Cozinha (KDS)" },
-  { value: "admin", label: "Administrador" },
-];
-
 const PERM_GROUPS = [
   {
     group: "Operacional",
@@ -105,16 +99,40 @@ const PERM_GROUPS = [
 
 const ALL_PERM_KEYS = PERM_GROUPS.flatMap(g => g.items.map(i => i.key));
 
+/**
+ * ESPELHO do padrão do backend (`resolveUserPermissions` em supabase/functions/server/index.tsx):
+ * conta Cozinha sem perfil atribuído recebe só estas chaves; Admin recebe todas; Colaborador nenhuma.
+ * Serve apenas para MOSTRAR o que vem "de graça" da conta; a decisão real continua sendo do servidor.
+ * (Se o backend mudar essa lista, atualizar aqui — ou expor um endpoint de permissões resolvidas por pessoa.)
+ */
+const KITCHEN_BASELINE = ["dashboard", "orders", "kds", "checkin", "waste", "menu", "reviews", "checkin-report", "recipe-suggestions"];
+
 const PRESET_COLORS = [
   "#ff4500", "#6366f1", "#0ea5e9", "#10b981", "#f59e0b",
   "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316",
 ];
 
-const SYSTEM_ROLE_LABELS: Record<string, { label: string; color: string }> = {
-  master: { label: "Master", color: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400 border-yellow-500/20" },
-  admin: { label: "Admin", color: "bg-primary/10 text-primary border-primary/20" },
-  kitchen: { label: "Cozinha", color: "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20" },
-  user: { label: "Usuário", color: "bg-muted text-muted-foreground border-border" },
+const SYSTEM_ROLE_LABELS: Record<string, { label: string; color: string; about: string }> = {
+  master: {
+    label: "Master",
+    color: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400 border-yellow-500/20",
+    about: "Acesso total e irrestrito ao painel.",
+  },
+  admin: {
+    label: "Admin",
+    color: "bg-primary/10 text-primary border-primary/20",
+    about: "Conta de administrador: por padrão acessa todo o painel.",
+  },
+  kitchen: {
+    label: "Cozinha",
+    color: "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20",
+    about: "Conta de cozinha: por padrão acessa pedidos, KDS, check-in, cardápio e relatórios básicos.",
+  },
+  user: {
+    label: "Colaborador",
+    color: "bg-muted text-muted-foreground border-border",
+    about: "Conta de colaborador: não entra no painel administrativo.",
+  },
 };
 
 const SEEN_USERS_KEY = "spacefood:seen_user_ids";
@@ -131,30 +149,92 @@ function markUserSeen(id: string) {
   seen.add(id);
   localStorage.setItem(SEEN_USERS_KEY, JSON.stringify([...seen]));
 }
-function countEnabled(perms: Record<string, boolean>) {
+function countEnabled(perms: Perms) {
   return ALL_PERM_KEYS.filter(k => perms[k] === true).length;
 }
 
+// ─── Regras de acesso (espelham o backend; só para exibir) ───────────────────
+/** O que a pessoa recebe SEM ajustes individuais: Master = tudo; perfil atribuído = o que o perfil marca; senão, o padrão da conta. */
+function baselineFor(systemRole: string, roleId: string | null, roles: PermRole[]): Perms {
+  const out: Perms = {};
+  if (systemRole === "master") { ALL_PERM_KEYS.forEach(k => { out[k] = true; }); return out; }
+  if (roleId) {
+    // Igual ao servidor: perfil atribuído mas inexistente => nada liberado.
+    const role = roles.find(r => r.id === roleId);
+    ALL_PERM_KEYS.forEach(k => { out[k] = role?.permissions?.[k] === true; });
+    return out;
+  }
+  const granted = systemRole === "admin" ? ALL_PERM_KEYS : systemRole === "kitchen" ? KITCHEN_BASELINE : [];
+  ALL_PERM_KEYS.forEach(k => { out[k] = granted.includes(k); });
+  return out;
+}
+
+/** Só chaves conhecidas com boolean de verdade (mesmo filtro que o servidor aplica ao salvar). */
+function cleanOverrides(raw: unknown): Perms {
+  const out: Perms = {};
+  if (raw && typeof raw === "object") {
+    for (const k of ALL_PERM_KEYS) {
+      const v = (raw as Record<string, unknown>)[k];
+      if (typeof v === "boolean") out[k] = v;
+    }
+  }
+  return out;
+}
+
+const effectivePerms = (base: Perms, overrides: Perms): Perms => ({ ...base, ...overrides });
+
+function sameOverrides(a: Perms, b: Perms): boolean {
+  const ka = Object.keys(a), kb = Object.keys(b);
+  return ka.length === kb.length && ka.every(k => k in b && a[k] === b[k]);
+}
+function sameCampaignPerms(a: Perms, b: Perms): boolean {
+  return CAMPAIGN_PERM_KEYS.every(k => (a[k] === true) === (b[k] === true));
+}
+
+const roleStyle = (color: string) => ({ backgroundColor: color + "22", color, borderColor: color + "44" });
+
+// ─── Hook: bolinha "Novo" ─────────────────────────────────────────────────────
+function useSeenDot<T extends HTMLElement>(isNew: boolean, id: string, onSeen: (id: string) => void) {
+  const ref = useRef<T>(null);
+  const [showDot, setShowDot] = useState(isNew);
+  useEffect(() => { setShowDot(isNew); }, [isNew]);
+  useEffect(() => {
+    if (!showDot || !ref.current) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) { timer = setTimeout(() => { setShowDot(false); onSeen(id); }, 1500); }
+      else { if (timer) { clearTimeout(timer); timer = null; } }
+    }, { threshold: 0.5 });
+    observer.observe(ref.current);
+    return () => { observer.disconnect(); if (timer) clearTimeout(timer); };
+  }, [showDot, id, onSeen]);
+  return { ref, showDot };
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
+// `defaultTab` é mantido só por compatibilidade com as rotas: "permissions" abre direto o diálogo de perfis.
 export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "permissions" }) {
-  // ── User state ──────────────────────────────────────────────────────────────
+  const { user: me } = useAuth();
+  const campaignPerms = useCampaignPerms();
+  const canManageCampaignAccess = !campaignPerms.loading && campaignPerms.isAdmin && campaignPerms.perms.campaigns_access === true;
+
+  // ── Pessoas ─────────────────────────────────────────────────────────────────
   const [users, setUsers] = useState<AppUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [profileFilter, setProfileFilter] = useState("all");
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [resetTarget, setResetTarget] = useState<AppUser | null>(null);
   const [newUserIds, setNewUserIds] = useState<Set<string>>(new Set());
-  // Custom role assignment for the user being edited/created
-  const [editingCustomRoleId, setEditingCustomRoleId] = useState<string>("");
-  // Map userId -> customRoleId from server
+  // Perfil escolhido ao CRIAR uma pessoa (na edição, o perfil muda no editor de acessos)
+  const [newUserRoleId, setNewUserRoleId] = useState<string>("");
   const [userRoleMap, setUserRoleMap] = useState<Record<string, string | null>>({});
-  // Permissions modal for a user
-  const [userPermEntry, setUserPermEntry] = useState<UserRoleAssignment | null>(null);
-  // Available units for lunch location select
+  // Ajustes individuais por pessoa (só buscados para contas que entram no painel)
+  const [overridesMap, setOverridesMap] = useState<Record<string, Perms>>({});
   const [availableUnits, setAvailableUnits] = useState<string[]>([]);
-  // Extra edit fields (not in react-hook-form for simpler control)
   const [editLunchLocation, setEditLunchLocation] = useState("");
   const [editDietaryRestrictions, setEditDietaryRestrictions] = useState("");
   const [editAge, setEditAge] = useState("");
@@ -164,18 +244,32 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
 
   const { register, handleSubmit, reset, unregister, formState: { errors } } = useForm();
 
-  // ── Roles state ─────────────────────────────────────────────────────────────
+  // ── Perfis (funções nomeadas) ───────────────────────────────────────────────
   const [roles, setRoles] = useState<PermRole[]>([]);
   const [rolesLoading, setRolesLoading] = useState(true);
+  /** Perfis e atribuições (quem usa qual perfil) precisam carregar JUNTOS: editar com um dos dois faltando mostraria dados errados. */
+  const [rolesStatus, setRolesStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [roleMapStatus, setRoleMapStatus] = useState<"loading" | "ok" | "error">("loading");
+  const accessState: "loading" | "ok" | "denied" =
+    rolesStatus === "error" || roleMapStatus === "error" ? "denied"
+    : rolesStatus === "ok" && roleMapStatus === "ok" ? "ok"
+    : "loading";
+  const [rolesDialogOpen, setRolesDialogOpen] = useState(defaultTab === "permissions");
   const [roleFormOpen, setRoleFormOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<PermRole | null>(null);
   const [deleteRoleTarget, setDeleteRoleTarget] = useState<PermRole | null>(null);
+  const [deletingRole, setDeletingRole] = useState(false);
   const [roleSearchQuery, setRoleSearchQuery] = useState("");
+
+  // ── Acessos às Campanhas (lista própria do módulo) ──────────────────────────
+  const [campaignAccess, setCampaignAccess] = useState<Record<string, Perms> | null>(null);
+
+  // ── Editor de acessos de uma pessoa ─────────────────────────────────────────
+  const [sheetUser, setSheetUser] = useState<AppUser | null>(null);
 
   // ─────────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     fetchUsers(); fetchRoles(); fetchUserRoleMap();
-    // Fetch available units for lunch location
     api.get("/admin/settings").then((settings) => {
       const raw = settings?.units;
       if (Array.isArray(raw) && raw.length > 0) {
@@ -210,9 +304,12 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
     try {
       setRolesLoading(true);
       const data = await api.authGet("/admin/roles");
-      if (Array.isArray(data)) setRoles(data);
+      if (!Array.isArray(data)) throw new Error("Resposta inesperada ao carregar perfis.");
+      setRoles(data);
+      setRolesStatus("ok");
     } catch (e) {
       console.error("Fetch roles error:", e);
+      setRolesStatus("error");
     } finally {
       setRolesLoading(false);
     }
@@ -221,17 +318,67 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
   const fetchUserRoleMap = async () => {
     try {
       const data = await api.authGet("/admin/user-roles");
-      if (Array.isArray(data)) {
-        const map: Record<string, string | null> = {};
-        for (const entry of data) { map[entry.userId] = entry.customRoleId || null; }
-        setUserRoleMap(map);
-      }
+      if (!Array.isArray(data)) throw new Error("Resposta inesperada ao carregar atribuições.");
+      const map: Record<string, string | null> = {};
+      for (const entry of data) { map[entry.userId] = entry.customRoleId || null; }
+      setUserRoleMap(map);
+      setRoleMapStatus("ok");
     } catch (e) {
       console.error("Fetch user-role map error:", e);
+      setRoleMapStatus("error");
     }
   };
 
+  // Acessos às Campanhas de todas as pessoas (só para quem gerencia esses acessos)
   useEffect(() => {
+    if (!canManageCampaignAccess) { setCampaignAccess(null); return; }
+    let alive = true;
+    campaignsApi.get<{ items: { user_id: string; permissions: Perms }[] }>("/admin/access")
+      .then((r) => {
+        if (!alive) return;
+        const map: Record<string, Perms> = {};
+        for (const row of r.items ?? []) {
+          map[row.user_id] = campaignPermsFromKeys(CAMPAIGN_PERM_KEYS.filter(k => row.permissions?.[k] === true));
+        }
+        setCampaignAccess(map);
+      })
+      .catch(() => { if (alive) setCampaignAccess(null); });
+    return () => { alive = false; };
+  }, [canManageCampaignAccess]);
+
+  // Ajustes individuais: só para contas que entram no painel (Admin/Cozinha/Master) ou que têm perfil.
+  // Colaboradores comuns não entram no painel, então não vale a pena (nem é barato) buscar um a um.
+  // Não cancelamos a busca quando a lista muda (isso deixaria gente sem dados): ela termina e só descarta
+  // o resultado se a página já foi fechada. Quem falhar sai da fila e é tentado de novo na próxima mudança.
+  const fetchedOverridesRef = useRef<Set<string>>(new Set());
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
+    if (accessState !== "ok" || users.length === 0) return;
+    const todo = users.filter(u => {
+      const sys = u.user_metadata?.role || "user";
+      return (sys !== "user" || !!userRoleMap[u.id]) && !fetchedOverridesRef.current.has(u.id);
+    });
+    if (todo.length === 0) return;
+    todo.forEach(u => fetchedOverridesRef.current.add(u.id));
+    (async () => {
+      for (let i = 0; i < todo.length; i += 5) {
+        const batch = todo.slice(i, i + 5);
+        const results = await Promise.allSettled(batch.map(u => api.authGet(`/admin/user-permissions/${u.id}`)));
+        if (!mountedRef.current) return;
+        results.forEach((r, idx) => { if (r.status === "rejected") fetchedOverridesRef.current.delete(batch[idx].id); });
+        setOverridesMap(prev => {
+          const next = { ...prev };
+          results.forEach((r, idx) => { if (r.status === "fulfilled") next[batch[idx].id] = cleanOverrides(r.value); });
+          return next;
+        });
+      }
+    })();
+  }, [accessState, users, userRoleMap]);
+
+  // Formulário de dados da pessoa (criar/editar)
+  useEffect(() => {
+    if (!isUserModalOpen) return;
     if (editingUser) {
       unregister("password");
       reset({
@@ -240,7 +387,6 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
         role: editingUser.user_metadata.role || "user",
         department: editingUser.user_metadata.department || "",
       });
-      setEditingCustomRoleId(userRoleMap[editingUser.id] || "");
       setEditLunchLocation(editingUser.user_metadata.lunch_location || "");
       setEditDietaryRestrictions(editingUser.user_metadata.dietary_restrictions || "");
       setEditAge(editingUser.user_metadata.age || "");
@@ -248,20 +394,22 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
       setEditCanOrderMeal((editingUser.user_metadata as any).can_order_meal !== false);
     } else {
       reset({ name: "", email: "", password: "", role: "user", department: "" });
-      setEditingCustomRoleId("");
+      setNewUserRoleId("");
       setEditLunchLocation("");
       setEditDietaryRestrictions("");
       setEditAge("");
       setEditPhone("");
       setEditCanOrderMeal(true);
     }
-  }, [editingUser, reset, unregister, userRoleMap]);
+  }, [editingUser, isUserModalOpen, reset, unregister]);
 
   const handleResetPassword = async () => {
-    if (!editingUser) return;
+    const target = resetTarget;
+    if (!target) return;
+    setResetTarget(null);
     setResettingPassword(true);
     try {
-      const result = await api.authPost(`/admin/users/${editingUser.id}/reset-password`, {});
+      const result = await api.authPost(`/admin/users/${target.id}/reset-password`, {});
       toast.success(result.message || "Email de redefinição enviado!");
     } catch (e: any) {
       toast.error(e.message || "Erro ao enviar email de redefinição.");
@@ -273,6 +421,7 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
   const onUserSubmit = async (data: any) => {
     setSaving(true);
     try {
+      // `role` (tipo da conta) é reenviado como está: o servidor o grava a cada PUT.
       const payload: any = { name: data.name, role: data.role, department: data.department || "" };
       if (editingUser) {
         payload.lunchLocation = editLunchLocation;
@@ -281,9 +430,6 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
         payload.phone = editPhone;
         payload.canOrderMeal = editCanOrderMeal;
         const updated = await api.authPut(`/admin/users/${editingUser.id}`, payload);
-        // Save custom role assignment
-        await api.authPut(`/admin/user-roles/${editingUser.id}`, { roleId: editingCustomRoleId || null });
-        setUserRoleMap(prev => ({ ...prev, [editingUser.id]: editingCustomRoleId || null }));
         setUsers(users.map(u => u.id === editingUser.id
           ? { ...u, user_metadata: { ...u.user_metadata, ...updated.user_metadata } }
           : u
@@ -291,9 +437,9 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
         toast.success("Usuário atualizado!");
       } else {
         const newUser = await api.authPost("/admin/users", { ...payload, email: data.email, password: data.password });
-        if (editingCustomRoleId && newUser?.id) {
-          await api.authPut(`/admin/user-roles/${newUser.id}`, { roleId: editingCustomRoleId });
-          setUserRoleMap(prev => ({ ...prev, [newUser.id]: editingCustomRoleId }));
+        if (newUserRoleId && newUser?.id) {
+          await api.authPut(`/admin/user-roles/${newUser.id}`, { roleId: newUserRoleId });
+          setUserRoleMap(prev => ({ ...prev, [newUser.id]: newUserRoleId }));
         }
         setUsers([newUser, ...users]);
         toast.success("Usuário criado!");
@@ -325,188 +471,257 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
     setNewUserIds(prev => { const n = new Set(prev); n.delete(userId); return n; });
   }, []);
 
+  // Excluir perfil: o servidor só remove o perfil da lista — as atribuições ficariam apontando para um perfil
+  // que não existe e a pessoa perderia TODOS os acessos (o servidor trata "perfil sumido" como "nada liberado").
+  // Por isso, antes de excluir, devolvemos quem usa esse perfil ao padrão da conta (o que o aviso sempre prometeu).
+  const roleAssignedUserIds = (roleId: string) =>
+    Object.entries(userRoleMap).filter(([, id]) => id === roleId).map(([uid]) => uid);
+
   const handleDeleteRole = async () => {
-    if (!deleteRoleTarget) return;
+    const target = deleteRoleTarget;
+    if (!target) return;
+    if (roleMapStatus !== "ok") {
+      toast.error("Não foi possível verificar quem usa este perfil. Recarregue a página antes de excluir.");
+      setDeleteRoleTarget(null);
+      return;
+    }
+    setDeletingRole(true);
     try {
-      await api.authDel(`/admin/roles/${deleteRoleTarget.id}`);
-      setRoles(roles.filter(r => r.id !== deleteRoleTarget.id));
-      toast.success("Função removida.");
+      const affected = roleAssignedUserIds(target.id);
+      for (const uid of affected) {
+        await api.authPut(`/admin/user-roles/${uid}`, { roleId: null });
+      }
+      if (affected.length > 0) {
+        setUserRoleMap(prev => {
+          const next = { ...prev };
+          affected.forEach(uid => { next[uid] = null; });
+          return next;
+        });
+      }
+      await api.authDel(`/admin/roles/${target.id}`);
+      setRoles(prev => prev.filter(r => r.id !== target.id));
+      toast.success("Perfil removido.");
     } catch (e: any) {
-      toast.error(e.message || "Erro ao excluir função.");
+      toast.error(e.message || "Erro ao excluir perfil. Nada foi apagado se alguma etapa falhou.");
     } finally {
+      setDeletingRole(false);
       setDeleteRoleTarget(null);
     }
   };
 
-  const filteredUsers = users.filter(u =>
-    u.user_metadata?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.user_metadata?.lunch_location?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // ── Lista filtrada ──────────────────────────────────────────────────────────
+  const filteredUsers = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    return users.filter(u => {
+      const matchesText =
+        u.user_metadata?.name?.toLowerCase().includes(q) ||
+        u.email?.toLowerCase().includes(q) ||
+        u.user_metadata?.lunch_location?.toLowerCase().includes(q) ||
+        u.user_metadata?.department?.toLowerCase().includes(q);
+      if (!matchesText) return false;
+      if (profileFilter === "all") return true;
+      const sys = u.user_metadata?.role || "user";
+      if (profileFilter.startsWith("sys:")) return sys === profileFilter.slice(4);
+      if (profileFilter.startsWith("role:")) return userRoleMap[u.id] === profileFilter.slice(5);
+      return true;
+    });
+  }, [users, searchQuery, profileFilter, userRoleMap]);
 
-  // Build userEntry for permissions modal
-  const openUserPermissions = (u: AppUser) => {
-    const entry: UserRoleAssignment = {
-      userId: u.id,
-      userName: u.user_metadata?.name || u.email,
-      email: u.email,
-      avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(u.user_metadata?.name || "U")}&background=random`,
-      systemRole: u.user_metadata?.role || "user",
-      customRoleId: userRoleMap[u.id] || null,
-      assignedAt: null,
+  // Resumo de acessos de uma pessoa, para a lista
+  const accessSummary = (u: AppUser): { text: string; custom: boolean } => {
+    const sys = u.user_metadata?.role || "user";
+    const roleId = userRoleMap[u.id] || null;
+    if (sys === "user" && !roleId) return { text: "Sem acesso ao painel", custom: false };
+    const base = baselineFor(sys, roleId, roles);
+    const ov = overridesMap[u.id];
+    const eff = ov ? effectivePerms(base, ov) : base;
+    return {
+      text: `${countEnabled(eff)} de ${ALL_PERM_KEYS.length} acessos`,
+      custom: !!ov && Object.keys(ov).length > 0,
     };
-    setUserPermEntry(entry);
   };
 
+  const campaignBadge = (u: AppUser): string | null => {
+    if (!campaignAccess) return null;
+    const perms = campaignAccess[u.id];
+    if (!perms) return null;
+    const level = campaignLevelOf(perms);
+    return level === "none" ? null : campaignLevelShort(level);
+  };
+
+  const canEditAccess = accessState === "ok";
+
+  const openEdit = (u: AppUser) => { setEditingUser(u); setIsUserModalOpen(true); };
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div>
         <h1 className="text-xl font-bold tracking-tight text-foreground">Usuários & Permissões</h1>
-        <p className="text-muted-foreground text-xs">Gerencie usuários, funções e acessos do sistema.</p>
+        <p className="text-muted-foreground text-xs">Pessoas, perfis e acessos — tudo em um só lugar.</p>
       </div>
 
-      <Tabs defaultValue={defaultTab}>
-        <TabsList className="w-full sm:w-auto">
-          <TabsTrigger value="users" className="gap-2"><Users size={14} /> Usuários</TabsTrigger>
-          <TabsTrigger value="permissions" className="gap-2"><ShieldCheck size={14} /> Funções & Permissões</TabsTrigger>
-        </TabsList>
-
-        {/* ── TAB: USERS ────────────────────────────────────────────────────── */}
-        <TabsContent value="users" className="mt-4 space-y-4">
-          {/* Role rules info callout */}
-          
-          {/* Actions bar */}
-          <div className="flex flex-col sm:flex-row gap-2 justify-between">
-            <div className="relative w-full sm:w-80">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15} />
-              <input
-                type="text" placeholder="Buscar por nome, email ou unidade..."
-                className="w-full pl-9 pr-4 py-2 h-9 rounded-lg border border-input text-sm focus:ring-2 focus:ring-primary/20 outline-none bg-background"
-                value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <Button onClick={() => { setEditingUser(null); setIsUserModalOpen(true); }} className="gap-2 shrink-0">
-              <Plus size={16} /> Novo Usuário
+      {/* Barra de ações */}
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+        <div className="relative w-full lg:max-w-sm lg:flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15} />
+          <input
+            type="text" placeholder="Buscar por nome, email, unidade ou depto..."
+            aria-label="Buscar pessoa"
+            className="w-full pl-9 pr-4 py-2 h-10 rounded-lg border border-input text-sm focus:ring-2 focus:ring-primary/20 outline-none bg-background"
+            value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+          />
+        </div>
+        <div className="flex items-center gap-2 lg:ml-auto">
+          <select
+            aria-label="Filtrar por perfil"
+            className="h-10 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-sm lg:w-52 lg:flex-none"
+            value={profileFilter}
+            onChange={e => setProfileFilter(e.target.value)}
+          >
+            <option value="all">Todos os perfis</option>
+            <optgroup label="Tipo de conta">
+              <option value="sys:master">Master</option>
+              <option value="sys:admin">Admin</option>
+              <option value="sys:kitchen">Cozinha</option>
+              <option value="sys:user">Colaborador</option>
+            </optgroup>
+            {roles.length > 0 && (
+              <optgroup label="Perfis de acesso">
+                {roles.map(r => <option key={r.id} value={`role:${r.id}`}>{r.name}</option>)}
+              </optgroup>
+            )}
+          </select>
+          {canEditAccess && (
+            <Button variant="outline" className="h-10 shrink-0 gap-2" onClick={() => setRolesDialogOpen(true)}>
+              <ShieldCheck size={15} /> <span className="hidden sm:inline">Gerenciar perfis</span><span className="sm:hidden">Perfis</span>
             </Button>
-          </div>
+          )}
+          <Button onClick={() => { setEditingUser(null); setIsUserModalOpen(true); }} className="h-10 shrink-0 gap-2">
+            <Plus size={16} /> <span className="hidden sm:inline">Novo Usuário</span><span className="sm:hidden">Novo</span>
+          </Button>
+        </div>
+      </div>
 
-          {/* Table */}
-          <div className="bg-card rounded-xl shadow-sm border border-border overflow-hidden">
-            {usersLoading ? (
-              <SkeletonTable />
-            ) : (
-              <>
-                {/* Desktop table */}
-                <div className="hidden md:block overflow-x-auto">
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-accent text-muted-foreground uppercase font-medium text-xs">
-                      <tr>
-                        <th className="px-5 py-3">Usuário</th>
-                        <th className="px-5 py-3">Unidade</th>
-                        <th className="px-5 py-3">Função</th>
-                        <th className="px-5 py-3">Depto.</th>
-                        <th className="px-5 py-3 text-right">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {filteredUsers.map(u => (
-                        <UserRow
-                          key={u.id}
-                          user={u}
-                          isNew={newUserIds.has(u.id)}
-                          onSeen={handleMarkSeen}
-                          onEdit={usr => { setEditingUser(usr); setIsUserModalOpen(true); }}
-                          onDelete={id => setDeleteTarget(id)}
-                          onPermissions={openUserPermissions}
-                          roles={roles}
-                          customRoleId={userRoleMap[u.id] || null}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                  {filteredUsers.length === 0 && (
-                    <div className="text-center py-10 text-muted-foreground text-sm">Nenhum usuário encontrado.</div>
-                  )}
-                </div>
+      {accessState === "denied" && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+          <Info size={14} className="mt-0.5 shrink-0" />
+          <span>
+            Você pode ver as pessoas, mas não tem permissão para alterar perfis e acessos (ou não foi possível carregá-los).{" "}
+            <button type="button" className="font-semibold underline" onClick={() => { setRolesStatus("loading"); setRoleMapStatus("loading"); fetchRoles(); fetchUserRoleMap(); }}>Tentar de novo</button>
+          </span>
+        </div>
+      )}
 
-                {/* Mobile cards */}
-                <div className="md:hidden divide-y divide-border">
+      {/* Lista única de pessoas */}
+      <div className="bg-card rounded-xl shadow-sm border border-border overflow-hidden">
+        {usersLoading ? (
+          <SkeletonTable />
+        ) : (
+          <>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-accent text-muted-foreground uppercase font-medium text-xs">
+                  <tr>
+                    <th className="px-5 py-3">Pessoa</th>
+                    <th className="px-5 py-3">Perfil</th>
+                    <th className="px-5 py-3">Acessos</th>
+                    <th className="px-5 py-3 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
                   {filteredUsers.map(u => (
-                    <MobileUserCard
+                    <PersonRow
                       key={u.id}
                       user={u}
                       isNew={newUserIds.has(u.id)}
                       onSeen={handleMarkSeen}
-                      onEdit={usr => { setEditingUser(usr); setIsUserModalOpen(true); }}
+                      roles={roles}
+                      roleId={userRoleMap[u.id] || null}
+                      summary={accessSummary(u)}
+                      campaignText={campaignBadge(u)}
+                      canEditAccess={canEditAccess}
+                      busyReset={resettingPassword}
+                      onAccess={setSheetUser}
+                      onEdit={openEdit}
+                      onReset={setResetTarget}
                       onDelete={id => setDeleteTarget(id)}
-                      onPermissions={openUserPermissions}
                     />
                   ))}
-                  {filteredUsers.length === 0 && (
-                    <div className="text-center py-10 text-muted-foreground text-sm">Nenhum usuário encontrado.</div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        </TabsContent>
-
-        {/* ── TAB: PERMISSIONS ──────────────────────────────────────────────── */}
-        <TabsContent value="permissions" className="mt-4 space-y-4">
-          <div className="flex flex-col sm:flex-row gap-2 justify-between">
-            <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15} />
-              <input
-                type="text" placeholder="Buscar função..."
-                className="w-full pl-9 pr-4 py-2 h-9 rounded-lg border border-input text-sm focus:ring-2 focus:ring-primary/20 outline-none bg-background"
-                value={roleSearchQuery} onChange={e => setRoleSearchQuery(e.target.value)}
-              />
-            </div>
-            <Button onClick={() => { setEditingRole(null); setRoleFormOpen(true); }} className="gap-2 shrink-0">
-              <Plus size={16} /> Nova Função
-            </Button>
-          </div>
-
-          {rolesLoading ? (
-            <SkeletonRoleCards />
-          ) : (
-            <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
-              {roles
-                .filter(r => !roleSearchQuery || r.name.toLowerCase().includes(roleSearchQuery.toLowerCase()))
-                .map(role => {
-                  const assignedCount = Object.values(userRoleMap).filter(id => id === role.id).length;
-                  return (
-                    <RoleCard
-                      key={role.id}
-                      role={role}
-                      usersWithRole={assignedCount}
-                      onEdit={r => { setEditingRole(r); setRoleFormOpen(true); }}
-                      onDelete={r => setDeleteRoleTarget(r)}
-                    />
-                  );
-                })}
-              {roles.length === 0 && (
-                <div className="col-span-full text-center py-12 text-muted-foreground border-2 border-dashed rounded-xl">
-                  <ShieldCheck className="mx-auto h-10 w-10 opacity-20 mb-3" />
-                  <p className="text-sm">Nenhuma função criada ainda.</p>
-                </div>
+                </tbody>
+              </table>
+              {filteredUsers.length === 0 && (
+                <div className="text-center py-10 text-muted-foreground text-sm">Nenhum usuário encontrado.</div>
               )}
             </div>
-          )}
-        </TabsContent>
-      </Tabs>
 
-      {/* ── Create/Edit User Modal ──────────────────────────────────────────── */}
+            <div className="md:hidden divide-y divide-border">
+              {filteredUsers.map(u => (
+                <PersonCard
+                  key={u.id}
+                  user={u}
+                  isNew={newUserIds.has(u.id)}
+                  onSeen={handleMarkSeen}
+                  roles={roles}
+                  roleId={userRoleMap[u.id] || null}
+                  summary={accessSummary(u)}
+                  campaignText={campaignBadge(u)}
+                  canEditAccess={canEditAccess}
+                  busyReset={resettingPassword}
+                  onAccess={setSheetUser}
+                  onEdit={openEdit}
+                  onReset={setResetTarget}
+                  onDelete={id => setDeleteTarget(id)}
+                />
+              ))}
+              {filteredUsers.length === 0 && (
+                <div className="text-center py-10 text-muted-foreground text-sm">Nenhum usuário encontrado.</div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+      {!usersLoading && (
+        <p className="text-[11px] text-muted-foreground">
+          {filteredUsers.length} {filteredUsers.length === 1 ? "pessoa" : "pessoas"}
+        </p>
+      )}
+
+      {/* ── Editor único de acessos de uma pessoa ───────────────────────────── */}
+      <PersonAccessSheet
+        person={sheetUser}
+        roles={roles}
+        initialRoleId={sheetUser ? userRoleMap[sheetUser.id] || null : null}
+        campaignEnabled={canManageCampaignAccess && campaignAccess !== null}
+        initialCampaignPerms={sheetUser && campaignAccess ? campaignAccess[sheetUser.id] ?? null : null}
+        currentUserId={me?.id}
+        onClose={() => setSheetUser(null)}
+        onSaved={r => {
+          const { userId, roleId, overrides, campaignPerms } = r;
+          if (roleId !== undefined) setUserRoleMap(prev => ({ ...prev, [userId]: roleId }));
+          if (overrides !== undefined) setOverridesMap(prev => ({ ...prev, [userId]: overrides }));
+          if (campaignPerms !== undefined) {
+            setCampaignAccess(prev => {
+              const next = { ...(prev ?? {}) };
+              if (campaignPerms === null) delete next[userId];
+              else next[userId] = campaignPerms;
+              return next;
+            });
+          }
+        }}
+      />
+
+      {/* ── Dados da pessoa (criar/editar) ──────────────────────────────────── */}
       <Dialog open={isUserModalOpen} onOpenChange={setIsUserModalOpen}>
         <DialogContent className="sm:max-w-[540px] max-h-[90vh] flex flex-col gap-0 p-0">
           <DialogHeader className="px-6 pt-6 pb-4 border-b">
-            <DialogTitle>{editingUser ? "Editar Usuário" : "Novo Usuário"}</DialogTitle>
+            <DialogTitle>{editingUser ? "Editar dados" : "Novo Usuário"}</DialogTitle>
             <DialogDescription>
-              {editingUser ? "Edite todos os dados do cadastro do usuário." : "Preencha os dados do novo usuário."}
+              {editingUser
+                ? "Dados do cadastro. Perfil e acessos ficam em “Acessos”."
+                : "Preencha os dados do novo usuário."}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit(onUserSubmit)} className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-            {/* Name & Email */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Nome Completo *</Label>
@@ -520,7 +735,6 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
               </div>
             </div>
 
-            {/* Password (new user only) */}
             {!editingUser && (
               <div className="space-y-1.5">
                 <Label>Senha Provisória *</Label>
@@ -529,73 +743,37 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
               </div>
             )}
 
-            {/* Reset password (edit mode only) */}
-            {editingUser && (
-              <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <KeyRound size={14} className="text-amber-600 dark:text-amber-400" />
-                    <span className="text-sm font-medium text-foreground">Redefinir Senha</span>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs gap-1.5 border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/30"
-                    disabled={resettingPassword}
-                    onClick={handleResetPassword}
-                  >
-                    {resettingPassword ? <Loader2 size={12} className="animate-spin" /> : <KeyRound size={12} />}
-                    Enviar Email de Reset
-                  </Button>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  Envia um email de redefinição para <strong>{editingUser.email}</strong>. O usuário poderá criar uma nova senha pelo link recebido.
-                </p>
-              </div>
-            )}
-
-            {/* Department */}
             <div className="space-y-1.5">
               <Label>Departamento</Label>
               <Input {...register("department")} placeholder="Ex: Financeiro" />
             </div>
 
-            {/* Custom Role */}
-            <div className="space-y-1.5">
-              <Label className="flex items-center gap-1.5">
-                <ShieldCheck size={13} className="text-primary" /> Função
-              </Label>
-              {rolesLoading ? (
-                <div className="flex items-center gap-2 h-9 px-3 rounded-md border border-input bg-muted/40 text-xs text-muted-foreground">
-                  <Loader2 size={12} className="animate-spin" /> Carregando funções...
-                </div>
-              ) : roles.length === 0 ? (
-                <div className="flex items-center gap-2 h-9 px-3 rounded-md border border-dashed border-input bg-muted/20 text-xs text-muted-foreground italic">
-                  Nenhuma função cadastrada
-                </div>
-              ) : (
+            {/* Perfil só na criação; depois, fica no editor de acessos (um lugar só) */}
+            {!editingUser && canEditAccess && roles.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1.5">
+                  <ShieldCheck size={13} className="text-primary" /> Perfil de acesso
+                </Label>
                 <select
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
-                  value={editingCustomRoleId}
-                  onChange={e => setEditingCustomRoleId(e.target.value)}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                  value={newUserRoleId}
+                  onChange={e => setNewUserRoleId(e.target.value)}
                 >
-                  <option value="">-- Sem função personalizada --</option>
+                  <option value="">Padrão da conta</option>
                   {roles.map(r => (
                     <option key={r.id} value={r.id}>{r.name}</option>
                   ))}
                 </select>
-              )}
-            </div>
+              </div>
+            )}
 
-            {/* Lunch Location & Age */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="flex items-center gap-1.5">
                   <MapPin size={13} className="text-primary" /> Unidade (Almoço)
                 </Label>
                 <select
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
                   value={editLunchLocation}
                   onChange={e => setEditLunchLocation(e.target.value)}
                 >
@@ -616,7 +794,6 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
               </div>
             </div>
 
-            {/* Phone */}
             <div className="space-y-1.5">
               <Label className="flex items-center gap-1.5">
                 <Phone size={13} className="text-muted-foreground" /> Telefone
@@ -629,7 +806,6 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
               />
             </div>
 
-            {/* Dietary Restrictions */}
             <div className="space-y-1.5">
               <Label className="flex items-center gap-1.5">
                 <AlertTriangle size={13} className="text-amber-500" /> Restrições Alimentares
@@ -641,7 +817,6 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
               />
             </div>
 
-            {/* Meal Order Permission */}
             {editingUser && (
               <div className={cn(
                 "flex items-center justify-between p-3 rounded-lg border transition-colors",
@@ -660,6 +835,7 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
                 </div>
                 <button
                   type="button"
+                  aria-label="Permissão para pedir marmita"
                   onClick={() => setEditCanOrderMeal(v => !v)}
                   className={cn(
                     "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-300",
@@ -685,7 +861,58 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
         </DialogContent>
       </Dialog>
 
-      {/* ── Role Form Modal ─────────────────────────────────────────────────── */}
+      {/* ── Gerenciar perfis (dentro desta mesma página) ────────────────────── */}
+      <Dialog open={rolesDialogOpen} onOpenChange={setRolesDialogOpen}>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] flex flex-col gap-0 p-0">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b">
+            <DialogTitle className="flex items-center gap-2"><ShieldCheck size={18} className="text-primary" /> Perfis de acesso</DialogTitle>
+            <DialogDescription>
+              Conjuntos de acessos prontos para dar a várias pessoas de uma vez. Para ajustar uma pessoa só, use “Acessos” na lista.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+            <div className="flex flex-col sm:flex-row gap-2 justify-between">
+              <div className="relative w-full sm:w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15} />
+                <input
+                  type="text" placeholder="Buscar perfil..."
+                  className="w-full pl-9 pr-4 py-2 h-10 rounded-lg border border-input text-sm focus:ring-2 focus:ring-primary/20 outline-none bg-background"
+                  value={roleSearchQuery} onChange={e => setRoleSearchQuery(e.target.value)}
+                />
+              </div>
+              <Button onClick={() => { setEditingRole(null); setRoleFormOpen(true); }} className="gap-2 shrink-0 h-10">
+                <Plus size={16} /> Novo perfil
+              </Button>
+            </div>
+
+            {rolesLoading ? (
+              <SkeletonRoleCards />
+            ) : (
+              <div className="grid sm:grid-cols-2 gap-4">
+                {roles
+                  .filter(r => !roleSearchQuery || r.name.toLowerCase().includes(roleSearchQuery.toLowerCase()))
+                  .map(role => (
+                    <RoleCard
+                      key={role.id}
+                      role={role}
+                      usersWithRole={roleAssignedUserIds(role.id).length}
+                      onEdit={r => { setEditingRole(r); setRoleFormOpen(true); }}
+                      onDelete={r => setDeleteRoleTarget(r)}
+                    />
+                  ))}
+                {roles.length === 0 && (
+                  <div className="col-span-full text-center py-12 text-muted-foreground border-2 border-dashed rounded-xl">
+                    <ShieldCheck className="mx-auto h-10 w-10 opacity-20 mb-3" />
+                    <p className="text-sm">Nenhum perfil criado ainda.</p>
+                    <p className="text-xs mt-1">Sem perfil, cada conta usa o padrão do seu tipo (Admin, Cozinha ou Colaborador).</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <RoleFormModal
         open={roleFormOpen}
         onClose={() => setRoleFormOpen(false)}
@@ -699,16 +926,7 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
         }}
       />
 
-      {/* ── User Permissions Modal ──────────────────────────────────────────── */}
-      <UserPermissionsModal
-        open={!!userPermEntry}
-        onClose={() => setUserPermEntry(null)}
-        userEntry={userPermEntry}
-        roles={roles}
-        onSaved={() => {}}
-      />
-
-      {/* ── Confirm Dialogs ─────────────────────────────────────────────────── */}
+      {/* ── Confirmações ────────────────────────────────────────────────────── */}
       <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={() => setDeleteTarget(null)}
@@ -719,10 +937,24 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
         onConfirm={handleDeleteUser}
       />
       <ConfirmDialog
-        open={!!deleteRoleTarget}
-        onOpenChange={() => setDeleteRoleTarget(null)}
-        title="Excluir Função?"
-        description={`A função "${deleteRoleTarget?.name}" será removida. Usuários com esta função voltarão ao padrão.`}
+        open={!!resetTarget}
+        onOpenChange={o => !o && setResetTarget(null)}
+        title="Redefinir senha?"
+        description={`Enviaremos um email de redefinição para ${resetTarget?.email ?? ""}. A pessoa poderá criar uma nova senha pelo link recebido.`}
+        confirmLabel="Enviar email"
+        onConfirm={handleResetPassword}
+      />
+      <ConfirmDialog
+        open={!!deleteRoleTarget && !deletingRole}
+        onOpenChange={o => !o && setDeleteRoleTarget(null)}
+        title="Excluir perfil?"
+        description={(() => {
+          const n = deleteRoleTarget ? roleAssignedUserIds(deleteRoleTarget.id).length : 0;
+          const who = n === 0
+            ? "Ninguém usa este perfil."
+            : `${n} ${n === 1 ? "pessoa volta" : "pessoas voltam"} ao acesso padrão da conta.`;
+          return `O perfil “${deleteRoleTarget?.name ?? ""}” será removido. ${who}`;
+        })()}
         confirmLabel="Excluir"
         variant="destructive"
         onConfirm={handleDeleteRole}
@@ -731,190 +963,478 @@ export function AdminUsers({ defaultTab = "users" }: { defaultTab?: "users" | "p
   );
 }
 
-// ─── UserRow ──────────────────────────────────────────────────────────────────
-function UserRow({ user, isNew, onSeen, onEdit, onDelete, onPermissions, roles, customRoleId }: {
-  user: AppUser; isNew: boolean;
+// ─── Peças da lista ───────────────────────────────────────────────────────────
+type PersonItemProps = {
+  user: AppUser;
+  isNew: boolean;
   onSeen: (id: string) => void;
-  onEdit: (u: AppUser) => void;
-  onDelete: (id: string) => void;
-  onPermissions: (u: AppUser) => void;
   roles: PermRole[];
-  customRoleId: string | null;
-}) {
-  const rowRef = useRef<HTMLTableRowElement>(null);
-  const [showDot, setShowDot] = useState(isNew);
+  roleId: string | null;
+  summary: { text: string; custom: boolean };
+  campaignText: string | null;
+  canEditAccess: boolean;
+  busyReset: boolean;
+  onAccess: (u: AppUser) => void;
+  onEdit: (u: AppUser) => void;
+  onReset: (u: AppUser) => void;
+  onDelete: (id: string) => void;
+};
 
-  useEffect(() => { setShowDot(isNew); }, [isNew]);
-  useEffect(() => {
-    if (!showDot || !rowRef.current) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) { timer = setTimeout(() => { setShowDot(false); onSeen(user.id); }, 1500); }
-      else { if (timer) { clearTimeout(timer); timer = null; } }
-    }, { threshold: 0.5 });
-    observer.observe(rowRef.current);
-    return () => { observer.disconnect(); if (timer) clearTimeout(timer); };
-  }, [showDot, user.id, onSeen]);
-
-  const roleColor = user.user_metadata?.role === "admin"
-    ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400"
-    : user.user_metadata?.role === "kitchen"
-    ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
-    : user.user_metadata?.role === "master"
-    ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-    : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400";
-
+function SystemRoleBadge({ role }: { role: string }) {
+  const meta = SYSTEM_ROLE_LABELS[role] ?? SYSTEM_ROLE_LABELS.user;
   return (
-    <tr ref={rowRef} className="hover:bg-accent/40 transition-colors group">
-      <td className="px-5 py-3">
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
-              {user.user_metadata?.name?.charAt(0).toUpperCase() || <User size={16} />}
-            </div>
-            {showDot && (
-              <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-blue-500 border-2 border-card" />
-              </span>
-            )}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-sm text-foreground">{user.user_metadata?.name || "Sem Nome"}</span>
-              {showDot && <span className="text-[10px] font-bold uppercase bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded-full">Novo</span>}
-              {user.user_metadata?.role === "master" && (
-                <span title="Admin Master do Sistema" className="flex items-center gap-0.5 text-[10px] font-black text-yellow-700 dark:text-yellow-400 bg-yellow-100 dark:bg-yellow-900/30 px-1.5 py-0.5 rounded-full border border-yellow-300 dark:border-yellow-800">
-                  <Crown size={9} className="fill-current" /> Master
-                </span>
-              )}
-            </div>
-            <div className="text-xs text-muted-foreground">{user.email}</div>
-          </div>
-        </div>
-      </td>
-      <td className="px-5 py-3">
-        <div className="flex flex-col gap-1">
-          {user.user_metadata?.lunch_location ? (
-            <span className="flex items-center gap-1 text-xs text-foreground">
-              <MapPin size={11} className="text-primary shrink-0" />
-              {user.user_metadata.lunch_location}
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">—</span>
-          )}
-          {user.user_metadata?.dietary_restrictions && (
-            <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400" title={user.user_metadata.dietary_restrictions}>
-              <AlertTriangle size={10} className="shrink-0" />
-              <span className="truncate max-w-[120px]">{user.user_metadata.dietary_restrictions}</span>
-            </span>
-          )}
-        </div>
-      </td>
-      <td className="px-5 py-3">
-        {customRoleId ? (
-          <span
-            className="text-xs font-semibold px-2 py-0.5 rounded-full border w-fit inline-block"
-            style={{
-              backgroundColor: (roles.find(r => r.id === customRoleId)?.color || "#6366f1") + "22",
-              color: roles.find(r => r.id === customRoleId)?.color || "#6366f1",
-              borderColor: (roles.find(r => r.id === customRoleId)?.color || "#6366f1") + "44",
-            }}
-          >
-            {roles.find(r => r.id === customRoleId)?.name || "Função"}
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
+    <span className={cn("inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border", meta.color)}>
+      {role === "master" && <Crown size={9} className="fill-current" />} {meta.label}
+    </span>
+  );
+}
+
+function RoleChip({ role }: { role?: PermRole }) {
+  if (!role) return null;
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border" style={roleStyle(role.color)}>
+      <ShieldCheck size={10} /> {role.name}
+    </span>
+  );
+}
+
+function PersonMenu({ user, canEditAccess, busyReset, onEdit, onReset, onDelete, onAccess }: Pick<PersonItemProps, "user" | "canEditAccess" | "busyReset" | "onEdit" | "onReset" | "onDelete" | "onAccess">) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0" aria-label={`Mais ações de ${user.user_metadata?.name || user.email}`}>
+          <MoreHorizontal size={16} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        {canEditAccess && (
+          <DropdownMenuItem onSelect={() => onAccess(user)} className="cursor-pointer gap-2">
+            <ShieldCheck size={14} /> Acessos
+          </DropdownMenuItem>
         )}
+        <DropdownMenuItem onSelect={() => onEdit(user)} className="cursor-pointer gap-2">
+          <Pencil size={14} /> Editar dados
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onReset(user)} disabled={busyReset} className="cursor-pointer gap-2">
+          <KeyRound size={14} /> Redefinir senha
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => onDelete(user.id)} className="cursor-pointer gap-2 text-destructive focus:text-destructive">
+          <TrashIcon size={14} /> Excluir
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function PersonIdentity({ user, showDot, compact }: { user: AppUser; showDot: boolean; compact?: boolean }) {
+  const meta = user.user_metadata;
+  return (
+    <div className="flex items-center gap-3 min-w-0">
+      <div className="relative shrink-0">
+        <div className={cn("rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold", compact ? "h-10 w-10" : "h-9 w-9 text-sm")}>
+          {meta?.name?.charAt(0).toUpperCase() || <User size={16} />}
+        </div>
+        {showDot && (
+          <span className="absolute -top-0.5 -right-0.5 flex h-3.5 w-3.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-blue-500 border-2 border-card" />
+          </span>
+        )}
+      </div>
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-semibold text-sm text-foreground truncate">{meta?.name || "Sem Nome"}</span>
+          {showDot && <span className="text-[10px] font-bold uppercase bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded-full">Novo</span>}
+        </div>
+        <div className="text-xs text-muted-foreground truncate">{user.email}</div>
+        {(meta?.lunch_location || meta?.department) && (
+          <div className="flex items-center gap-1 text-[11px] text-muted-foreground mt-0.5 truncate">
+            <MapPin size={10} className="text-primary shrink-0" />
+            <span className="truncate">{[meta?.lunch_location, meta?.department].filter(Boolean).join(" · ")}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AccessSummary({ summary, campaignText }: { summary: { text: string; custom: boolean }; campaignText: string | null }) {
+  return (
+    <div className="space-y-0.5">
+      <p className="text-xs font-medium text-foreground">
+        {summary.text}
+        {summary.custom && <span className="ml-1.5 text-[10px] font-bold text-amber-600 dark:text-amber-400">· personalizado</span>}
+      </p>
+      {campaignText && (
+        <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+          <Megaphone size={10} className="text-primary shrink-0" /> Campanhas: {campaignText}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function PersonRow(p: PersonItemProps) {
+  const { ref, showDot } = useSeenDot<HTMLTableRowElement>(p.isNew, p.user.id, p.onSeen);
+  const sys = p.user.user_metadata?.role || "user";
+  return (
+    <tr ref={ref} className="hover:bg-accent/40 transition-colors">
+      <td className="px-5 py-3"><PersonIdentity user={p.user} showDot={showDot} /></td>
+      <td className="px-5 py-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <SystemRoleBadge role={sys} />
+          <RoleChip role={p.roles.find(r => r.id === p.roleId)} />
+        </div>
       </td>
-      <td className="px-5 py-3 text-xs text-muted-foreground">
-        {user.user_metadata?.department || "—"}
-      </td>
+      <td className="px-5 py-3"><AccessSummary summary={p.summary} campaignText={p.campaignText} /></td>
       <td className="px-5 py-3 text-right">
         <div className="flex items-center justify-end gap-1">
-          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:text-violet-600" onClick={() => onPermissions(user)} title="Permissões">
-            <ShieldCheck size={13} />
-          </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:text-blue-600" onClick={() => onEdit(user)} title="Editar">
-            <Edit2 size={13} />
-          </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600" onClick={() => onDelete(user.id)} title="Excluir">
-            <Trash2 size={13} />
-          </Button>
+          {p.canEditAccess && (
+            <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => p.onAccess(p.user)}>
+              <ShieldCheck size={13} /> Acessos
+            </Button>
+          )}
+          <PersonMenu {...p} />
         </div>
       </td>
     </tr>
   );
 }
 
-// ─── MobileUserCard ───────────────────────────────────────────────────────────
-function MobileUserCard({ user, isNew, onSeen, onEdit, onDelete, onPermissions }: {
-  user: AppUser; isNew: boolean;
-  onSeen: (id: string) => void;
-  onEdit: (u: AppUser) => void;
-  onDelete: (id: string) => void;
-  onPermissions: (u: AppUser) => void;
-}) {
-  const cardRef = useRef<HTMLDivElement>(null);
-  const [showDot, setShowDot] = useState(isNew);
-  useEffect(() => { setShowDot(isNew); }, [isNew]);
-  useEffect(() => {
-    if (!showDot || !cardRef.current) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) { timer = setTimeout(() => { setShowDot(false); onSeen(user.id); }, 1500); }
-      else { if (timer) { clearTimeout(timer); timer = null; } }
-    }, { threshold: 0.5 });
-    observer.observe(cardRef.current);
-    return () => { observer.disconnect(); if (timer) clearTimeout(timer); };
-  }, [showDot, user.id, onSeen]);
-
+function PersonCard(p: PersonItemProps) {
+  const { ref, showDot } = useSeenDot<HTMLDivElement>(p.isNew, p.user.id, p.onSeen);
+  const sys = p.user.user_metadata?.role || "user";
   return (
-    <div ref={cardRef} className="p-4 flex items-center gap-3">
-      <div className="relative flex-shrink-0">
-        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
-          {user.user_metadata?.name?.charAt(0).toUpperCase() || <User size={18} />}
-        </div>
-        {showDot && (
-          <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500 border-2 border-card" />
-          </span>
-        )}
+    <div ref={ref} className="p-4 space-y-3">
+      <div className="flex items-start justify-between gap-2">
+        <PersonIdentity user={p.user} showDot={showDot} compact />
+        <PersonMenu {...p} />
       </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-sm text-foreground">{user.user_metadata?.name || "Sem Nome"}</span>
-          {showDot && <span className="text-[10px] font-bold uppercase bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded-full">Novo</span>}
-          {user.user_metadata?.role === "master" && (
-            <span title="Admin Master do Sistema" className="flex items-center gap-0.5 text-[10px] font-black text-yellow-700 dark:text-yellow-400 bg-yellow-100 dark:bg-yellow-900/30 px-1.5 py-0.5 rounded-full border border-yellow-300 dark:border-yellow-800">
-              <Crown size={9} className="fill-current" /> Master
-            </span>
-          )}
-        </div>
-        <div className="text-xs text-muted-foreground truncate">{user.email}</div>
-        {user.user_metadata?.lunch_location && (
-          <div className="flex items-center gap-1 text-[11px] text-muted-foreground mt-0.5">
-            <MapPin size={10} className="text-primary" /> {user.user_metadata.lunch_location}
-          </div>
-        )}
-        {user.user_metadata?.dietary_restrictions && (
-          <div className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 mt-0.5">
-            <AlertTriangle size={10} className="shrink-0" />
-            <span className="truncate">{user.user_metadata.dietary_restrictions}</span>
-          </div>
-        )}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <SystemRoleBadge role={sys} />
+        <RoleChip role={p.roles.find(r => r.id === p.roleId)} />
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <Button variant="ghost" size="icon" className="h-8 w-8 text-violet-600" onClick={() => onPermissions(user)}><ShieldCheck size={14} /></Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit(user)}><Edit2 size={14} /></Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => onDelete(user.id)}><Trash2 size={14} /></Button>
-      </div>
+      <AccessSummary summary={p.summary} campaignText={p.campaignText} />
+      {p.canEditAccess && (
+        <Button variant="outline" className="h-11 w-full gap-2" onClick={() => p.onAccess(p.user)}>
+          <ShieldCheck size={15} /> Acessos
+        </Button>
+      )}
     </div>
   );
 }
 
-// ─── RoleCard ───────────────────────────────────��─────────────────────────────
+// ─── Editor único de acessos (perfil + acessos + Campanhas) ───────────────────
+type SavedResult = { userId: string; roleId?: string | null; overrides?: Perms; campaignPerms?: Perms | null };
+
+function PersonAccessSheet({ person, roles, initialRoleId, campaignEnabled, initialCampaignPerms, currentUserId, onClose, onSaved }: {
+  person: AppUser | null;
+  roles: PermRole[];
+  initialRoleId: string | null;
+  campaignEnabled: boolean;
+  initialCampaignPerms: Perms | null;
+  currentUserId?: string;
+  onClose: () => void;
+  onSaved: (r: SavedResult) => void;
+}) {
+  const open = !!person;
+  const sys = person?.user_metadata?.role || "user";
+  const isMaster = sys === "master";
+  const personId = person?.id ?? "";
+  const personName = person?.user_metadata?.name || person?.email || "";
+  const isSelf = !!person && person.id === currentUserId;
+
+  const [roleId, setRoleId] = useState("");
+  const [overrides, setOverrides] = useState<Perms>({});
+  const [campPerms, setCampPerms] = useState<Perms>(campaignPermsFromKeys([]));
+  // O que está salvo no servidor (atualizado a cada etapa concluída, para uma nova tentativa não repetir etapas)
+  const [orig, setOrig] = useState<{ roleId: string; overrides: Perms; camp: Perms }>({ roleId: "", overrides: {}, camp: campaignPermsFromKeys([]) });
+  const [loadingOverrides, setLoadingOverrides] = useState(false);
+  const [overridesError, setOverridesError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [riskText, setRiskText] = useState<string | null>(null);
+
+  const loadOverrides = useCallback((id: string) => {
+    setLoadingOverrides(true);
+    setOverridesError(false);
+    return api.authGet(`/admin/user-permissions/${id}`)
+      .then(data => {
+        const clean = cleanOverrides(data);
+        setOverrides(clean);
+        setOrig(o => ({ ...o, overrides: clean }));
+      })
+      .catch(() => setOverridesError(true))
+      .finally(() => setLoadingOverrides(false));
+  }, []);
+
+  // Ao abrir para uma pessoa: carrega os ajustes individuais fresquinhos do servidor
+  useEffect(() => {
+    if (!person) return;
+    const emptyCamp = campaignPermsFromKeys([]);
+    setRoleId(initialRoleId || "");
+    setCampPerms(emptyCamp);
+    setOverrides({});
+    setOrig({ roleId: initialRoleId || "", overrides: {}, camp: emptyCamp });
+    setRiskText(null);
+    if (person.user_metadata?.role !== "master") loadOverrides(person.id);
+    else { setLoadingOverrides(false); setOverridesError(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [person?.id]);
+
+  // Acesso a Campanhas: só entra no estado quando os dados do módulo já chegaram (a seção fica oculta até lá),
+  // para nunca mostrar "Sem acesso" por engano e um Salvar sobrescrever o acesso real.
+  useEffect(() => {
+    if (!person || !campaignEnabled) return;
+    const camp = campaignPermsFromKeys(CAMPAIGN_PERM_KEYS.filter(k => initialCampaignPerms?.[k] === true));
+    setCampPerms(camp);
+    setOrig(o => ({ ...o, camp }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [person?.id, campaignEnabled]);
+
+  const selectedRole = roles.find(r => r.id === roleId) || null;
+  const baseline = useMemo(() => baselineFor(sys, roleId || null, roles), [sys, roleId, roles]);
+  const effective = effectivePerms(baseline, overrides);
+  const origEffective = effectivePerms(baselineFor(sys, orig.roleId || null, roles), orig.overrides);
+
+  const siteReady = !isMaster && !loadingOverrides && !overridesError;
+  const siteDirty = siteReady && (roleId !== orig.roleId || !sameOverrides(overrides, orig.overrides));
+  const campDirty = campaignEnabled && !sameCampaignPerms(campPerms, orig.camp);
+  const dirty = siteDirty || campDirty;
+  const customCount = ALL_PERM_KEYS.filter(k => overrides[k] !== undefined && overrides[k] !== baseline[k]).length;
+
+  const toggle = (key: string, value: boolean) => {
+    setOverrides(prev => {
+      const next = { ...prev };
+      // Com perfil atribuído o "padrão" é exato (vem dos dados do perfil): voltar ao padrão remove o ajuste.
+      // Sem perfil, o padrão é o espelho do backend: gravamos o valor explícito para não depender dele.
+      if (selectedRole && value === baseline[key]) delete next[key];
+      else next[key] = value;
+      return next;
+    });
+  };
+
+  // Etapas gravadas em sequência; cada uma só roda se mudou. Se uma falhar, as anteriores ficam registradas.
+  const doSave = async () => {
+    if (!person) return;
+    setSaving(true);
+    const done: SavedResult = { userId: person.id };
+    const cur = { ...orig };
+    try {
+      if (siteReady) {
+        if (roleId !== cur.roleId) {
+          await api.authPut(`/admin/user-roles/${person.id}`, { roleId: roleId || null });
+          cur.roleId = roleId; done.roleId = roleId || null;
+          setOrig(o => ({ ...o, roleId }));
+        }
+        if (!sameOverrides(overrides, cur.overrides)) {
+          // Servidor guarda só chaves conhecidas com boolean real; "sem ajuste" = chave ausente (herda do perfil).
+          const clean = cleanOverrides(overrides);
+          await api.authPut(`/admin/user-permissions/${person.id}`, clean);
+          cur.overrides = clean; done.overrides = clean;
+          setOrig(o => ({ ...o, overrides: clean }));
+        }
+      }
+      if (campaignEnabled && !sameCampaignPerms(campPerms, cur.camp)) {
+        // Sempre as 17 chaves explícitas (true/false). Sem nenhuma ligada => remove a pessoa da lista do módulo.
+        const finalPerms = campaignPermsFromKeys(CAMPAIGN_PERM_KEYS.filter(k => campPerms[k] === true));
+        const any = CAMPAIGN_PERM_KEYS.some(k => finalPerms[k]);
+        if (!any) {
+          await campaignsApi.del(`/admin/access/${person.id}`);
+          done.campaignPerms = null;
+        } else {
+          await campaignsApi.put(`/admin/access/${person.id}`, { name: personName, permissions: finalPerms });
+          done.campaignPerms = finalPerms;
+        }
+        cur.camp = finalPerms;
+        setOrig(o => ({ ...o, camp: finalPerms }));
+        if (person.id === currentUserId) invalidateCampaignPerms();
+      }
+      onSaved(done);
+      toast.success(`Acessos de ${personName} atualizados!`);
+      onClose();
+    } catch (e: any) {
+      // Mostra o motivo do servidor (ex.: "É preciso manter pelo menos uma pessoa com gestão de acessos.")
+      const message = e && e.name === "CampaignApiError" ? campaignErrMsg(e) : (e?.message || "Erro ao salvar.");
+      if (Object.keys(done).length > 1) onSaved(done);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Antes de salvar: avisa se a própria pessoa logada está tirando um acesso que usa agora
+  const handleSave = () => {
+    if (!person) return;
+    const risks: string[] = [];
+    if (isSelf && siteReady) {
+      const after = effective;
+      if (origEffective.roles_permissions && !after.roles_permissions) risks.push("a tela de Usuários & Permissões (você não conseguirá desfazer isso sozinho)");
+      else if (origEffective.users && !after.users) risks.push("a lista de Usuários");
+    }
+    if (isSelf && campaignEnabled && campDirty) {
+      if (orig.camp.campaigns_access && !campPerms.campaigns_access) risks.push("a gestão de acessos de Campanhas");
+      else if (orig.camp.campaigns && !campPerms.campaigns) risks.push("o módulo de Campanhas");
+    }
+    if (risks.length > 0) { setRiskText(`Você está tirando de você mesmo(a) o acesso a: ${risks.join("; ")}. Continuar?`); return; }
+    doSave();
+  };
+
+  const roleAbout = selectedRole
+    ? (selectedRole.description || `${countEnabled(selectedRole.permissions)} de ${ALL_PERM_KEYS.length} acessos`)
+    : (SYSTEM_ROLE_LABELS[sys]?.about ?? "");
+
+  return (
+    <>
+      <Sheet open={open} onOpenChange={v => { if (!v && !saving) onClose(); }}>
+        <SheetContent className="w-full gap-0 p-0 sm:max-w-xl" aria-describedby={undefined}>
+          {person && (
+            <>
+              <SheetHeader className="border-b px-5 pb-4 pt-5 pr-12">
+                <SheetTitle className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
+                    {person.user_metadata?.name?.charAt(0).toUpperCase() || <User size={16} />}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-base font-bold">
+                      {personName}{isSelf && <span className="ml-2 text-[11px] font-normal text-muted-foreground">(você)</span>}
+                    </span>
+                    <span className="block truncate text-xs font-normal text-muted-foreground">{person.email}</span>
+                  </span>
+                </SheetTitle>
+                <SheetDescription className="sr-only">Perfil, acessos ao painel e acesso a Campanhas desta pessoa.</SheetDescription>
+                <div className="flex items-center gap-2 pt-1">
+                  <SystemRoleBadge role={sys} />
+                </div>
+              </SheetHeader>
+
+              <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
+                {/* 1. Perfil */}
+                <section className="space-y-2" aria-label="Perfil">
+                  <h3 className="text-sm font-bold text-foreground">Perfil</h3>
+                  {isMaster ? (
+                    <div className="flex items-start gap-2 rounded-xl border border-yellow-500/20 bg-yellow-500/10 p-3 text-xs text-yellow-700 dark:text-yellow-400">
+                      <Crown size={14} className="mt-0.5 shrink-0" />
+                      Usuários Master têm acesso total e irrestrito ao painel — não há o que ajustar aqui.
+                    </div>
+                  ) : (
+                    <>
+                      <select
+                        aria-label="Perfil de acesso"
+                        className="h-11 w-full rounded-lg border border-input bg-background px-3 text-sm disabled:opacity-60"
+                        value={roleId}
+                        disabled={!siteReady || saving}
+                        onChange={e => setRoleId(e.target.value)}
+                      >
+                        <option value="">Padrão da conta ({SYSTEM_ROLE_LABELS[sys]?.label ?? sys})</option>
+                        {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                      <p className="text-[11px] leading-snug text-muted-foreground">{roleAbout}</p>
+                      {sys === "user" && (
+                        <p className="flex items-start gap-1.5 rounded-lg bg-muted/60 px-3 py-2 text-[11px] text-muted-foreground">
+                          <Info size={12} className="mt-0.5 shrink-0" />
+                          Conta de colaborador: não entra no painel administrativo, então os acessos abaixo só passam a valer se a conta for Admin ou Cozinha.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </section>
+
+                {/* 2. Acessos ao painel */}
+                {!isMaster && (
+                  <section className="space-y-3" aria-label="Acessos ao painel">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-bold text-foreground">
+                        Acessos ao painel{" "}
+                        <span className="font-normal text-muted-foreground">({countEnabled(effective)}/{ALL_PERM_KEYS.length})</span>
+                      </h3>
+                      {customCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setOverrides({})}
+                          disabled={!siteReady || saving}
+                          className="inline-flex min-h-9 items-center gap-1 text-xs font-semibold text-primary hover:underline disabled:opacity-50"
+                        >
+                          <RotateCcw size={12} /> Voltar ao padrão do perfil
+                        </button>
+                      )}
+                    </div>
+
+                    {loadingOverrides ? (
+                      <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground" role="status">
+                        <Loader2 size={16} className="animate-spin" /> Carregando acessos...
+                      </div>
+                    ) : overridesError ? (
+                      <div className="space-y-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+                        <p>Não foi possível carregar os ajustes desta pessoa. Para não sobrescrever nada por engano, a edição está bloqueada.</p>
+                        <Button variant="outline" size="sm" onClick={() => loadOverrides(personId)}>Tentar de novo</Button>
+                      </div>
+                    ) : (
+                      PERM_GROUPS.map(group => (
+                        <div key={group.group} className="space-y-1.5">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{group.group}</p>
+                          <div className="divide-y divide-border rounded-xl border">
+                            {group.items.map(item => {
+                              const on = effective[item.key] === true;
+                              const custom = overrides[item.key] !== undefined && overrides[item.key] !== baseline[item.key];
+                              return (
+                                <label key={item.key} className="flex min-h-11 cursor-pointer items-center justify-between gap-3 px-3 py-2">
+                                  <span className="flex min-w-0 items-center gap-2">
+                                    <item.icon size={14} className="shrink-0 text-muted-foreground" aria-hidden="true" />
+                                    <span className="truncate text-sm font-medium">{item.label}</span>
+                                    {custom && (
+                                      <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                                        personalizado
+                                      </span>
+                                    )}
+                                  </span>
+                                  <Switch
+                                    checked={on}
+                                    onCheckedChange={v => toggle(item.key, v)}
+                                    disabled={!siteReady || saving}
+                                    aria-label={item.label}
+                                  />
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </section>
+                )}
+
+                {/* 3. Campanhas (lista própria do módulo; só para quem gerencia esses acessos) */}
+                {campaignEnabled && (
+                  <CampaignAccessSection perms={campPerms} onChange={setCampPerms} disabled={saving} />
+                )}
+              </div>
+
+              <SheetFooter className="flex-row justify-end gap-2 border-t px-5 py-4">
+                <Button variant="outline" className="h-11" onClick={() => !saving && onClose()} disabled={saving}>Cancelar</Button>
+                <Button className="h-11 min-w-[120px] gap-2" onClick={handleSave} disabled={!dirty || saving}>
+                  {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Salvar
+                </Button>
+              </SheetFooter>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      <ConfirmDialog
+        open={riskText !== null}
+        onOpenChange={o => !o && setRiskText(null)}
+        title="Remover o seu próprio acesso?"
+        description={riskText ?? ""}
+        confirmLabel="Sim, remover"
+        variant="destructive"
+        onConfirm={() => { setRiskText(null); doSave(); }}
+      />
+    </>
+  );
+}
+
+// ─── RoleCard ─────────────────────────────────────────────────────────────────
 function RoleCard({ role, usersWithRole, onEdit, onDelete }: {
   role: PermRole; usersWithRole: number;
   onEdit: (r: PermRole) => void; onDelete: (r: PermRole) => void;
@@ -935,37 +1455,28 @@ function RoleCard({ role, usersWithRole, onEdit, onDelete }: {
                 <span className="font-semibold text-sm">{role.name}</span>
                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
                   style={{ backgroundColor: role.color + "22", color: role.color }}>
-                  {enabled}/{ALL_PERM_KEYS.length} permissões
+                  {enabled}/{ALL_PERM_KEYS.length} acessos
                 </span>
               </div>
               {role.description && <p className="text-xs text-muted-foreground truncate">{role.description}</p>}
-              {/* Assignment count */}
               <div className="flex items-center gap-1 mt-1">
                 <Users size={11} className="text-muted-foreground" />
                 <span className="text-[11px] text-muted-foreground">
                   {usersWithRole === 0
-                    ? "Nenhum usuário atribuído"
-                    : `${usersWithRole} usuário${usersWithRole !== 1 ? "s" : ""} atribuído${usersWithRole !== 1 ? "s" : ""}`
+                    ? "Ninguém usa este perfil"
+                    : `${usersWithRole} ${usersWithRole !== 1 ? "pessoas" : "pessoa"}`
                   }
                 </span>
-                {usersWithRole > 0 && (
-                  <span
-                    className="text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1"
-                    style={{ backgroundColor: role.color + "22", color: role.color }}
-                  >
-                    {usersWithRole}
-                  </span>
-                )}
               </div>
             </div>
           </div>
           <div className="flex gap-1 flex-shrink-0">
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(role)}><Pencil size={13} /></Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7 hover:text-destructive" onClick={() => onDelete(role)}><Trash2 size={13} /></Button>
+            <Button variant="ghost" size="icon" className="h-9 w-9" aria-label={`Editar perfil ${role.name}`} onClick={() => onEdit(role)}><Pencil size={13} /></Button>
+            <Button variant="ghost" size="icon" className="h-9 w-9 hover:text-destructive" aria-label={`Excluir perfil ${role.name}`} onClick={() => onDelete(role)}><Trash2 size={13} /></Button>
           </div>
         </div>
-        <button onClick={() => setExpanded(v => !v)} className="text-xs text-primary hover:underline flex items-center gap-1 mt-3">
-          {expanded ? "Ocultar" : "Ver permissões"}
+        <button onClick={() => setExpanded(v => !v)} className="text-xs text-primary hover:underline flex items-center gap-1 mt-3 min-h-8">
+          {expanded ? "Ocultar" : "Ver acessos"}
           {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
         </button>
       </div>
@@ -1001,7 +1512,7 @@ function RoleFormModal({ open, onClose, role, onSaved }: {
   const [name, setName] = useState(role?.name || "");
   const [description, setDescription] = useState(role?.description || "");
   const [color, setColor] = useState(role?.color || "#6366f1");
-  const [permissions, setPermissions] = useState<Record<string, boolean>>(role?.permissions || {});
+  const [permissions, setPermissions] = useState<Perms>(role?.permissions || {});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -1012,11 +1523,11 @@ function RoleFormModal({ open, onClose, role, onSaved }: {
   }, [open, role]);
 
   const togglePerm = (key: string) => setPermissions(p => ({ ...p, [key]: !p[key] }));
-  const selectAll = () => { const a: Record<string, boolean> = {}; ALL_PERM_KEYS.forEach(k => a[k] = true); setPermissions(a); };
+  const selectAll = () => { const a: Perms = {}; ALL_PERM_KEYS.forEach(k => a[k] = true); setPermissions(a); };
   const selectNone = () => setPermissions({});
 
   const handleSave = async () => {
-    if (!name.trim()) { toast.error("Nome da função é obrigatório."); return; }
+    if (!name.trim()) { toast.error("Nome do perfil é obrigatório."); return; }
     setSaving(true);
     try {
       // Write an explicit true/false for every current permission key, not just
@@ -1024,20 +1535,20 @@ function RoleFormModal({ open, onClose, role, onSaved }: {
       // absent from the stored object, and the resolver treats "absent" as
       // "allowed" — so a role can look restricted in this screen while actually
       // granting everything it never explicitly denied.
-      const normalizedPermissions: Record<string, boolean> = {};
+      const normalizedPermissions: Perms = {};
       ALL_PERM_KEYS.forEach((k) => { normalizedPermissions[k] = permissions[k] === true; });
 
       let saved: PermRole;
       if (isEdit && role) {
         saved = await api.authPut(`/admin/roles/${role.id}`, { name, description, color, permissions: normalizedPermissions });
-        toast.success("Função atualizada!");
+        toast.success("Perfil atualizado!");
       } else {
         saved = await api.authPost("/admin/roles", { name, description, color, permissions: normalizedPermissions });
-        toast.success("Função criada!");
+        toast.success("Perfil criado!");
       }
       onSaved(saved); onClose();
     } catch (e: any) {
-      toast.error(e.message || "Erro ao salvar função.");
+      toast.error(e.message || "Erro ao salvar perfil.");
     } finally {
       setSaving(false);
     }
@@ -1051,16 +1562,16 @@ function RoleFormModal({ open, onClose, role, onSaved }: {
             <div className="h-8 w-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: color + "22", color }}>
               <ShieldCheck size={18} />
             </div>
-            {isEdit ? "Editar Função" : "Nova Função"}
+            {isEdit ? "Editar perfil" : "Novo perfil"}
           </DialogTitle>
           <DialogDescription className="sr-only">
-            {isEdit ? "Edite os detalhes e permissões da função." : "Preencha os detalhes e permissões da nova função."}
+            {isEdit ? "Edite os detalhes e acessos do perfil." : "Preencha os detalhes e acessos do novo perfil."}
           </DialogDescription>
         </DialogHeader>
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label>Nome da Fun��ão *</Label>
+              <Label>Nome do perfil *</Label>
               <Input value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Gerente de Cozinha" />
             </div>
             <div className="space-y-1.5">
@@ -1072,32 +1583,32 @@ function RoleFormModal({ open, onClose, role, onSaved }: {
             <Label>Cor</Label>
             <div className="flex items-center gap-2 flex-wrap">
               {PRESET_COLORS.map(c => (
-                <button key={c} onClick={() => setColor(c)}
-                  className={cn("h-6 w-6 rounded-full border-2 transition-all", color === c ? "border-foreground scale-110" : "border-transparent")}
+                <button key={c} type="button" aria-label={`Cor ${c}`} onClick={() => setColor(c)}
+                  className={cn("h-7 w-7 rounded-full border-2 transition-all", color === c ? "border-foreground scale-110" : "border-transparent")}
                   style={{ backgroundColor: c }} />
               ))}
-              <input type="color" value={color} onChange={e => setColor(e.target.value)}
-                className="h-6 w-6 rounded-full cursor-pointer border border-border bg-transparent" />
+              <input type="color" value={color} onChange={e => setColor(e.target.value)} aria-label="Cor personalizada"
+                className="h-7 w-7 rounded-full cursor-pointer border border-border bg-transparent" />
             </div>
           </div>
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <Label className="font-semibold">Permissões ({countEnabled(permissions)}/{ALL_PERM_KEYS.length})</Label>
+              <Label className="font-semibold">Acessos ({countEnabled(permissions)}/{ALL_PERM_KEYS.length})</Label>
               <div className="flex gap-2 text-xs">
-                <button onClick={selectAll} className="text-primary hover:underline">Todas</button>
+                <button type="button" onClick={selectAll} className="text-primary hover:underline">Todos</button>
                 <span className="text-muted-foreground">/</span>
-                <button onClick={selectNone} className="text-muted-foreground hover:underline">Nenhuma</button>
+                <button type="button" onClick={selectNone} className="text-muted-foreground hover:underline">Nenhum</button>
               </div>
             </div>
             {PERM_GROUPS.map(group => (
               <div key={group.group}>
                 <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">{group.group}</p>
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                   {group.items.map(item => {
                     const on = permissions[item.key] === true;
                     return (
-                      <button key={item.key} onClick={() => togglePerm(item.key)}
-                        className={cn("flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all text-left",
+                      <button key={item.key} type="button" onClick={() => togglePerm(item.key)}
+                        className={cn("flex min-h-11 items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all text-left",
                           on ? "border-primary/30 bg-primary/8 text-foreground" : "border-border bg-card text-muted-foreground hover:bg-accent")}>
                         <div className={cn("h-5 w-5 rounded flex items-center justify-center flex-shrink-0", on ? "bg-primary text-primary-foreground" : "bg-muted")}>
                           {on ? <Check size={11} /> : <item.icon size={11} />}
@@ -1115,191 +1626,8 @@ function RoleFormModal({ open, onClose, role, onSaved }: {
           <DialogClose asChild><Button variant="outline">Cancelar</Button></DialogClose>
           <Button onClick={handleSave} disabled={saving} className="gap-2 min-w-[120px]">
             {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
-            {isEdit ? "Salvar" : "Criar Função"}
+            {isEdit ? "Salvar" : "Criar perfil"}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─── UserPermissionsModal ─────────────────────────────────────────────────────
-function UserPermissionsModal({ open, onClose, userEntry, roles, onSaved }: {
-  open: boolean; onClose: () => void;
-  userEntry: UserRoleAssignment | null; roles: PermRole[]; onSaved: () => void;
-}) {
-  const [selectedRoleId, setSelectedRoleId] = useState("");
-  const [overrides, setOverrides] = useState<Record<string, boolean | null>>({});
-  const [showOverrides, setShowOverrides] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [loadingOverrides, setLoadingOverrides] = useState(false);
-
-  const selectedRole = roles.find(r => r.id === selectedRoleId) || null;
-
-  useEffect(() => {
-    if (open && userEntry) {
-      setSelectedRoleId(userEntry.customRoleId || "");
-      setShowOverrides(false);
-      setLoadingOverrides(true);
-      api.authGet(`/admin/user-permissions/${userEntry.userId}`)
-        .then(data => setOverrides(data || {}))
-        .catch(() => setOverrides({}))
-        .finally(() => setLoadingOverrides(false));
-    }
-  }, [open, userEntry]);
-
-  const getEffectivePerm = (key: string) => {
-    if (overrides[key] !== undefined && overrides[key] !== null) return overrides[key] as boolean;
-    if (selectedRole) return selectedRole.permissions[key] === true;
-    return null;
-  };
-
-  const toggleOverride = (key: string) => {
-    const current = overrides[key];
-    const roleDefault = selectedRole?.permissions[key] === true;
-    if (current === undefined || current === null) setOverrides(p => ({ ...p, [key]: !roleDefault }));
-    else if (current === true) setOverrides(p => ({ ...p, [key]: false }));
-    else setOverrides(p => ({ ...p, [key]: null }));
-  };
-
-  const handleSave = async () => {
-    if (!userEntry) return;
-    setSaving(true);
-    try {
-      await api.authPut(`/admin/user-roles/${userEntry.userId}`, { roleId: selectedRoleId || null });
-      const cleanOverrides: Record<string, boolean> = {};
-      for (const [k, v] of Object.entries(overrides)) {
-        if (v !== null && v !== undefined) cleanOverrides[k] = v as boolean;
-      }
-      await api.authPut(`/admin/user-permissions/${userEntry.userId}`, cleanOverrides);
-      toast.success(`Permissões de ${userEntry.userName} atualizadas!`);
-      onSaved(); onClose();
-    } catch (e: any) {
-      toast.error(e.message || "Erro ao salvar.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (!userEntry) return null;
-  const activeOverrides = Object.entries(overrides).filter(([, v]) => v !== null && v !== undefined).length;
-
-  return (
-    <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="sm:max-w-xl max-h-[90vh] flex flex-col gap-0 p-0">
-        <DialogHeader className="px-6 pt-5 pb-4 border-b">
-          <DialogTitle className="flex items-center gap-3">
-            <img src={userEntry.avatar} alt={userEntry.userName} className="h-9 w-9 rounded-full object-cover border" />
-            <div>
-              <p className="font-semibold text-sm">{userEntry.userName}</p>
-              <p className="text-xs text-muted-foreground">{userEntry.email}</p>
-            </div>
-          </DialogTitle>
-          <DialogDescription className="sr-only">Gerencie a função e as permissões individuais deste usuário.</DialogDescription>
-        </DialogHeader>
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">Papel:</span>
-            <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full border",
-              SYSTEM_ROLE_LABELS[userEntry.systemRole]?.color || SYSTEM_ROLE_LABELS.user.color)}>
-              {SYSTEM_ROLE_LABELS[userEntry.systemRole]?.label || userEntry.systemRole}
-            </span>
-          </div>
-          {userEntry.systemRole === "master" ? (
-            <div className="rounded-xl bg-yellow-500/10 border border-yellow-500/20 p-4 text-sm text-yellow-700 dark:text-yellow-400 flex items-start gap-2">
-              <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
-              Usuários Master têm acesso total irrestrito.
-            </div>
-          ) : (
-            <>
-              <div className="space-y-2">
-                <Label className="font-semibold">Função Atribuída</Label>
-                <div className="space-y-1">
-                  <button onClick={() => setSelectedRoleId("")}
-                    className={cn("w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-sm text-left transition-all",
-                      !selectedRoleId ? "border-primary/30 bg-primary/8" : "border-border hover:bg-accent")}>
-                    <div className={cn("h-4 w-4 rounded-full border-2 flex items-center justify-center",
-                      !selectedRoleId ? "border-primary" : "border-muted-foreground")}>
-                      {!selectedRoleId && <div className="h-2 w-2 rounded-full bg-primary" />}
-                    </div>
-                    <span className="italic text-muted-foreground">Sem função personalizada</span>
-                  </button>
-                  {roles.map(role => (
-                    <button key={role.id} onClick={() => setSelectedRoleId(role.id)}
-                      className={cn("w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-sm text-left transition-all",
-                        selectedRoleId === role.id ? "border-primary/30 bg-primary/8" : "border-border hover:bg-accent")}>
-                      <div className={cn("h-4 w-4 rounded-full border-2 flex items-center justify-center",
-                        selectedRoleId === role.id ? "border-primary" : "border-muted-foreground")}>
-                        {selectedRoleId === role.id && <div className="h-2 w-2 rounded-full bg-primary" />}
-                      </div>
-                      <div className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: role.color }} />
-                      <span className="flex-1 font-medium">{role.name}</span>
-                      <span className="text-xs text-muted-foreground">{countEnabled(role.permissions)}/{ALL_PERM_KEYS.length}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="border border-border rounded-xl overflow-hidden">
-                <button onClick={() => setShowOverrides(v => !v)}
-                  className="w-full flex items-center justify-between px-4 py-3 bg-muted/40 hover:bg-muted/60 text-sm transition-colors">
-                  <div className="flex items-center gap-2 font-medium">
-                    <UserCog size={14} /> Overrides Individuais
-                    {activeOverrides > 0 && (
-                      <span className="bg-primary text-primary-foreground text-[10px] font-bold px-1.5 py-0.5 rounded-full">{activeOverrides}</span>
-                    )}
-                  </div>
-                  {showOverrides ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-                </button>
-                {showOverrides && (
-                  <div className="px-4 py-3 space-y-3">
-                    {loadingOverrides ? <div className="flex justify-center py-4"><Loader2 size={18} className="animate-spin" /></div> : (
-                      <>
-                        <p className="text-xs text-muted-foreground flex gap-1.5 items-start">
-                          <Info size={12} className="shrink-0 mt-0.5" />
-                          Clique para alternar: ✅ permitido / ❌ bloqueado / — padrão da função.
-                        </p>
-                        {activeOverrides > 0 && (
-                          <button onClick={() => setOverrides({})} className="text-xs text-destructive hover:underline">Limpar overrides</button>
-                        )}
-                        {PERM_GROUPS.map(group => (
-                          <div key={group.group}>
-                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{group.group}</p>
-                            <div className="grid grid-cols-2 gap-1">
-                              {group.items.map(item => {
-                                const override = overrides[item.key];
-                                const hasOverride = override !== null && override !== undefined;
-                                return (
-                                  <button key={item.key} onClick={() => toggleOverride(item.key)}
-                                    className={cn("flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs transition-all text-left",
-                                      hasOverride ? (override ? "border-green-500/30 bg-green-500/8" : "border-red-500/30 bg-red-500/8") : "border-border bg-card hover:bg-accent")}>
-                                    <div className={cn("h-5 w-5 rounded flex items-center justify-center flex-shrink-0 text-[10px] font-bold",
-                                      hasOverride ? (override ? "bg-green-500 text-white" : "bg-red-500 text-white") : "bg-muted text-muted-foreground")}>
-                                      {hasOverride ? (override ? "✓" : "✗") : "—"}
-                                    </div>
-                                    {item.label}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ))}
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-        <DialogFooter className="px-6 py-4 border-t gap-2">
-          <DialogClose asChild><Button variant="outline">Cancelar</Button></DialogClose>
-          {userEntry.systemRole !== "master" && (
-            <Button onClick={handleSave} disabled={saving} className="gap-2 min-w-[120px]">
-              {saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
-              Salvar Permissões
-            </Button>
-          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

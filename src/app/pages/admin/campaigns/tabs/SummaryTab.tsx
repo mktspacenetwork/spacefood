@@ -9,7 +9,7 @@ import { Progress } from "../../../../components/ui/progress";
 import { cn } from "../../../../lib/utils";
 import { TIMEZONE } from "../../../../lib/date-utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
-import { RESULT_STATUS, fmtDateTime, plural } from "../../../../lib/campaigns/format";
+import { RESULT_STATUS, fmtDate, fmtDateTime, plural } from "../../../../lib/campaigns/format";
 import type { DisplayState } from "../../../../lib/campaigns/format";
 import type {
   AdminDashboard, AdminParticipant, AdminSubmissionRow, PublishCheck,
@@ -73,11 +73,11 @@ export function SummaryTab(props: SummaryTabProps) {
     const missing = items.filter((i) => !i.ok);
     const fix = (key: string) =>
       key === "registration_dates" || key === "voting_dates"
-        ? () => goTab?.("settings", "schedule")
+        ? () => goTab?.("settings", "period")
         : () => navigate(`/admin/campaigns/${campaignId}/edit`);
     return (
       <div className="space-y-4">
-        <TabIntro>Acompanhe em que etapa a campanha está e o que fazer agora. Enquanto for rascunho, veja o que falta para publicar.</TabIntro>
+        <TabIntro>Veja o que falta para publicar a campanha.</TabIntro>
         {top}
         {publishCheck ? (
           <Card className="rounded-3xl border" data-tutorial="camp-summary-checklist">
@@ -129,16 +129,18 @@ export function SummaryTab(props: SummaryTabProps) {
   if (!d) return null;
 
   const hasVoting = f.voting;
-  const votingStarted = d.locked || d.votes_registered > 0;
+  // Enquanto a votação não encerra, o servidor não manda a contagem por receita: aqui nada de placar parcial.
+  const resultsLocked = hasVoting && !!d.results_locked;
+  const votingEnds = d.voting_ends_at ?? d.stages.find((x) => x.stage_key === "voting")?.ends_at ?? null;
   const rs = d.results?.status ?? "none";
   const rsMeta = RESULT_STATUS[rs];
-  const tally = d.tally ?? [];
+  const tally = resultsLocked ? [] : d.tally ?? [];
   const official = rs === "confirmed" || rs === "announced";
   const canGoVoting = !!goTab && (!!perms.campaigns_schedule || !!perms.campaigns_results || !!perms.campaigns_votes_view);
   const share = (n: number) => (d.submissions > 0 ? (n / d.submissions) * 100 : 0);
-  const showVotes = hasVoting && votingStarted;
-  const showResult = hasVoting && (votingStarted || rs !== "none");
-  const showRanking = hasVoting && !!perms.campaigns_results && tally.length > 0 && votingStarted;
+  const showVotes = hasVoting;
+  const showResult = hasVoting;
+  const showRanking = hasVoting && !resultsLocked && !!perms.campaigns_results && tally.length > 0;
   const maxVotes = Math.max(0, ...tally.map((t) => t.votes));
 
   const refresh = () => {
@@ -160,7 +162,7 @@ export function SummaryTab(props: SummaryTabProps) {
           </Button>
         )}
       >
-        Veja em que etapa a campanha está, o que fazer agora e os números que importam.
+        Veja o que fazer agora e os números que importam.
       </TabIntro>
 
       {top}
@@ -244,18 +246,29 @@ export function SummaryTab(props: SummaryTabProps) {
           <Card className="rounded-3xl border">
             <CardContent className="space-y-3 p-5">
               <SectionLabel>Resultado</SectionLabel>
-              <Badge className={cn("border text-[11px]", rsMeta.className)}>{rsMeta.label}</Badge>
-              <p className="text-[12px] leading-relaxed text-muted-foreground">
-                {rs === "none" && "A votação ainda não foi apurada."}
-                {rs === "preliminary" && "Apuração pronta: confira o ranking e confirme o vencedor."}
-                {rs === "tie_pending" && "Há empate: registre a decisão para continuar."}
-                {rs === "confirmed" && `Vencedor confirmado em ${fmtDateTime(d.results?.confirmed_at)}.`}
-                {rs === "announced" && `Divulgado em ${fmtDateTime(d.results?.announced_at)}.`}
-              </p>
-              {canGoVoting && (
-                <button type="button" onClick={() => goTab?.("voting")} className="text-xs font-semibold text-primary hover:underline">
-                  Ir para Votação →
-                </button>
+              {resultsLocked ? (
+                <>
+                  <Badge className="border border-blue-200 bg-blue-100 text-[11px] text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300">Votação em andamento</Badge>
+                  <p className="text-[12px] leading-relaxed text-muted-foreground">
+                    O resultado só aparece depois do encerramento{votingEnds ? ` (${fmtDate(votingEnds)})` : ""}.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Badge className={cn("border text-[11px]", rsMeta.className)}>{rsMeta.label}</Badge>
+                  <p className="text-[12px] leading-relaxed text-muted-foreground">
+                    {rs === "none" && "A votação encerrou. Veja o resultado e o vencedor."}
+                    {rs === "preliminary" && "Confira o resultado e confirme o vencedor."}
+                    {rs === "tie_pending" && "Há empate: registre a decisão para continuar."}
+                    {rs === "confirmed" && `Vencedor confirmado em ${fmtDateTime(d.results?.confirmed_at)}.`}
+                    {rs === "announced" && `Divulgado em ${fmtDateTime(d.results?.announced_at)}.`}
+                  </p>
+                  {canGoVoting && (
+                    <button type="button" onClick={() => goTab?.("voting")} className="text-xs font-semibold text-primary hover:underline">
+                      Ver resultado →
+                    </button>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -271,7 +284,7 @@ export function SummaryTab(props: SummaryTabProps) {
               <Badge className={cn("border text-[10px]", official
                 ? "border-green-200 bg-green-100 text-green-700 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300"
                 : "border-yellow-200 bg-yellow-100 text-yellow-700 dark:border-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300")}>
-                {official ? "Oficial" : "Parcial"}
+                {official ? "Oficial" : "Preliminar"}
               </Badge>
             </div>
             <ol className="space-y-3">

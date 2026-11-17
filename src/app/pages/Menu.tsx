@@ -752,10 +752,10 @@ export function Menu() {
           )}
 
           {/* Banner Carousel - Controlled by settings.showBannerCarousel (default true).
-               Hidden only when an order banner is active for the viewed date.
+               With an order banner active for the viewed date only the CAMPAIGN slides are shown (never the regular banners).
                Manual logs (Taipas diary) do NOT count as "ordered", so banners always show. */}
-          {!orderForDate && (settings.showBannerCarousel !== false) && (
-            <BannerCarousel userUnit={selectedUnit} />
+          {(settings.showBannerCarousel !== false) && (
+            <BannerCarousel userUnit={selectedUnit} campaignsOnly={!!orderForDate} />
           )}
 
           {/* Previous Day Menu Banner */}

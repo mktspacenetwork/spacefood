@@ -94,7 +94,7 @@ export function CampaignRecipes() {
       <EmptyState
         icon={<Lock size={22} aria-hidden="true" />}
         title="A galeria ainda não está disponível"
-        description="As receitas aparecem aqui assim que a campanha liberar a galeria. Acompanhe as datas na página inicial da campanha."
+        description="As receitas aparecem aqui quando forem liberadas."
       />,
     );
   }
@@ -105,15 +105,15 @@ export function CampaignRecipes() {
     return withTour(
       <EmptyState
         icon={<BookOpen size={22} aria-hidden="true" />}
-        title="Ainda não há receitas aprovadas"
-        description="Quando as primeiras receitas forem aprovadas, elas aparecem aqui."
+        title="Ainda não há receitas"
+        description="As receitas aprovadas aparecem aqui."
       />,
     );
   }
 
   return withTour(
     <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4" aria-label="Galeria de receitas">
-      <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{plural(total, "receita aprovada", "receitas aprovadas")}</p>
+      <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{plural(total, "receita", "receitas")}</p>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3" data-tutorial="camp-gallery">
         {items.map((r, i) => (
           <RecipeCard key={r.id} recipe={r} to={`/campanhas/${slug}/receitas/${r.id}`} first={i === 0} />

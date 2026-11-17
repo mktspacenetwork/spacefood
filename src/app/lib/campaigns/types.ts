@@ -195,6 +195,8 @@ export type AdminDashboard = {
   votes_registered: number; votes_valid: number; votes_invalidated: number; voters: number;
   participation_pct: number; voting_pct: number;
   results: Partial<AdminResults> | null; stages: AdminStageRow[]; locked: boolean; tally?: TallyRow[];
+  /** true enquanto a votação não encerrou: o servidor não envia contagem por receita. */
+  results_locked?: boolean; voting_ends_at?: string | null;
 };
 
 export type AdminSubmissionRow = {
@@ -231,3 +233,8 @@ export type AdminAuditRow = {
 export type AdminAccessRow = { user_id: string; user_name: string; permissions: Record<string, boolean>; added_at: string };
 
 export type ExportPayload = { kind: string; columns: string[]; rows: unknown[][] };
+
+/** Votos individuais: `locked` enquanto a votação não encerrou (nesse caso `items` vem vazio). */
+export type AdminVotesPayload = { locked: boolean; items: AdminVote[] };
+/** Resultado/apuração: `tally_locked` enquanto a votação não encerrou (nesse caso `tally` vem vazio). */
+export type AdminResultsPayload = { results: AdminResults | null; tally: TallyRow[]; tally_locked?: boolean };
