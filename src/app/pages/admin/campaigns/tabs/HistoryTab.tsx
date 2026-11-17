@@ -12,13 +12,19 @@ import type { TabProps } from "./types";
 // ── Resumo legível do antes/depois (nunca despeja JSON cru) ──
 const FIELD: Record<string, string> = {
   status: "Situação", name: "Nome", description: "Descrição", objective: "Objetivo", instructions: "Orientações",
-  visible_from: "Visível a partir de", starts_at: "Início", ends_at: "Fim", paused: "Pausada", suspended: "Suspensa",
+  visible_from: "Visível a partir de", starts_at: "Início", ends_at: "Fim", paused: "Pausada", suspended: "Não publicada",
   dish_name: "Prato", ingredients: "Ingredientes", preparation: "Modo de preparo", rejection_reason: "Justificativa",
   enabled: "Ligado", invalidated: "Invalidado", votes: "Votos", total_valid_votes: "Votos válidos", top_votes: "Votos do mais votado",
   tie: "Empate", count: "Quantidade", media_changed: "Mídia alterada", media: "Mídias", rows: "Linhas", eligible_count: "Elegíveis",
   cover_path: "Capa", audience: "Público", features: "Funcionalidades", visibility: "Visibilidade", media_limits: "Limites de mídia",
   winner: "Receita vencedora", winner_submission_id: "Receita vencedora", candidates: "Receitas empatadas", slug: "Endereço",
-  authorized_at: "Publicada em", closed_at: "Encerrada em", archived_at: "Arquivada em", suspended_at: "Suspensa em",
+  authorized_at: "Publicada em", closed_at: "Encerrada em", archived_at: "Arquivada em", suspended_at: "Despublicada em",
+};
+// Mesmo vocabulário da tela: "Suspender/Retomar" viraram "Despublicar/Republicar" (o registro antigo continua legível).
+const ACTION_LABEL: Record<string, string> = {
+  ...AUDIT_ACTION,
+  SUSPEND_CAMPAIGN: "Campanha despublicada",
+  RESUME_CAMPAIGN: "Campanha republicada",
 };
 const IGNORE = new Set([
   "id", "version", "updated_at", "updated_by", "created_at", "created_by", "created_by_name", "type", "edit_locked_at",
@@ -83,7 +89,7 @@ export function HistoryTab({ campaignId }: TabProps) {
   const rows = useMemo(() => {
     const t = q.trim().toLowerCase();
     return (data ?? []).filter(
-      (r) => !t || (AUDIT_ACTION[r.action] ?? r.action).toLowerCase().includes(t) || (r.actor_name ?? "").toLowerCase().includes(t) || (r.reason ?? "").toLowerCase().includes(t),
+      (r) => !t || (ACTION_LABEL[r.action] ?? r.action).toLowerCase().includes(t) || (r.actor_name ?? "").toLowerCase().includes(t) || (r.reason ?? "").toLowerCase().includes(t),
     );
   }, [data, q]);
 
@@ -116,7 +122,7 @@ export function HistoryTab({ campaignId }: TabProps) {
                   className={cn("flex w-full items-start justify-between gap-3 text-left", !expandable && "cursor-default")}
                 >
                   <span className="min-w-0">
-                    <span className="block text-sm font-semibold">{AUDIT_ACTION[r.action] ?? r.action}</span>
+                    <span className="block text-sm font-semibold">{ACTION_LABEL[r.action] ?? r.action}</span>
                     <span className="block text-[11px] text-muted-foreground">{r.actor_name || "Sistema"} · {fmtDateTime(r.occurred_at)}</span>
                     {r.reason && <span className="block text-[13px] text-muted-foreground italic mt-1">“{r.reason}”</span>}
                   </span>

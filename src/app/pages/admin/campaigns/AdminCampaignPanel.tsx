@@ -1,47 +1,311 @@
-import { Fragment, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
-  Archive, ArrowLeft, BarChart3, CalendarClock, ChefHat, Copy, FileDown, History as HistoryIcon, Loader2, MoreHorizontal,
-  Pencil, PauseCircle, PlayCircle, Rocket, Send, Trash2, Trophy, Undo2, Users, Vote, XCircle, Megaphone,
+  ArrowLeft, BarChart3, Check, ChefHat, Compass, Copy, EyeOff, Loader2, Megaphone, MoreHorizontal, Pencil, Play, Rocket,
+  Send, Settings, Users, Vote,
 } from "lucide-react";
 import { Badge } from "../../../components/ui/Badge";
 import { Button } from "../../../components/ui/Button";
+import { Card } from "../../../components/ui/Card";
 import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
-} from "../../../components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../../components/ui/dropdown-menu";
 import { cn } from "../../../lib/utils";
 import { useAuth } from "../../../context/auth-context";
 import { campaignsApi } from "../../../lib/campaigns/api";
-import { CAMPAIGN_STATUS, fmtDateTime } from "../../../lib/campaigns/format";
-import type { AdminCampaignDetail } from "../../../lib/campaigns/types";
+import {
+  DISPLAY_STATE, PHASE_STATE, RESULT_STATUS, campaignDisplayState, fmtDateTime, fmtShort, plural,
+} from "../../../lib/campaigns/format";
+import type { DisplayState } from "../../../lib/campaigns/format";
+import type {
+  AdminCampaign, AdminCampaignDetail, AdminDashboard, AdminResults, AdminStageRow, PublishCheck,
+} from "../../../lib/campaigns/types";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_PANEL } from "../../../lib/campaigns/tours-admin";
 import { useCampaignPerms } from "./useCampaignPerms";
 import { PublishDialog } from "./PublishDialog";
 import { DuplicateDialog } from "./DuplicateDialog";
 import { ErrorBox, LoadingBox, Notice, ReasonDialog, RestrictedBox, stageState, useBusy, useLoader } from "./shared";
-import { OverviewTab } from "./tabs/OverviewTab";
+import { SummaryTab } from "./tabs/SummaryTab";
 import { SubmissionsTab } from "./tabs/SubmissionsTab";
 import { ParticipantsTab } from "./tabs/ParticipantsTab";
 import { VotingTab } from "./tabs/VotingTab";
-import { ResultsTab } from "./tabs/ResultsTab";
-import { ScheduleTab } from "./tabs/ScheduleTab";
-import { HistoryTab } from "./tabs/HistoryTab";
-import { ReportsTab } from "./tabs/ReportsTab";
+import { SettingsTab } from "./tabs/SettingsTab";
+import type { RiskKind } from "./tabs/SettingsTab";
 import type { TabProps } from "./tabs/types";
 
 type Confirm = "resume" | "archive" | "draft" | "delete" | "review" | null;
 type Reasoned = "suspend" | "close" | null;
+type Phase = ReturnType<typeof stageState>;
 
-const STATE_WORD: Record<string, string> = {
-  unset: "sem datas", upcoming: "em breve", open: "abertas", paused: "pausadas", closed: "encerradas",
+const YELLOW = "bg-yellow-100 text-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800";
+
+// Abas antigas (links e favoritos) continuam funcionando.
+const LEGACY_TABS: Record<string, { tab: string; section?: string }> = {
+  overview: { tab: "summary" },
+  results: { tab: "voting" },
+  schedule: { tab: "settings", section: "schedule" },
+  history: { tab: "settings", section: "history" },
+  reports: { tab: "settings", section: "reports" },
 };
-const VOTE_WORD: Record<string, string> = {
-  unset: "sem datas", upcoming: "em breve", open: "aberta", paused: "pausada", closed: "encerrada",
-};
+
+const stageOf = (stages: AdminStageRow[], k: AdminStageRow["stage_key"]) => stages.find((s) => s.stage_key === k);
+
+// ───────────────────────────── Situação atual (selo de fase) ─────────────────────────────
+
+function phaseBadge(
+  c: AdminCampaign, display: DisplayState, results: AdminResults | null, regState: Phase, votState: Phase,
+): { label: string; className: string } | null {
+  if (display === "closed" || display === "archived") return null;
+  const f = c.features;
+  const rs = results?.status ?? "none";
+  if (f.voting) {
+    if (rs === "announced") return { label: "Resultado divulgado", className: RESULT_STATUS.announced.className };
+    if (rs === "confirmed") return { label: "Vencedor confirmado", className: RESULT_STATUS.confirmed.className };
+    if (rs === "tie_pending") return { label: "Empate a decidir", className: RESULT_STATUS.tie_pending.className };
+    if (rs === "preliminary") return { label: "Apuração pronta", className: RESULT_STATUS.preliminary.className };
+    if (votState === "open") return { label: "Votação aberta", className: PHASE_STATE.open.className };
+    if (votState === "paused") return { label: "Votação pausada", className: PHASE_STATE.paused.className };
+    if (votState === "closed") return { label: "Votação encerrada", className: PHASE_STATE.closed.className };
+  }
+  if (f.submission) {
+    if (regState === "open") return { label: "Inscrições abertas", className: PHASE_STATE.open.className };
+    if (regState === "paused") return { label: "Inscrições pausadas", className: PHASE_STATE.paused.className };
+    if (regState === "closed") return f.approval ? { label: "Em análise", className: YELLOW } : { label: "Inscrições encerradas", className: PHASE_STATE.closed.className };
+    if (regState === "upcoming") return { label: "Inscrições em breve", className: PHASE_STATE.upcoming.className };
+  }
+  if (regState === "unset" && votState === "unset") return { label: "Sem datas", className: PHASE_STATE.unset.className };
+  return null;
+}
+
+// ─────────────────────────────── Ciclo da campanha ───────────────────────────────
+
+type CycleStep = { key: string; label: string; status: "done" | "current" | "upcoming"; lines: string[] };
+
+function buildCycle(
+  c: AdminCampaign, display: DisplayState, stages: AdminStageRow[], results: AdminResults | null, dash: AdminDashboard | null,
+): CycleStep[] {
+  const f = c.features;
+  const finished = display === "closed" || display === "archived";
+  const draft = display === "draft"; // nada começou de verdade enquanto é rascunho
+  const reg = stageOf(stages, "registration");
+  const vot = stageOf(stages, "voting");
+  const ann = stageOf(stages, "announcement");
+  const regState = stageState(reg);
+  const votState = stageState(vot);
+  const rs = results?.status ?? "none";
+  const locked = !!c.edit_locked_at || !!dash?.locked;
+  const range = (s?: AdminStageRow): string[] =>
+    !s?.starts_at ? ["Sem datas"] : s.ends_at ? [fmtShort(s.starts_at), `→ ${fmtShort(s.ends_at)}`] : [fmtShort(s.starts_at)];
+  const pick = (st: CycleStep["status"]): CycleStep["status"] => (draft ? "upcoming" : st);
+
+  const steps: CycleStep[] = [];
+  if (f.submission) {
+    steps.push({
+      key: "registration", label: "Inscrições", lines: range(reg),
+      status: finished ? "done" : pick(regState === "closed" ? "done" : regState === "open" || regState === "paused" ? "current" : "upcoming"),
+    });
+  }
+  if (f.approval) {
+    const pending = dash?.pending ?? 0;
+    steps.push({
+      key: "review", label: "Análise",
+      lines: locked ? ["Concluída"] : pending > 0 ? [plural(pending, "pendente", "pendentes")] : ["Até a votação"],
+      status: finished || locked ? "done" : pick(regState === "closed" ? "current" : "upcoming"),
+    });
+  }
+  if (f.voting) {
+    steps.push({
+      key: "voting", label: "Votação", lines: range(vot),
+      status: finished ? "done" : pick(votState === "closed" ? "done" : votState === "open" || votState === "paused" ? "current" : "upcoming"),
+    });
+  }
+  if (f.results) {
+    steps.push({
+      key: "results", label: "Resultado",
+      lines: [rs === "none" ? "Apuração" : rs === "tie_pending" ? "Empate" : rs === "preliminary" ? "Preliminar" : "Confirmado"],
+      status: finished || rs === "confirmed" || rs === "announced" ? "done" : pick(votState === "closed" ? "current" : "upcoming"),
+    });
+  }
+  if (f.announcement) {
+    steps.push({
+      key: "announcement", label: "Divulgação",
+      lines: [rs === "announced" ? "Divulgado" : ann?.starts_at ? fmtShort(ann.starts_at) : "Após confirmar"],
+      status: finished || rs === "announced" ? "done" : pick(rs === "confirmed" ? "current" : "upcoming"),
+    });
+  }
+  return steps;
+}
+
+function CycleStepper({ steps }: { steps: CycleStep[] }) {
+  const n = steps.length;
+  if (n === 0) return null;
+  const lastActive = steps.reduce((acc, s, i) => (s.status !== "upcoming" ? i : acc), -1);
+  const fill = n > 1 && lastActive > 0 ? lastActive / (n - 1) : 0;
+  const inset = 50 / n; // o traço vai do centro do 1º ao centro do último passo
+  return (
+    <Card className="rounded-3xl border p-4 pb-5 hover:shadow-sm" data-tutorial="camp-panel-cycle">
+      <div className="relative">
+        <div className="absolute h-0.5 rounded bg-border" style={{ top: 13, left: `${inset}%`, right: `${inset}%` }} aria-hidden="true" />
+        <div className="absolute h-0.5 rounded bg-primary transition-all" style={{ top: 13, left: `${inset}%`, width: `${fill * (100 - 2 * inset)}%` }} aria-hidden="true" />
+        <ol className="relative grid" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }} aria-label="Ciclo da campanha">
+          {steps.map((s, i) => (
+            <li key={s.key} className="flex min-w-0 flex-col items-center gap-1.5 px-0.5 text-center" aria-current={s.status === "current" ? "step" : undefined}>
+              <span
+                className={cn(
+                  "relative z-10 flex h-7 w-7 items-center justify-center rounded-full border-2 text-[11px] font-bold",
+                  s.status === "done" && "border-primary bg-primary text-primary-foreground",
+                  s.status === "current" && "border-primary bg-background text-primary ring-4 ring-primary/15",
+                  s.status === "upcoming" && "border-border bg-background text-muted-foreground",
+                )}
+              >
+                {s.status === "done" ? <Check size={13} strokeWidth={3} /> : i + 1}
+              </span>
+              <span className={cn("max-w-full truncate text-[11px] font-semibold sm:text-xs", s.status === "upcoming" ? "text-muted-foreground" : "text-foreground")}>{s.label}</span>
+              <span className="space-y-0 text-[10px] leading-tight text-muted-foreground">
+                {s.lines.map((l) => <span key={l} className="block truncate">{l}</span>)}
+              </span>
+              <span className="sr-only">{s.status === "done" ? "concluída" : s.status === "current" ? "em andamento" : "ainda não começou"}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────── Próximo passo ───────────────────────────────────
+
+type NextAction = { label: string; onClick: () => void; primary?: boolean };
+type NextStep = { tone: "info" | "warn" | "ok"; title: string; text?: string; actions: NextAction[] };
+
+const NEXT_TONE = {
+  info: { box: "border-blue-200 bg-blue-50/70 dark:border-blue-800 dark:bg-blue-950/20", dot: "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" },
+  warn: { box: "border-yellow-200 bg-yellow-50/70 dark:border-yellow-800 dark:bg-yellow-950/20", dot: "bg-yellow-100 text-yellow-700 dark:bg-yellow-950/60 dark:text-yellow-300" },
+  ok: { box: "border-green-200 bg-green-50/70 dark:border-green-800 dark:bg-green-950/20", dot: "bg-green-100 text-green-700 dark:bg-green-950/60 dark:text-green-300" },
+} as const;
+
+function buildNext(x: {
+  c: AdminCampaign; display: DisplayState; stages: AdminStageRow[]; results: AdminResults | null;
+  dash: AdminDashboard | null; check: PublishCheck | null; perms: Record<string, boolean>;
+  goTab: (tab: string, section?: string) => void; openPublish: () => void; openResume: () => void; edit: () => void;
+}): NextStep {
+  const { c, display, stages, results, dash, check, perms, goTab, openPublish, openResume, edit } = x;
+  const f = c.features;
+  const reg = stageOf(stages, "registration");
+  const vot = stageOf(stages, "voting");
+  const regState = stageState(reg);
+  const votState = stageState(vot);
+  const rs = results?.status ?? "none";
+  const pending = dash?.pending ?? 0;
+  const canPublish = !!perms.campaigns_publish;
+  const goVoting: NextAction = { label: "Abrir Votação", onClick: () => goTab("voting"), primary: true };
+  const setDates: NextAction = { label: "Definir datas", onClick: () => goTab("settings", "schedule"), primary: true };
+  const analyze: NextAction[] = perms.campaigns_review ? [{ label: "Analisar receitas", onClick: () => goTab("submissions"), primary: true }] : [];
+
+  if (display === "closed" || display === "archived") {
+    return { tone: "ok", title: display === "closed" ? "Campanha encerrada" : "Campanha arquivada", text: "Nada pendente. Receitas, votos e histórico continuam salvos, e dá para duplicar a campanha para uma nova edição.", actions: [] };
+  }
+
+  if (display === "draft") {
+    const missing = check?.items.filter((i) => !i.ok) ?? [];
+    if (check && missing.length === 0) {
+      return {
+        tone: "ok", title: "Tudo pronto para publicar",
+        text: `Os itens obrigatórios estão em ordem. Ao publicar, ${plural(check.eligible_count, "colaborador elegível passa", "colaboradores elegíveis passam")} a ver a campanha.`,
+        actions: canPublish ? [{ label: "Publicar", onClick: openPublish, primary: true }] : [],
+      };
+    }
+    if (check) {
+      const dates = missing.some((i) => i.key === "registration_dates" || i.key === "voting_dates");
+      return {
+        tone: "warn", title: `${plural(missing.length, "item falta", "itens faltam")} para publicar`,
+        text: `${missing[0].message}${missing.length > 1 ? ` (e mais ${missing.length - 1})` : ""}. A lista completa está em Resumo.`,
+        actions: dates ? [setDates] : perms.campaigns_edit ? [{ label: "Editar informações", onClick: edit, primary: true }] : [],
+      };
+    }
+    return { tone: "info", title: "Rascunho em construção", text: "Complete as informações e as datas; depois a campanha pode ser publicada.", actions: canPublish ? [{ label: "Publicar", onClick: openPublish, primary: true }] : [] };
+  }
+
+  if (display === "unpublished") {
+    return {
+      tone: "warn", title: "Campanha não publicada",
+      text: "Está fora de exibição para os colaboradores. Nada foi apagado: receitas, votos e histórico continuam salvos.",
+      actions: canPublish ? [{ label: "Republicar", onClick: openResume, primary: true }] : [],
+    };
+  }
+  if (display === "scheduled") {
+    return { tone: "info", title: "Publicação agendada", text: `Os colaboradores passam a ver a campanha em ${fmtDateTime(c.visible_from)}.`, actions: [] };
+  }
+
+  // Publicada
+  if (f.voting) {
+    if (rs === "announced") return { tone: "ok", title: "Campanha concluída", text: "O resultado foi divulgado aos colaboradores.", actions: [] };
+    if (rs === "confirmed") {
+      return f.announcement
+        ? { tone: "warn", title: "Divulgue o resultado", text: "O vencedor está confirmado. Divulgue para os colaboradores verem.", actions: [goVoting] }
+        : { tone: "ok", title: "Campanha concluída", text: "O vencedor está confirmado.", actions: [] };
+    }
+    if (rs === "tie_pending") return { tone: "warn", title: "Há empate: decida o vencedor", text: "Duas ou mais receitas têm o mesmo número de votos. Registre a decisão, com justificativa, para continuar.", actions: [goVoting] };
+    if (rs === "preliminary") return { tone: "warn", title: "Confirme o vencedor", text: "A apuração está pronta. Confira o ranking e confirme o vencedor.", actions: [goVoting] };
+    if (votState === "closed") return { tone: "warn", title: "Apure a votação", text: "A votação terminou. Apure para gerar o resultado preliminar.", actions: [goVoting] };
+    if (votState === "open" || votState === "paused") {
+      const until = vot?.ends_at ? ` até ${fmtDateTime(vot.ends_at)}` : "";
+      return {
+        tone: "info", title: votState === "paused" ? "Votação pausada" : `Votação aberta${until}`,
+        text: dash ? `${dash.voting_pct}% dos elegíveis já votaram (${dash.voters} de ${dash.eligible}).` : undefined,
+        actions: [{ label: "Ver votação", onClick: () => goTab("voting"), primary: true }],
+      };
+    }
+  }
+
+  // Votação ainda não começou (ou a campanha não tem votação)
+  if (f.submission && regState === "unset") return { tone: "warn", title: "Defina as datas das inscrições", text: "Sem datas, os colaboradores não conseguem enviar receitas.", actions: [setDates] };
+  if (f.submission && regState === "upcoming") return { tone: "info", title: "Inscrições ainda não abriram", text: reg?.starts_at ? `Abrem em ${fmtDateTime(reg.starts_at)}.` : undefined, actions: [] };
+  if (pending > 0) {
+    return {
+      tone: "warn", title: `${plural(pending, "receita aguarda", "receitas aguardam")} análise`,
+      text: f.voting && vot?.starts_at ? `Aprove ou reprove antes de a votação começar, em ${fmtDateTime(vot.starts_at)}. As pendentes ficam de fora da votação.` : "Aprove ou reprove as receitas pendentes.",
+      actions: analyze,
+    };
+  }
+  if (f.submission && regState === "open") {
+    return {
+      tone: "info", title: "Inscrições abertas",
+      text: `${plural(dash?.submissions ?? 0, "receita enviada", "receitas enviadas")}${reg?.ends_at ? ` · encerram em ${fmtDateTime(reg.ends_at)}` : ""}.`,
+      actions: [],
+    };
+  }
+  if (f.voting && votState === "unset") return { tone: "warn", title: "Defina as datas da votação", text: "Sem datas, a votação não começa.", actions: [setDates] };
+  if (f.voting) return { tone: "info", title: "Aguardando o início da votação", text: vot?.starts_at ? `Começa em ${fmtDateTime(vot.starts_at)}.` : undefined, actions: [] };
+  return { tone: "ok", title: "Inscrições encerradas", text: "Todas as receitas já foram analisadas.", actions: [] };
+}
+
+function NextStepCard({ next, busy }: { next: NextStep; busy: boolean }) {
+  const tone = NEXT_TONE[next.tone];
+  return (
+    <Card className={cn("rounded-3xl border p-4 hover:shadow-sm", tone.box)} data-tutorial="camp-panel-next">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full", tone.dot)}><Compass size={18} /></span>
+        <div className="min-w-0 flex-1 basis-60">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Próximo passo</p>
+          <p className="text-sm font-bold text-foreground">{next.title}</p>
+          {next.text && <p className="mt-0.5 text-[13px] leading-relaxed text-muted-foreground">{next.text}</p>}
+        </div>
+        {next.actions.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {next.actions.map((a) => (
+              <Button key={a.label} size="sm" variant={a.primary ? "primary" : "outline"} className="rounded-xl" disabled={busy} onClick={a.onClick}>{a.label}</Button>
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// ───────────────────────────────────── Painel ─────────────────────────────────────
 
 export function AdminCampaignPanel() {
   const { id } = useParams<{ id: string }>();
@@ -50,6 +314,7 @@ export function AdminCampaignPanel() {
   const { user } = useAuth();
   const { perms, loading: permsLoading, isAdmin } = useCampaignPerms();
   const detail = useLoader<AdminCampaignDetail>(() => campaignsApi.get(`/admin/campaigns/${id}`), [id]);
+  const dashboard = useLoader<AdminDashboard>(() => campaignsApi.get(`/admin/campaigns/${id}/dashboard`), [id]);
   const { busy, run } = useBusy();
 
   const [publishOpen, setPublishOpen] = useState(false);
@@ -59,22 +324,27 @@ export function AdminCampaignPanel() {
 
   const c = detail.data?.campaign;
   const tour = useTour({
-    storageKey: tourKey("admin", user?.id, "panel"),
+    storageKey: tourKey("admin", user?.id, "panel2"),
     enabled: !permsLoading && isAdmin && !!c,
   });
+
+  // Checklist de publicação: só para rascunhos e para quem pode editar (mesma fonte do diálogo Publicar).
+  const stagesKey = JSON.stringify(detail.data?.stages ?? []);
+  const checkEnabled = !!c && (c.status === "draft" || c.status === "in_review") && !!perms.campaigns_edit && isAdmin;
+  const check = useLoader<PublishCheck | null>(
+    () => (checkEnabled ? campaignsApi.get<PublishCheck>(`/admin/campaigns/${id}/publish-check`) : Promise.resolve(null)),
+    [id, checkEnabled, stagesKey, c?.version],
+  );
 
   const tabs = useMemo(() => {
     if (!c) return [] as { value: string; label: string; icon: React.ReactNode }[];
     const f = c.features;
     const list: { value: string; label: string; icon: React.ReactNode; show: boolean }[] = [
-      { value: "overview", label: "Visão geral", icon: <BarChart3 size={14} />, show: true },
+      { value: "summary", label: "Resumo", icon: <BarChart3 size={14} />, show: true },
       { value: "submissions", label: "Receitas", icon: <ChefHat size={14} />, show: !!perms.campaigns_review && f.submission },
       { value: "participants", label: "Participantes", icon: <Users size={14} />, show: !!perms.campaigns_participants },
       { value: "voting", label: "Votação", icon: <Vote size={14} />, show: f.voting && (!!perms.campaigns_schedule || !!perms.campaigns_votes_view || !!perms.campaigns_results) },
-      { value: "results", label: "Resultado", icon: <Trophy size={14} />, show: f.voting && !!perms.campaigns_results },
-      { value: "schedule", label: "Calendário", icon: <CalendarClock size={14} />, show: !!perms.campaigns_schedule },
-      { value: "history", label: "Histórico", icon: <HistoryIcon size={14} />, show: true },
-      { value: "reports", label: "Relatórios", icon: <FileDown size={14} />, show: !!perms.campaigns_export },
+      { value: "settings", label: "Configurações", icon: <Settings size={14} />, show: true },
     ];
     return list.filter((t) => t.show);
   }, [c, perms]);
@@ -85,31 +355,38 @@ export function AdminCampaignPanel() {
   if (!detail.data || !c) return null;
 
   const { stages, results } = detail.data;
-  const requested = params.get("tab") ?? "overview";
-  const tab = tabs.some((t) => t.value === requested) ? requested : "overview";
-  const goTab = (v: string) => setParams({ tab: v }, { replace: true });
+  const rawTab = params.get("tab") ?? "summary";
+  const legacy = LEGACY_TABS[rawTab];
+  const requested = legacy ? legacy.tab : rawTab;
+  const tab = tabs.some((t) => t.value === requested) ? requested : "summary";
+  const section = params.get("section") ?? legacy?.section ?? null;
+  const goTab = (v: string, sec?: string) => {
+    const next: Record<string, string> = { tab: v };
+    if (sec) next.section = sec;
+    setParams(next, { replace: true });
+  };
 
-  const status = CAMPAIGN_STATUS[c.status];
-  const suspended = !!c.suspended_at;
-  const isDraft = c.status === "draft";
-  const inReview = c.status === "in_review";
-  const published = c.status === "authorized";
-  const closed = c.status === "closed" || c.status === "archived";
-  const regState = stageState(stages.find((s) => s.stage_key === "registration"));
-  const votState = stageState(stages.find((s) => s.stage_key === "voting"));
+  const display = campaignDisplayState(c);
+  const state = DISPLAY_STATE[display];
+  const isDraft = display === "draft";
+  const finished = display === "closed" || display === "archived";
+  const regState = stageState(stageOf(stages, "registration"));
+  const votState = stageState(stageOf(stages, "voting"));
+  const phase = phaseBadge(c, display, results, regState, votState);
   const base = `/admin/campaigns/${c.id}`;
-  const scheduled = published && c.visible_from && new Date(c.visible_from).getTime() > Date.now();
+  const refreshAll = () => { detail.reload(); dashboard.reload(); };
+  const live = regState === "open" || regState === "paused" || votState === "open" || votState === "paused";
 
   const doAction = async (key: string, fn: () => Promise<unknown>, ok: string, after?: () => void) => {
     const r = await run(key, fn, ok);
-    if (r.ok) { detail.reload(); after?.(); }
+    if (r.ok) { refreshAll(); after?.(); }
     return r.ok;
   };
 
   const onConfirm = async () => {
     const kind = confirm;
     setConfirm(null);
-    if (kind === "resume") await doAction("resume", () => campaignsApi.post(`${base}/resume`), "Campanha retomada: voltou a aparecer para os colaboradores.");
+    if (kind === "resume") await doAction("resume", () => campaignsApi.post(`${base}/resume`), "Campanha republicada: voltou a aparecer para os colaboradores.");
     if (kind === "archive") await doAction("archive", () => campaignsApi.post(`${base}/archive`), "Campanha arquivada.");
     if (kind === "draft") await doAction("draft", () => campaignsApi.post(`${base}/return-to-draft`), "A campanha voltou a rascunho e está oculta dos colaboradores.");
     if (kind === "review") await doAction("review", () => campaignsApi.post(`${base}/submit-for-review`), "Enviada para revisão.");
@@ -123,26 +400,36 @@ export function AdminCampaignPanel() {
     const kind = reasoned;
     if (!kind) return;
     const ok = await doAction(kind, () => campaignsApi.post(`${base}/${kind}`, { reason: reason || null }),
-      kind === "suspend" ? "Campanha suspensa: oculta dos colaboradores." : "Campanha encerrada.");
+      kind === "suspend" ? "Campanha despublicada: saiu de exibição e continua salva." : "Campanha encerrada.");
     if (ok) setReasoned(null);
   };
 
-  const tabProps: TabProps = { campaignId: c.id, campaign: c, stages, results, perms, onChanged: detail.reload, goTab };
+  const onRisk = (kind: RiskKind) => {
+    if (kind === "close") setReasoned("close");
+    else setConfirm(kind);
+  };
 
-  const menuItems: { key: string; label: string; icon: React.ReactNode; show: boolean; danger?: boolean; onSelect: () => void }[] = [
-    { key: "review", label: "Enviar para revisão", icon: <Send size={14} />, show: isDraft && !!perms.campaigns_edit, onSelect: () => setConfirm("review") },
-    { key: "suspend", label: "Suspender", icon: <PauseCircle size={14} />, show: published && !suspended && !!perms.campaigns_publish, onSelect: () => setReasoned("suspend") },
-    { key: "resume", label: "Retomar", icon: <PlayCircle size={14} />, show: published && suspended && !!perms.campaigns_publish, onSelect: () => setConfirm("resume") },
-    { key: "duplicate", label: "Duplicar", icon: <Copy size={14} />, show: !!perms.campaigns_duplicate, onSelect: () => setDupOpen(true) },
-    { key: "draft", label: "Voltar a rascunho", icon: <Undo2 size={14} />, show: (inReview || published) && !!perms.campaigns_edit, onSelect: () => setConfirm("draft") },
-    { key: "archive", label: "Arquivar", icon: <Archive size={14} />, show: (isDraft || c.status === "closed") && !!perms.campaigns_edit, onSelect: () => setConfirm("archive") },
-    { key: "close", label: "Encerrar campanha", icon: <XCircle size={14} />, show: published && !!perms.campaigns_publish, danger: true, onSelect: () => setReasoned("close") },
-    { key: "delete", label: "Excluir rascunho", icon: <Trash2 size={14} />, show: isDraft && !!perms.campaigns_edit, danger: true, onSelect: () => setConfirm("delete") },
-  ];
-  const visibleMenu = menuItems.filter((m) => m.show);
+  const tabProps: TabProps = { campaignId: c.id, campaign: c, stages, results, perms, onChanged: refreshAll, goTab };
+
+  // Botão principal: muda conforme a situação da campanha.
+  type Primary = { label: string; icon: React.ReactNode; onClick: () => void; outline?: boolean };
+  let primary: Primary | null = null;
+  if (display === "draft") {
+    if (perms.campaigns_publish) primary = { label: "Publicar", icon: <Rocket size={14} />, onClick: () => setPublishOpen(true) };
+    else if (perms.campaigns_edit && c.status === "draft") primary = { label: "Enviar para revisão", icon: <Send size={14} />, onClick: () => setConfirm("review") };
+  } else if (display === "published" || display === "scheduled") {
+    if (perms.campaigns_publish) primary = { label: "Despublicar", icon: <EyeOff size={14} />, onClick: () => setReasoned("suspend"), outline: true };
+  } else if (display === "unpublished") {
+    if (perms.campaigns_publish) primary = { label: "Republicar", icon: <Play size={14} />, onClick: () => setConfirm("resume") };
+  }
+
+  const next = buildNext({
+    c, display, stages, results, dash: dashboard.data, check: check.data, perms, goTab,
+    openPublish: () => setPublishOpen(true), openResume: () => setConfirm("resume"), edit: () => navigate(`${base}/edit`),
+  });
 
   const CONFIRM_COPY: Record<Exclude<Confirm, null>, { title: string; description: string; label: string; destructive?: boolean }> = {
-    resume: { title: "Retomar a campanha?", description: "Ela volta a aparecer para os colaboradores elegíveis.", label: "Retomar" },
+    resume: { title: "Republicar a campanha?", description: "Ela volta a aparecer para os colaboradores elegíveis, com tudo o que já estava salvo.", label: "Republicar" },
     archive: { title: "Arquivar a campanha?", description: "Ela sai da lista principal. Os dados e o histórico são preservados.", label: "Arquivar" },
     draft: { title: "Voltar a rascunho?", description: "A campanha deixa de ser visível para os colaboradores. Só é possível se ainda não houver receitas enviadas.", label: "Voltar a rascunho" },
     review: { title: "Enviar para revisão?", description: "Quem tem permissão de publicar poderá revisar e publicar a campanha.", label: "Enviar para revisão" },
@@ -150,7 +437,7 @@ export function AdminCampaignPanel() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Cabeçalho */}
       <div className="space-y-4">
         <button type="button" onClick={() => navigate("/admin/campaigns")} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
@@ -158,83 +445,70 @@ export function AdminCampaignPanel() {
         </button>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 space-y-2">
-            <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <Megaphone size={24} className="text-primary shrink-0" />
+            <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
+              <Megaphone size={24} className="shrink-0 text-primary" />
               <span className="min-w-0 break-words">{c.name}</span>
             </h1>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge className={cn("border text-[10px]", status.className)}>{status.label}</Badge>
-              {suspended && (
-                <Badge className="border text-[10px] gap-1 bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300 border-orange-200 dark:border-orange-800">
-                  <PauseCircle size={10} /> Suspensa
-                </Badge>
-              )}
-              {inReview && !perms.campaigns_publish && (
-                <Badge className="border text-[10px] bg-yellow-100 text-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800">Aguardando publicação</Badge>
-              )}
-              <span className="text-[11px] text-muted-foreground font-mono">/campanhas/{c.slug}</span>
+            <div data-tutorial="camp-panel-state" className="flex flex-wrap items-center gap-2">
+              <Badge className={cn("border px-3 py-1 text-xs", state.className)} title={state.hint}>{state.label}</Badge>
+              {phase && <Badge className={cn("border text-[10px]", phase.className)}>{phase.label}</Badge>}
+              {c.status === "in_review" && !perms.campaigns_publish && <Badge className={cn("border text-[10px]", YELLOW)}>Aguardando publicação</Badge>}
+              <span className="font-mono text-[11px] text-muted-foreground">/campanhas/{c.slug}</span>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {c.features.submission && <>Inscrições {STATE_WORD[regState]}</>}
-              {c.features.submission && c.features.voting && " · "}
-              {c.features.voting && <>Votação {VOTE_WORD[votState]}</>}
-            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <TourButton onClick={tour.start} />
-            {perms.campaigns_edit && !closed && (
-              <Button variant="outline" className="gap-2 rounded-xl" onClick={() => navigate(`${base}/edit`)}>
-                <Pencil size={14} /> Editar
-              </Button>
-            )}
-            {(isDraft || inReview) && perms.campaigns_publish && (
-              <Button data-tutorial="camp-panel-publish" className="gap-2 rounded-xl" onClick={() => setPublishOpen(true)} disabled={busy !== null}>
-                <Rocket size={14} /> Publicar
-              </Button>
-            )}
-            {isDraft && !perms.campaigns_publish && perms.campaigns_edit && (
-              <Button data-tutorial="camp-panel-publish" className="gap-2 rounded-xl" onClick={() => setConfirm("review")} disabled={busy !== null}>
-                <Send size={14} /> Enviar para revisão
-              </Button>
-            )}
-            {visibleMenu.length > 0 && (
+            {perms.campaigns_duplicate && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="icon" className="rounded-xl" aria-label="Mais ações" disabled={busy !== null}>
                     {busy !== null ? <Loader2 size={16} className="animate-spin" /> : <MoreHorizontal size={16} />}
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  {visibleMenu.map((m, i) => (
-                    <Fragment key={m.key}>
-                      {m.danger && i > 0 && !visibleMenu[i - 1].danger && <DropdownMenuSeparator />}
-                      <DropdownMenuItem onSelect={m.onSelect} className={cn("gap-2 cursor-pointer", m.danger && "text-destructive focus:text-destructive")}>
-                        {m.icon} {m.label}
-                      </DropdownMenuItem>
-                    </Fragment>
-                  ))}
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuItem onSelect={() => setDupOpen(true)} className="cursor-pointer gap-2"><Copy size={14} /> Duplicar campanha</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+            )}
+            {perms.campaigns_edit && !finished && (
+              <Button data-tutorial="camp-panel-edit" variant="outline" className="gap-2 rounded-xl" onClick={() => navigate(`${base}/edit`)} disabled={busy !== null}>
+                <Pencil size={14} /> Editar
+              </Button>
+            )}
+            {primary && (
+              <Button
+                data-tutorial="camp-panel-primary"
+                variant={primary.outline ? "outline" : "primary"}
+                className="gap-2 rounded-xl"
+                onClick={primary.onClick}
+                disabled={busy !== null}
+              >
+                {primary.icon} {primary.label}
+              </Button>
             )}
           </div>
         </div>
 
-        {/* Quem enxerga o quê */}
-        {isDraft || inReview ? (
-          <Notice tone="info" title="Esta campanha ainda não foi publicada">
-            Somente a gestão a enxerga. Os colaboradores só passam a ver a campanha — e o menu Campanhas — depois que alguém com permissão clicar em Publicar.
-          </Notice>
-        ) : suspended ? (
-          <Notice tone="warn" title="Campanha suspensa">Está oculta dos colaboradores. Os dados foram preservados; use "Retomar" para voltar a exibi-la.</Notice>
-        ) : scheduled ? (
-          <Notice tone="info" title="Publicação agendada">Os colaboradores passam a ver esta campanha em {fmtDateTime(c.visible_from)}.</Notice>
-        ) : null}
+        {/* Uma frase por estado: quem enxerga o quê */}
+        {isDraft && (
+          <Notice tone="info">Rascunho: só a gestão enxerga. Os colaboradores só veem a campanha — e o menu Campanhas — depois que alguém clicar em Publicar.</Notice>
+        )}
+        {display === "unpublished" && (
+          <Notice tone="warn">Não publicada: está oculta dos colaboradores. Receitas, votos e histórico continuam salvos; use Republicar para voltar a exibi-la.</Notice>
+        )}
+        {display === "scheduled" && (
+          <Notice tone="info">Publicação agendada: os colaboradores passam a ver esta campanha em {fmtDateTime(c.visible_from)}.</Notice>
+        )}
       </div>
 
+      {/* Onde estamos e o que fazer agora */}
+      <CycleStepper steps={buildCycle(c, display, stages, results, dashboard.data)} />
+      <NextStepCard next={next} busy={busy !== null} />
+
       {/* Abas */}
-      <Tabs value={tab} onValueChange={goTab} className="gap-4">
-        <div className="overflow-x-auto -mx-1 px-1 pb-1">
+      <Tabs value={tab} onValueChange={(v) => goTab(v)} className="gap-4">
+        <div className="-mx-1 overflow-x-auto px-1 pb-1">
           <TabsList data-tutorial="camp-panel-tabs" className="h-10 w-max min-w-full justify-start">
             {tabs.map((t) => (
               <TabsTrigger key={t.value} value={t.value} data-tutorial={`camp-tab-${t.value}`} className="flex-none px-3.5">
@@ -244,14 +518,23 @@ export function AdminCampaignPanel() {
           </TabsList>
         </div>
 
-        <TabsContent value="overview"><OverviewTab {...tabProps} /></TabsContent>
+        <TabsContent value="summary">
+          <SummaryTab
+            {...tabProps}
+            dashboard={dashboard.data}
+            dashboardLoading={dashboard.loading}
+            dashboardError={dashboard.error}
+            onReloadDashboard={dashboard.reload}
+            display={display}
+            publishCheck={check.data}
+          />
+        </TabsContent>
         {tabs.some((t) => t.value === "submissions") && <TabsContent value="submissions"><SubmissionsTab {...tabProps} /></TabsContent>}
         {tabs.some((t) => t.value === "participants") && <TabsContent value="participants"><ParticipantsTab {...tabProps} /></TabsContent>}
         {tabs.some((t) => t.value === "voting") && <TabsContent value="voting"><VotingTab {...tabProps} /></TabsContent>}
-        {tabs.some((t) => t.value === "results") && <TabsContent value="results"><ResultsTab {...tabProps} /></TabsContent>}
-        {tabs.some((t) => t.value === "schedule") && <TabsContent value="schedule"><ScheduleTab {...tabProps} /></TabsContent>}
-        <TabsContent value="history"><HistoryTab {...tabProps} /></TabsContent>
-        {tabs.some((t) => t.value === "reports") && <TabsContent value="reports"><ReportsTab {...tabProps} /></TabsContent>}
+        <TabsContent value="settings">
+          <SettingsTab {...tabProps} section={section} onAction={onRisk} display={display} dashboard={dashboard.data} />
+        </TabsContent>
       </Tabs>
 
       {publishOpen && (
@@ -261,7 +544,7 @@ export function AdminCampaignPanel() {
           open={publishOpen}
           onOpenChange={setPublishOpen}
           onPublished={(r) => {
-            detail.reload();
+            refreshAll();
             if (r.module_enabled_now) toast.info("O módulo de campanhas foi ligado ao publicar.");
           }}
         />
@@ -287,12 +570,12 @@ export function AdminCampaignPanel() {
       <ReasonDialog
         open={reasoned !== null}
         onOpenChange={(o) => !o && setReasoned(null)}
-        title={reasoned === "close" ? "Encerrar a campanha?" : "Suspender a campanha?"}
+        title={reasoned === "close" ? "Encerrar a campanha?" : "Despublicar a campanha?"}
         description={reasoned === "close"
           ? "A campanha deixa de receber receitas e votos para todos e não pode ser reaberta (você pode duplicá-la depois). Dados e histórico são preservados."
-          : "A campanha some para os colaboradores até você retomá-la. Nada é apagado."}
+          : `A campanha some para os colaboradores até você republicá-la. Nada é apagado: receitas, votos e histórico continuam salvos.${live ? " Enquanto estiver não publicada, ninguém consegue enviar receitas nem votar." : ""}`}
         placeholder="Motivo (opcional)"
-        confirmLabel={reasoned === "close" ? "Encerrar campanha" : "Suspender"}
+        confirmLabel={reasoned === "close" ? "Encerrar campanha" : "Despublicar"}
         destructive={reasoned === "close"}
         pending={busy === "suspend" || busy === "close"}
         onConfirm={onReason}

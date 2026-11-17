@@ -9,6 +9,6 @@ export type TabProps = {
   perms: Record<string, boolean>;
   /** Recarrega os dados do painel (cabeçalho, etapas, resultado) depois de uma ação. */
   onChanged: () => void;
-  /** Troca de aba por código (ex.: "Ir para Receitas"). */
-  goTab?: (tab: string) => void;
+  /** Troca de aba por código (ex.: "Ir para Receitas"). `section` abre uma seção da aba (ex.: settings → schedule). */
+  goTab?: (tab: string, section?: string) => void;
 };

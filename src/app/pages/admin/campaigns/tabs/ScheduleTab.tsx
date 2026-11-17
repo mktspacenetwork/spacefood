@@ -1,26 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarPlus, Lock, Pause, Play, Save } from "lucide-react";
+import { CalendarPlus, Lock, Pause, Play, Save, Vote } from "lucide-react";
 import { Badge } from "../../../../components/ui/Badge";
 import { Button } from "../../../../components/ui/Button";
 import { Card, CardContent } from "../../../../components/ui/Card";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "../../../../components/ui/dialog";
 import { Input } from "../../../../components/ui/input";
 import { Label } from "../../../../components/ui/label";
+import { Textarea } from "../../../../components/ui/textarea";
 import { cn } from "../../../../lib/utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
-import { STAGE_LABEL, fmtDateTime, fromInputValue, toInputValue } from "../../../../lib/campaigns/format";
+import { PHASE_STATE, STAGE_LABEL, fmtDateTime, fromInputValue, toInputValue } from "../../../../lib/campaigns/format";
 import type { StageKey } from "../../../../lib/campaigns/types";
 import { Notice, ReasonDialog, stageState, useBusy } from "../shared";
-import { ExtendDialog } from "./VotingTab";
 import type { TabProps } from "./types";
 
 const KEYS: StageKey[] = ["registration", "voting", "results", "announcement"];
 type Edit = { starts: string; ends: string };
 
-const STATE_LABEL: Record<string, string> = {
-  unset: "Sem datas", upcoming: "Ainda não começou", open: "Aberta", paused: "Pausada", closed: "Encerrada",
-};
-
-export function ScheduleTab({ campaignId, campaign, stages, perms, onChanged }: TabProps) {
+/**
+ * Calendário da campanha (seção de Configurações): edita as datas das quatro etapas.
+ * Pausar/prorrogar ficam só nas INSCRIÇÕES; para a votação isso fica na aba Votação,
+ * para não haver o mesmo controle em dois lugares.
+ */
+export function ScheduleTab({ campaignId, campaign, stages, perms, onChanged, goTab }: TabProps) {
   const { busy, run } = useBusy();
   const locked = !!campaign.edit_locked_at;
   const closedCampaign = campaign.status === "closed" || campaign.status === "archived";
@@ -39,8 +43,8 @@ export function ScheduleTab({ campaignId, campaign, stages, perms, onChanged }: 
   useEffect(() => setEdits(original), [original]);
 
   const [saveTarget, setSaveTarget] = useState<StageKey | null>(null);
-  const [pauseTarget, setPauseTarget] = useState<StageKey | null>(null);
-  const [extendTarget, setExtendTarget] = useState<StageKey | null>(null);
+  const [pauseOpen, setPauseOpen] = useState(false);
+  const [extendOpen, setExtendOpen] = useState(false);
 
   const stageOf = (k: StageKey) => stages.find((s) => s.stage_key === k);
   const dirty = (k: StageKey) => edits[k].starts !== original[k].starts || edits[k].ends !== original[k].ends;
@@ -71,12 +75,11 @@ export function ScheduleTab({ campaignId, campaign, stages, perms, onChanged }: 
       "Datas salvas.");
     if (r.ok) { setSaveTarget(null); onChanged(); }
   };
-  const pauseStage = async (reason: string) => {
-    const k = pauseTarget;
-    if (!k) return;
-    const pausing = !stageOf(k)?.paused;
-    const r = await run("pause", () => campaignsApi.post(`${base}/stages/${k}/pause`, { pause: pausing, reason: reason || null }), pausing ? "Etapa pausada." : "Etapa reaberta.");
-    if (r.ok) { setPauseTarget(null); onChanged(); }
+  const registration = stageOf("registration");
+  const pauseRegistration = async (reason: string) => {
+    const pausing = !registration?.paused;
+    const r = await run("pause", () => campaignsApi.post(`${base}/stages/registration/pause`, { pause: pausing, reason: reason || null }), pausing ? "Inscrições pausadas." : "Inscrições reabertas.");
+    if (r.ok) { setPauseOpen(false); onChanged(); }
   };
 
   if (!perms.campaigns_schedule) {
@@ -85,7 +88,7 @@ export function ScheduleTab({ campaignId, campaign, stages, perms, onChanged }: 
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">Datas e horários no fuso de Brasília.</p>
+      <p className="text-xs text-muted-foreground">Datas e horários no fuso de Brasília.</p>
 
       {locked && (
         <Notice tone="warn" title="A votação já começou">
@@ -99,18 +102,17 @@ export function ScheduleTab({ campaignId, campaign, stages, perms, onChanged }: 
       {visibleKeys.map((k) => {
         const s = stageOf(k);
         const st = stageState(s);
+        const phase = PHASE_STATE[st];
         const lockedStarts = locked && (k === "registration" || k === "voting");
         const lockedEnds = locked && k === "registration";
         const err = problem(k);
-        const canPause = k === "registration" || k === "voting";
+        const isReg = k === "registration";
         return (
           <Card key={k} className="rounded-3xl border">
             <CardContent className="p-5 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="font-semibold">{STAGE_LABEL[k]}</p>
-                <Badge className={cn("border text-[10px]", s?.paused ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800" : "bg-muted text-muted-foreground border-border")}>
-                  {STATE_LABEL[st]}
-                </Badge>
+                <Badge className={cn("border text-[10px]", phase.className)}>{s?.paused ? "Pausada" : phase.label}</Badge>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
@@ -130,17 +132,28 @@ export function ScheduleTab({ campaignId, campaign, stages, perms, onChanged }: 
                 {dirty(k) && (
                   <Button size="sm" variant="ghost" className="rounded-xl" onClick={() => setEdits((v) => ({ ...v, [k]: original[k] }))}>Descartar</Button>
                 )}
-                {s?.ends_at && !closedCampaign && (
-                  <Button size="sm" variant="outline" className="gap-2 rounded-xl" disabled={busy !== null || (k === "registration" && locked)} onClick={() => setExtendTarget(k)}>
+                {isReg && s?.ends_at && !closedCampaign && (
+                  <Button size="sm" variant="outline" className="gap-2 rounded-xl" disabled={busy !== null || locked} onClick={() => setExtendOpen(true)}>
                     <CalendarPlus size={13} /> Prorrogar
                   </Button>
                 )}
-                {canPause && s?.starts_at && !closedCampaign && (
-                  <Button size="sm" variant="outline" className="gap-2 rounded-xl" disabled={busy !== null} onClick={() => setPauseTarget(k)}>
+                {isReg && s?.starts_at && !closedCampaign && (
+                  <Button size="sm" variant="outline" className="gap-2 rounded-xl" disabled={busy !== null} onClick={() => setPauseOpen(true)}>
                     {s.paused ? <><Play size={13} /> Reabrir</> : <><Pause size={13} /> Pausar</>}
                   </Button>
                 )}
               </div>
+              {k === "voting" && !closedCampaign && (
+                <p className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
+                  <Vote size={13} className="shrink-0" />
+                  Para pausar, prorrogar ou encerrar a votação, use a aba Votação.
+                  {goTab && (
+                    <button type="button" onClick={() => goTab("voting")} className="font-semibold text-primary hover:underline">
+                      Ir para Votação
+                    </button>
+                  )}
+                </p>
+              )}
               {s?.ends_at && <p className="text-[11px] text-muted-foreground">Prazo atual: {fmtDateTime(s.ends_at)}</p>}
             </CardContent>
           </Card>
@@ -159,28 +172,72 @@ export function ScheduleTab({ campaignId, campaign, stages, perms, onChanged }: 
         onConfirm={saveStage}
       />
       <ReasonDialog
-        open={!!pauseTarget}
-        onOpenChange={(o) => !o && setPauseTarget(null)}
-        title={pauseTarget && stageOf(pauseTarget)?.paused ? "Reabrir etapa?" : "Pausar etapa?"}
-        description={pauseTarget === "voting"
-          ? "Pausar a votação impede novos votos, mas não apaga nenhum voto nem libera a edição das receitas."
-          : "Pausar as inscrições impede novos envios e edições enquanto estiver pausada."}
+        open={pauseOpen}
+        onOpenChange={setPauseOpen}
+        title={registration?.paused ? "Reabrir as inscrições?" : "Pausar as inscrições?"}
+        description="Pausar as inscrições impede novos envios e edições enquanto estiver pausada. Nenhuma receita é apagada."
         label="Motivo"
         placeholder="Motivo (opcional)"
-        confirmLabel={pauseTarget && stageOf(pauseTarget)?.paused ? "Reabrir" : "Pausar"}
+        confirmLabel={registration?.paused ? "Reabrir" : "Pausar"}
         pending={busy === "pause"}
-        onConfirm={pauseStage}
+        onConfirm={pauseRegistration}
       />
-      {extendTarget && stageOf(extendTarget)?.ends_at && (
-        <ExtendDialog
-          stage={extendTarget}
-          title={`Prorrogar ${STAGE_LABEL[extendTarget].toLowerCase()}`}
-          currentEnd={stageOf(extendTarget)!.ends_at as string}
+      {extendOpen && registration?.ends_at && (
+        <ExtendRegistrationDialog
+          currentEnd={registration.ends_at}
           base={base}
-          onClose={() => setExtendTarget(null)}
-          onDone={() => { setExtendTarget(null); onChanged(); }}
+          onClose={() => setExtendOpen(false)}
+          onDone={() => { setExtendOpen(false); onChanged(); }}
         />
       )}
     </div>
+  );
+}
+
+/** Prorroga o prazo final das inscrições (o novo prazo precisa ser depois do atual). */
+function ExtendRegistrationDialog({
+  currentEnd, base, onClose, onDone,
+}: {
+  currentEnd: string;
+  base: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [value, setValue] = useState(toInputValue(currentEnd));
+  const [reason, setReason] = useState("");
+  const { busy, run } = useBusy();
+  const iso = fromInputValue(value);
+  const valid = !!iso && new Date(iso) > new Date(currentEnd);
+
+  const submit = async () => {
+    if (!valid) return;
+    const r = await run("extend", () => campaignsApi.post(`${base}/stages/registration/extend`, { ends_at: iso, reason: reason.trim() || null }), "Prazo prorrogado.");
+    if (r.ok) onDone();
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Prorrogar as inscrições</DialogTitle>
+          <DialogDescription>Prazo atual: {fmtDateTime(currentEnd)} (Brasília). O novo prazo precisa ser depois do atual.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Novo prazo final</Label>
+            <Input type="datetime-local" value={value} onChange={(e) => setValue(e.target.value)} className="rounded-xl h-10" disabled={!!busy} />
+            {!valid && <p className="text-[11px] text-destructive">Escolha uma data e hora depois do prazo atual.</p>}
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Motivo (opcional)</Label>
+            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={1000} className="rounded-xl" disabled={!!busy} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" className="rounded-xl" onClick={onClose} disabled={!!busy}>Cancelar</Button>
+          <Button className="rounded-xl" onClick={submit} disabled={!valid || !!busy}>Prorrogar</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

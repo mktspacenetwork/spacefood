@@ -49,6 +49,48 @@ export const CAMPAIGN_STATUS: Record<CampaignStatus, { label: string; className:
   archived: { label: "Arquivada", className: GRAY },
 };
 
+/**
+ * Estado que a gestão enxerga, em linguagem simples. Junta o `status` do banco com a suspensão e o agendamento:
+ *  Rascunho · Agendada · Publicada · Não publicada · Encerrada · Arquivada.
+ * "Não publicada" é a campanha que já foi publicada e foi retirada de exibição (suspensa no banco): tudo fica salvo
+ * e ela pode ser republicada. "Em revisão" é tratado como Rascunho (não há revisor separado).
+ */
+export type DisplayState = "draft" | "scheduled" | "published" | "unpublished" | "closed" | "archived";
+
+export const DISPLAY_STATE: Record<DisplayState, { label: string; hint: string; className: string }> = {
+  draft: { label: "Rascunho", hint: "Em construção. Só a gestão vê.", className: GRAY },
+  scheduled: { label: "Agendada", hint: "Publicada, vai aparecer para os colaboradores na data marcada.", className: BLUE },
+  published: { label: "Publicada", hint: "Visível para os colaboradores elegíveis.", className: GREEN },
+  unpublished: { label: "Não publicada", hint: "Retirada de exibição. Tudo continua salvo e pode ser republicada.", className: ORANGE },
+  closed: { label: "Encerrada", hint: "Finalizada. Não recebe mais receitas nem votos.", className: PURPLE },
+  archived: { label: "Arquivada", hint: "Fora da lista principal. Dados e histórico preservados.", className: GRAY },
+};
+
+export function campaignDisplayState(c: {
+  status: CampaignStatus;
+  suspended_at?: string | null;
+  visible_from?: string | null;
+}): DisplayState {
+  if (c.status === "closed") return "closed";
+  if (c.status === "archived") return "archived";
+  if (c.status === "authorized") {
+    if (c.suspended_at) return "unpublished";
+    if (c.visible_from && new Date(c.visible_from).getTime() > Date.now()) return "scheduled";
+    return "published";
+  }
+  return "draft"; // draft e in_review
+}
+
+/** Situação de uma etapa (inscrições, votação...) calculada a partir das datas. */
+export type PhaseState = "unset" | "upcoming" | "open" | "paused" | "closed";
+export const PHASE_STATE: Record<PhaseState, { label: string; className: string }> = {
+  unset: { label: "Sem datas", className: GRAY },
+  upcoming: { label: "Em breve", className: BLUE },
+  open: { label: "Aberta", className: GREEN },
+  paused: { label: "Pausada", className: ORANGE },
+  closed: { label: "Encerrada", className: PURPLE },
+};
+
 export const SUBMISSION_STATUS: Record<SubmissionStatus, { label: string; className: string }> = {
   pending_media: { label: "Enviando mídia", className: GRAY },
   submitted: { label: "Enviada", className: BLUE },
