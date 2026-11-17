@@ -5,7 +5,8 @@ import {
   Bell,
   Settings,
   Lock,
-  Star
+  Star,
+  Megaphone
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { useAuth, useCart, useNotifications } from "../../context/Store";
@@ -16,6 +17,7 @@ import type { LottieRefCurrentProps } from "lottie-react";
 import foodAnimation from "../../assets/food-animation.json";
 import { PWAInstallBanner } from "../PWAInstallBanner";
 import { api } from "../../lib/api";
+import { fetchCampaignAvailability } from "../../lib/campaigns/api";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -29,6 +31,33 @@ export function AppLayout({ children }: AppLayoutProps) {
   const navigate = useNavigate();
   const lottieRef = useRef<LottieRefCurrentProps>(null);
   const [ordersAllowed, setOrdersAllowed] = useState<boolean | null>(null);
+  // "Campanhas" só aparece quando o módulo está ligado E há campanha publicada visível para esta
+  // pessoa (decidido pelo servidor). Falha de rede = oculto; nunca atrapalha o resto do app.
+  const [hasCampaigns, setHasCampaigns] = useState(false);
+  const campaignsCheckedAt = useRef(0);
+
+  useEffect(() => {
+    if (!user?.email) {
+      setHasCampaigns(false);
+      return;
+    }
+    let cancelled = false;
+    const check = () => {
+      campaignsCheckedAt.current = Date.now();
+      fetchCampaignAvailability().then((r) => {
+        if (!cancelled) setHasCampaigns(r.enabled && r.hasVisible);
+      });
+    };
+    check();
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && Date.now() - campaignsCheckedAt.current > 60_000) check();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [user?.email]);
 
   // Check if user's unit allows orders
   useEffect(() => {
@@ -67,14 +96,21 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   const canOrder = ordersAllowed !== false; // null (loading) = allow by default
 
-  const navItems = [
+  const navItems: { label: string; href: string; icon: typeof Home; disabled: boolean; tutorial?: string }[] = [
     { label: "Inicio", href: "/", icon: Home, disabled: false },
     { label: "Sacola", href: "/cart", icon: ShoppingBag, disabled: !canOrder },
     ...(canOrder
       ? [{ label: "Pedidos", href: "/orders", icon: User, disabled: false }]
       : [{ label: "Avaliar", href: "/rate", icon: Star, disabled: false }]
     ),
+    ...(hasCampaigns
+      ? [{ label: "Campanhas", href: "/campanhas", icon: Megaphone, disabled: false, tutorial: "camp-nav" }]
+      : []),
   ];
+  const isItemActive = (href: string) =>
+    location.pathname === href || (href === "/campanhas" && location.pathname.startsWith("/campanhas"));
+  // Com 6 itens na barra do celular, reduz o espaçamento lateral para caberem sem apertar.
+  const navPx = hasCampaigns ? "px-1.5" : "px-3";
 
   return (
     <div className="flex min-h-screen bg-background text-foreground transition-colors duration-300">
@@ -97,7 +133,7 @@ export function AppLayout({ children }: AppLayoutProps) {
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1.5">
           {navItems.map((item) => {
-            const isActive = location.pathname === item.href;
+            const isActive = isItemActive(item.href);
             if (item.disabled) {
               return (
                 <div
@@ -119,6 +155,7 @@ export function AppLayout({ children }: AppLayoutProps) {
               <Link
                 key={item.href}
                 to={item.href}
+                data-tutorial={item.tutorial}
                 className={cn(
                   "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 group relative",
                   isActive
@@ -228,12 +265,12 @@ export function AppLayout({ children }: AppLayoutProps) {
         <div className="absolute inset-0 bg-background/80 backdrop-blur-xl border-t border-border/50" />
         <div className="relative flex h-16 w-full items-center justify-around px-1">
           {navItems.map((item) => {
-             const isActive = location.pathname === item.href;
+             const isActive = isItemActive(item.href);
              if (item.disabled) {
                return (
                  <div
                    key={item.href}
-                   className="relative flex flex-col items-center justify-center gap-1 rounded-2xl px-3 py-1.5 text-muted-foreground/40 cursor-not-allowed select-none"
+                   className={cn("relative flex flex-col items-center justify-center gap-1 rounded-2xl py-1.5 text-muted-foreground/40 cursor-not-allowed select-none", navPx)}
                    title="Pedidos não disponíveis para sua unidade"
                  >
                    <div className="relative">
@@ -248,8 +285,10 @@ export function AppLayout({ children }: AppLayoutProps) {
               <Link
                 key={item.href}
                 to={item.href}
+                data-tutorial={item.tutorial}
                 className={cn(
-                  "relative flex flex-col items-center justify-center gap-1 rounded-2xl px-3 py-1.5 transition-all duration-300",
+                  "relative flex flex-col items-center justify-center gap-1 rounded-2xl py-1.5 transition-all duration-300",
+                  navPx,
                   isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
                 )}
               >
@@ -269,7 +308,8 @@ export function AppLayout({ children }: AppLayoutProps) {
             data-tutorial="notifications"
             onClick={() => unreadCount > 0 && markAllRead()}
             className={cn(
-              "relative flex flex-col items-center justify-center gap-1 rounded-2xl px-3 py-1.5 transition-all duration-300",
+              "relative flex flex-col items-center justify-center gap-1 rounded-2xl py-1.5 transition-all duration-300",
+              navPx,
               location.pathname === "/notifications" ? "text-primary" : "text-muted-foreground hover:text-foreground"
             )}
           >
@@ -292,7 +332,8 @@ export function AppLayout({ children }: AppLayoutProps) {
           <Link
             to="/settings"
             className={cn(
-              "relative flex flex-col items-center justify-center gap-1 rounded-2xl px-3 py-1.5 transition-all duration-300",
+              "relative flex flex-col items-center justify-center gap-1 rounded-2xl py-1.5 transition-all duration-300",
+              navPx,
               location.pathname === "/settings" ? "text-primary" : "text-muted-foreground hover:text-foreground"
             )}
           >

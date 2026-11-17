@@ -37,6 +37,21 @@ const AdminLogs = lazy(() => import("./pages/admin/AdminLogs").then(m => ({ defa
 const AdminRecipes = lazy(() => import("./pages/admin/AdminRecipes").then(m => ({ default: m.AdminRecipes })));
 // AdminPermissions removed – route now uses AdminUsers with defaultTab="permissions"
 
+// Gerenciador de Campanhas (módulo aditivo). Tudo lazy: quem só pede almoço não baixa nada disto.
+const AdminCampaigns = lazy(() => import("./pages/admin/campaigns/AdminCampaigns").then(m => ({ default: m.AdminCampaigns })));
+const AdminCampaignWizard = lazy(() => import("./pages/admin/campaigns/AdminCampaignWizard").then(m => ({ default: m.AdminCampaignWizard })));
+const AdminCampaignPanel = lazy(() => import("./pages/admin/campaigns/AdminCampaignPanel").then(m => ({ default: m.AdminCampaignPanel })));
+const Campaigns = lazy(() => import("./pages/campaigns/Campaigns").then(m => ({ default: m.Campaigns })));
+const CampaignLayout = lazy(() => import("./pages/campaigns/CampaignLayout").then(m => ({ default: m.CampaignLayout })));
+const CampaignHome = lazy(() => import("./pages/campaigns/CampaignHome").then(m => ({ default: m.CampaignHome })));
+const CampaignRecipes = lazy(() => import("./pages/campaigns/CampaignRecipes").then(m => ({ default: m.CampaignRecipes })));
+const CampaignRecipeDetail = lazy(() => import("./pages/campaigns/CampaignRecipeDetail").then(m => ({ default: m.CampaignRecipeDetail })));
+const CampaignSubmit = lazy(() => import("./pages/campaigns/CampaignSubmit").then(m => ({ default: m.CampaignSubmit })));
+const CampaignMyEntry = lazy(() => import("./pages/campaigns/CampaignMyEntry").then(m => ({ default: m.CampaignMyEntry })));
+const CampaignVote = lazy(() => import("./pages/campaigns/CampaignVote").then(m => ({ default: m.CampaignVote })));
+const CampaignRanking = lazy(() => import("./pages/campaigns/CampaignRanking").then(m => ({ default: m.CampaignRanking })));
+const CampaignResults = lazy(() => import("./pages/campaigns/CampaignResults").then(m => ({ default: m.CampaignResults })));
+
 // Shown briefly while an admin page chunk downloads (fast on repeat visits — cached by the browser).
 function AdminPageFallback() {
   return (
@@ -110,6 +125,22 @@ export const router = createBrowserRouter([
           { path: "team", element: <WithBoundary name="Equipe Responsavel"><Team /></WithBoundary> },
           { path: "rate", element: <WithBoundary name="Avaliar Almoco"><Rate /></WithBoundary> },
           { path: "receitas", element: <WithBoundary name="Receitas"><Recipes /></WithBoundary> },
+          // Campanhas: o servidor só libera o conteúdo depois que um admin publica a campanha.
+          { path: "campanhas", element: <WithBoundary name="Campanhas"><LazyAdminPage><Campaigns /></LazyAdminPage></WithBoundary> },
+          {
+            path: "campanhas/:slug",
+            element: <WithBoundary name="Campanha"><LazyAdminPage><CampaignLayout /></LazyAdminPage></WithBoundary>,
+            children: [
+              { index: true, element: <LazyAdminPage><CampaignHome /></LazyAdminPage> },
+              { path: "receitas", element: <LazyAdminPage><CampaignRecipes /></LazyAdminPage> },
+              { path: "receitas/:id", element: <LazyAdminPage><CampaignRecipeDetail /></LazyAdminPage> },
+              { path: "enviar", element: <LazyAdminPage><CampaignSubmit /></LazyAdminPage> },
+              { path: "participacao", element: <LazyAdminPage><CampaignMyEntry /></LazyAdminPage> },
+              { path: "votacao", element: <LazyAdminPage><CampaignVote /></LazyAdminPage> },
+              { path: "ranking", element: <LazyAdminPage><CampaignRanking /></LazyAdminPage> },
+              { path: "resultado", element: <LazyAdminPage><CampaignResults /></LazyAdminPage> },
+            ],
+          },
         ],
       },
       {
@@ -144,6 +175,12 @@ export const router = createBrowserRouter([
           { path: "settings", element: <WithBoundary name="Configuracoes"><LazyAdminPage><AdminSettings /></LazyAdminPage></WithBoundary> },
           { path: "logs", element: <WithBoundary name="Log de Auditoria"><LazyAdminPage><AdminLogs /></LazyAdminPage></WithBoundary> },
           { path: "recipe-suggestions", element: <WithBoundary name="Sugestões de Receita"><LazyAdminPage><AdminRecipes /></LazyAdminPage></WithBoundary> },
+
+          // Campanhas (acesso decidido pela lista própria do módulo, no servidor)
+          { path: "campaigns", element: <WithBoundary name="Campanhas"><LazyAdminPage><AdminCampaigns /></LazyAdminPage></WithBoundary> },
+          { path: "campaigns/new", element: <WithBoundary name="Nova campanha"><LazyAdminPage><AdminCampaignWizard /></LazyAdminPage></WithBoundary> },
+          { path: "campaigns/:id/edit", element: <WithBoundary name="Editar campanha"><LazyAdminPage><AdminCampaignWizard /></LazyAdminPage></WithBoundary> },
+          { path: "campaigns/:id", element: <WithBoundary name="Painel da campanha"><LazyAdminPage><AdminCampaignPanel /></LazyAdminPage></WithBoundary> },
         ],
       },
       {

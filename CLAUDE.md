@@ -43,6 +43,18 @@ Frontend: automático via GitHub Actions (`.github/workflows/deploy.yml`) — to
 - Dependências mortas removidas: `@mui/material`, `@mui/icons-material`, `@emotion/*`, `@popperjs/core`, `react-popper` (0 usos reais — o projeto usa Radix + Tailwind). Se algo precisar de um popover/tooltip posicionado, já existe `@radix-ui/react-popover`/`@radix-ui/react-tooltip` — não reinstalar Popper.
 - Rotas admin (`src/app/routes.tsx`) são `React.lazy` — cada página de admin vira um chunk separado, baixado só quando o usuário navega até lá. Cardápio/Carrinho (uso diário de todo mundo) continuam eager.
 
+## Gerenciador de Campanhas (adicionado 2026-11-17)
+
+Módulo aditivo (concurso de receitas "Café Especial | Memórias Afetivas" é a 1ª campanha; o motor é reutilizável). Não toca nas tabelas/KV existentes.
+
+- **Banco**: 11 tabelas `campaign_*` + ~62 funções `campaign_*` (`SECURITY DEFINER`), RLS ligado, **sem grants** para `anon`/`authenticated`; `service_role` só tem `SELECT` — toda escrita passa pelas funções. Migrações em `supabase/migrations/2026111710000{1..5}_campaigns_*.sql` (aplicadas em produção via MCP com os nomes `campaigns_1_schema` … `campaigns_5_grants_rls`; a 3 foi aplicada em pedaços 3a–3e). Regras críticas vivem **no banco**, não na API: 1 receita e 1 voto por colaborador (UNIQUE), sem voto na própria receita, voto irreversível, edição travada quando a votação começa (`edit_locked_at`, nunca desfeito), justificativa ≥ 10 caracteres, auditoria append-only (`campaign_audit_log`).
+- **API**: Edge Function **separada** `campaigns-api` (`supabase/functions/campaigns-api/index.ts`, `verify_jwt=false`, autentica pelo header `X-User-Auth-Token`). Deploy independente da função principal: `npx supabase functions deploy campaigns-api --project-ref revxdizgphrntekspvkm --use-api --no-verify-jwt` (ou MCP `deploy_edge_function`). Mídia vai direto ao bucket privado `make-c3078087-campaigns` por URL assinada; o servidor confere tamanho e *magic bytes* antes de aceitar.
+- **Nada aparece para colaborador até um admin clicar em "Publicar"**: chave geral `campaign_settings.enabled` (padrão `false`) + publicação por campanha (`status='authorized'`, `visible_from`). Publicar liga a chave. "Suspender" esconde sem apagar nada.
+- **Acesso admin NÃO usa os permKeys do site** (`ALL_PERM_KEYS`, `AdminUsers`, `user_metadata.role` não são consultados): vem da lista própria `campaign_admins` (17 chaves `campaigns*`, gerenciadas na aba "Acesso" do módulo, exige `campaigns_access`). Hoje só Heitor e Cleiton estão nela. O item do `AdminLayout` aparece conforme `/campaigns-api/admin/me`; o item "Campanhas" do `AppLayout` conforme `/campaigns-api/campaigns/availability` (módulo ligado **e** campanha visível para a pessoa).
+- Tour guiada própria (`components/campaigns/CampaignTour.tsx`, seletores `data-tutorial="camp-..."`); não altera o `OnboardingTutorial` do cardápio.
+- Notificações: só in-app (KV `notifications:user:{id}`, deduplicadas por `campaign_notification_log`); **sem push** nesta versão. Exportações: CSV (`;` + BOM, neutraliza fórmulas); sem `.xlsx` ainda (não há lib de planilha no projeto).
+- **Antes de abrir para todo mundo** seguem valendo os achados C2 (role editável pelo próprio usuário em `user_metadata`, afeta as rotas admin do site) e C10 (`POST /signup` público e troca de e-mail sem confirmação — "1 voto por pessoa" vale por conta). O módulo novo não depende de C2, mas C10 afeta a integridade do voto.
+
 ## Pendências conhecidas
 
 - `react-router` e `vite` têm CVEs conhecidas que exigem bump de versão maior (fora do range declarado em `package.json`) — não apliquei `npm audit fix --force` sem testar; avaliar upgrade dedicado depois.

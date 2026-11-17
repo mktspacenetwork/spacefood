@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router";
 import { 
   LayoutDashboard, 
@@ -32,7 +32,9 @@ import {
   Lock,
   ScrollText,
   BookMarked,
+  Megaphone,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Button } from "../components/ui/Button";
 import { useAuth } from "../context/auth-context";
@@ -64,9 +66,17 @@ import {
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { getBrazilDateString, getBrazilTimeString } from "../lib/date-utils";
+import { fetchCampaignAdminMe } from "../lib/campaigns/api";
+
+type MenuItemDef = { icon: LucideIcon; label: string; path: string; permKey: string; isComingSoon?: boolean };
+type MenuGroupDef = { title: string; items: MenuItemDef[] };
+
+// Campanhas NÃO usa as permissões gerais do site: o acesso vem da lista própria do módulo
+// (campaign_admins), consultada em /campaigns-api/admin/me. Sem acesso, o item nem existe no menu.
+const CAMPAIGNS_MENU_ITEM: MenuItemDef = { icon: Megaphone, label: "Campanhas", path: "/admin/campaigns", permKey: "campaigns" };
 
 // Grouped Menu Items
-const MENU_GROUPS = [
+const MENU_GROUPS: MenuGroupDef[] = [
   {
     title: "Operacional",
     items: [
@@ -133,7 +143,14 @@ export function AdminLayout() {
   const [permStatus, setPermStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [settingsData, setSettingsData] = useState<{ unitName?: string, cutoffTime?: string }>({});
   const [badges, setBadges] = useState({ orders: 0, users: 0, reviews: 0 });
-  
+  const [campaignsAccess, setCampaignsAccess] = useState(false);
+  const menuGroups = useMemo<MenuGroupDef[]>(
+    () => MENU_GROUPS.map((g) => (g.title === "Gestão" && campaignsAccess ? { ...g, items: [...g.items, CAMPAIGNS_MENU_ITEM] } : g)),
+    [campaignsAccess],
+  );
+  const isItemActive = (path: string) =>
+    location.pathname === path || (path === "/admin/campaigns" && location.pathname.startsWith("/admin/campaigns"));
+
   const [seenBadgeCounts, setSeenBadgeCounts] = useState<Record<string, number>>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('sf:admin:seen-badges');
@@ -199,6 +216,9 @@ export function AdminLayout() {
       setTempCutoff(settings?.cutoffTime || "10:30");
     });
 
+    // Acesso ao módulo Campanhas (lista própria; falha = sem item no menu, sem afetar o resto)
+    fetchCampaignAdminMe().then((r) => setCampaignsAccess(!!r.isAdmin));
+
     // Load badges (counts)
     const fetchBadges = async () => {
        if (!user) return;
@@ -235,6 +255,8 @@ export function AdminLayout() {
 
   const hasPermission = (permKey: string) => {
     if (!user) return false;
+    // Campanhas: só a lista própria do módulo decide (nem o master entra sem estar nela).
+    if (permKey === 'campaigns') return campaignsAccess;
     // Master has access to everything always
     if (user.role === 'master') return true;
     // Still loading (first render) — show everything briefly to avoid flicker.
@@ -340,7 +362,7 @@ export function AdminLayout() {
         </div>
 
         <div className="flex-1 overflow-y-auto py-4 space-y-6">
-           {MENU_GROUPS.map((group, idx) => (
+           {menuGroups.map((group, idx) => (
              <div key={idx} className="px-3">
                {isSidebarOpen && (
                  <h3 className="mb-2 px-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider animate-in fade-in duration-300">
@@ -349,7 +371,7 @@ export function AdminLayout() {
                )}
                <div className="space-y-1">
                  {group.items.filter(item => hasPermission(item.permKey)).map((item) => {
-                    const isActive = location.pathname === item.path;
+                    const isActive = isItemActive(item.path);
                     let badgeCount = item.permKey === 'orders' ? badges.orders :
                                        item.permKey === 'users' ? badges.users :
                                        item.permKey === 'reviews' ? badges.reviews : 
@@ -402,7 +424,7 @@ export function AdminLayout() {
                     );
                   })}
                </div>
-               {idx < MENU_GROUPS.length - 1 && isSidebarOpen && <div className="mt-4 mx-2 h-[1px] bg-border/50" />}
+               {idx < menuGroups.length - 1 && isSidebarOpen && <div className="mt-4 mx-2 h-[1px] bg-border/50" />}
              </div>
            ))}
         </div>
@@ -599,7 +621,7 @@ export function AdminLayout() {
             </Button>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-6">
-            {MENU_GROUPS.map((group, idx) => (
+            {menuGroups.map((group, idx) => (
                <div key={idx}>
                  <h3 className="mb-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                    {group.title}
