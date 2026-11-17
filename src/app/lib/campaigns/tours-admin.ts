@@ -43,7 +43,7 @@ export const ADMIN_TOUR_OVERVIEW: TourStep[] = [
     selector: "camp-list",
     title: "Suas campanhas",
     description:
-      "Abra uma campanha em \"Gerenciar\" para analisar receitas, acompanhar a votação, apurar e divulgar o resultado. Use \"Editar\" para ajustar a configuração.",
+      "Toque no nome da campanha, ou no menu \"⋯\" em \"Gerenciar\", para analisar receitas, acompanhar a votação e divulgar o resultado. No mesmo menu estão Publicar/Despublicar, Editar, Duplicar e Histórico.",
     icon: icon(ListChecks),
     placement: "top",
   },

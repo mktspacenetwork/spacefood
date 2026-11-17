@@ -5,7 +5,7 @@ import { Button } from "../../../components/ui/Button";
 import { Card, CardContent } from "../../../components/ui/Card";
 import { Badge } from "../../../components/ui/Badge";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "../../../components/ui/dropdown-menu";
 import { cn } from "../../../lib/utils";
 import { DISPLAY_STATE, PHASE_STATE, campaignDisplayState, fmtDateTime, fmtShort, plural } from "../../../lib/campaigns/format";
@@ -13,12 +13,12 @@ import type { AdminCampaignListItem, AdminStageRow, PublishCheck } from "../../.
 import { stageState } from "./shared";
 
 /**
- * Grade do cartão em telas largas (xl): uma linha por campanha, com colunas fixas e as AÇÕES na lateral direita,
- * na mesma linha do status. Abaixo disso o cartão empilha: cabeçalho (nome + status) → barra de ações → detalhes.
+ * Grade do cartão em telas largas (xl): uma linha por campanha, com colunas fixas e o menu "⋯" (todas as ações)
+ * na lateral direita, na mesma linha do status. Abaixo disso o cartão empilha: cabeçalho (nome + status + ⋯) → detalhes.
  * Exportada para o cabeçalho de colunas da página usar exatamente as mesmas larguras.
  */
 export const LIST_ROW_GRID =
-  "xl:grid xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.1fr)_4.5rem_22.5rem] xl:items-center xl:gap-x-6";
+  "xl:grid xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.1fr)_4.5rem_3rem] xl:items-center xl:gap-x-6";
 
 // ──────────────────────────── "O que falta" (rascunho) ────────────────────────────
 
@@ -77,25 +77,20 @@ function CardHint({ hint, moduleOff }: { hint: Hint; moduleOff: boolean }) {
   );
 }
 
-/** Estilo e explicação de cada ação de publicação — cada uma com cara própria, para ninguém confundir. */
+/** Cor e explicação de cada ação de publicação (item do menu "⋯") — cada uma com cara própria, para ninguém confundir. */
 const MAIN_ACTION = {
   publish: {
-    variant: "primary" as const,
-    className: "",
+    menuClass: "text-primary focus:text-primary",
     Icon: Rocket,
     title: "Tornar a campanha visível aos colaboradores elegíveis. Você confere o checklist antes de confirmar.",
   },
   unpublish: {
-    variant: "outline" as const,
-    className:
-      "border-amber-300 text-amber-800 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-200 dark:hover:bg-amber-950/40",
+    menuClass: "text-amber-700 focus:text-amber-700 dark:text-amber-300 dark:focus:text-amber-300",
     Icon: EyeOff,
     title: "Retirar a campanha de exibição, sem apagar nada.",
   },
   republish: {
-    variant: "outline" as const,
-    className:
-      "border-green-300 text-green-800 hover:bg-green-50 dark:border-green-700 dark:text-green-200 dark:hover:bg-green-950/40",
+    menuClass: "text-green-700 focus:text-green-700 dark:text-green-300 dark:focus:text-green-300",
     Icon: Eye,
     title: "Voltar a exibir a campanha aos colaboradores.",
   },
@@ -150,15 +145,13 @@ export function CampaignListCard(p: CampaignListCardProps) {
     : state === "unpublished" ? { kind: "republish", label: "Republicar", onClick: p.onRepublish }
     : null;
   const ms = main ? MAIN_ACTION[main.kind] : null;
-  // Um único botão de maior destaque por cartão: Publicar no rascunho; nos demais, Gerenciar.
-  const manageVariant = quiet || (state === "draft" && main) ? "outline" : "primary";
 
   const hintBlock = <CardHint hint={hint} moduleOff={moduleOff} />;
 
   return (
     <Card className={cn("rounded-2xl border hover:shadow-sm", quiet && "border-border/60 bg-muted/30", state === "archived" && "opacity-75")}>
       <CardContent className="p-4 sm:p-5">
-        <div className={cn("flex flex-col gap-3", LIST_ROW_GRID)}>
+        <div className={cn("relative flex flex-col gap-3", LIST_ROW_GRID)}>
           {/* Cabeçalho: campanha + status (em tela larga, cada um vira uma coluna da linha) */}
           <div className="flex items-start justify-between gap-3 xl:contents">
             <div className="min-w-0 xl:col-start-1 xl:row-start-1">
@@ -173,7 +166,7 @@ export function CampaignListCard(p: CampaignListCardProps) {
               <div className="mt-1.5 hidden xl:block">{hintBlock}</div>
             </div>
 
-            <div className="flex shrink-0 flex-col items-end gap-1.5 xl:col-start-2 xl:row-start-1 xl:items-start">
+            <div className="flex shrink-0 flex-col items-end gap-1.5 pr-12 xl:col-start-2 xl:row-start-1 xl:items-start xl:pr-0">
               <Badge className={cn("gap-2 border px-3.5 py-1 text-sm font-bold", st.className)}>
                 <span className="h-2 w-2 rounded-full bg-current" aria-hidden="true" />
                 {st.label}
@@ -193,63 +186,51 @@ export function CampaignListCard(p: CampaignListCardProps) {
             </p>
           </div>
 
-          {/* AÇÕES: ao lado do status (xl) ou logo abaixo do cabeçalho, antes dos detalhes */}
-          <div className="flex flex-wrap items-center gap-2 xl:col-start-4 xl:row-start-1 xl:justify-end">
-            {main && ms && (
-              <Button
-                size="sm"
-                variant={ms.variant}
-                title={ms.title}
-                aria-label={`${main.label}: ${c.name}`}
-                className={cn("h-10 min-w-[7rem] flex-1 gap-1.5 rounded-xl px-3 xl:flex-none", ms.className)}
-                onClick={main.onClick}
-                disabled={p.busy}
-              >
-                <ms.Icon size={14} /> {main.label}
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant={manageVariant}
-              aria-label={`Gerenciar: ${c.name}`}
-              title="Abrir o painel da campanha: resumo, receitas, participantes e votação"
-              className="h-10 min-w-[7rem] flex-1 gap-1.5 rounded-xl px-3 xl:flex-none"
-              onClick={p.onOpen}
-            >
-              <Settings2 size={13} /> Gerenciar
-            </Button>
-            {/* Editar + "⋯" andam juntos: em tela estreita quebram de linha como um grupo só */}
-            <div className="flex items-center gap-2">
-              {p.canEdit && editable && (
+          {/* AÇÕES: todas dentro do menu "⋯" (canto superior direito; em tela larga, última coluna da linha) */}
+          <div className="absolute right-0 top-0 xl:static xl:col-start-4 xl:row-start-1 xl:justify-self-end">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
                 <Button
-                  size="sm"
+                  className="h-10 w-10 rounded-xl"
+                  size="icon"
                   variant="outline"
-                  aria-label={`Editar: ${c.name}`}
-                  title="Editar as informações da campanha"
-                  className="h-10 w-10 gap-1.5 rounded-xl px-0 sm:w-auto sm:px-3"
-                  onClick={p.onEdit}
+                  aria-label={`Ações de ${c.name}`}
+                  title="Publicar, gerenciar, editar e outras ações"
+                  disabled={p.busy}
                 >
-                  <Pencil size={13} /> <span className="hidden sm:inline">Editar</span>
+                  <MoreHorizontal size={16} />
                 </Button>
-              )}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button className="h-10 w-10 rounded-xl" size="icon" variant="ghost" aria-label={`Mais ações de ${c.name}`} title="Mais ações">
-                    <MoreHorizontal size={16} />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  {p.canDuplicate && (
-                    <DropdownMenuItem onSelect={p.onDuplicate} className="cursor-pointer gap-2">
-                      <Copy size={14} /> Duplicar
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem onSelect={p.onHistory} className="cursor-pointer gap-2">
-                    <HistoryIcon size={14} /> Histórico
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                {main && ms && (
+                  <DropdownMenuItem
+                    onSelect={main.onClick}
+                    disabled={p.busy}
+                    title={ms.title}
+                    className={cn("cursor-pointer gap-2 font-semibold", ms.menuClass)}
+                  >
+                    <ms.Icon size={14} /> {main.label}
                   </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                )}
+                <DropdownMenuItem onSelect={p.onOpen} title="Abrir o painel da campanha: resumo, receitas, participantes e votação" className="cursor-pointer gap-2">
+                  <Settings2 size={14} /> Gerenciar
+                </DropdownMenuItem>
+                {p.canEdit && editable && (
+                  <DropdownMenuItem onSelect={p.onEdit} title="Editar as informações da campanha" className="cursor-pointer gap-2">
+                    <Pencil size={14} /> Editar
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                {p.canDuplicate && (
+                  <DropdownMenuItem onSelect={p.onDuplicate} className="cursor-pointer gap-2">
+                    <Copy size={14} /> Duplicar
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onSelect={p.onHistory} className="cursor-pointer gap-2">
+                  <HistoryIcon size={14} /> Histórico
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           {/* Detalhes (telas estreitas e médias) */}
