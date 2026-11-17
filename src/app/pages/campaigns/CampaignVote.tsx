@@ -44,6 +44,8 @@ export function CampaignVote() {
 
   useEffect(() => { void load(false); }, [load]);
 
+  // Abre sozinha uma vez, quando a votação está aberta (é quando as regras e o botão Votar existem na tela).
+  // O botão "Ver tour" fica sempre visível e, fora desse período, explica a tela.
   const tour = useTour({
     storageKey: tourKey("collab", user?.id, "vote", campaign.id, ctxState.tour?.version),
     enabled: !!ctxState.tour?.enabled && !!user && !!data && data.state.voting === "open",
@@ -94,7 +96,7 @@ export function CampaignVote() {
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-bold text-foreground">Votação</h2>
-        {phase === "open" && <TourButton onClick={tour.start} />}
+        <TourButton onClick={tour.start} />
       </div>
 
       {phase === "unset" && (

@@ -58,6 +58,8 @@ export function tourKey(
  */
 export function useTour({ storageKey, enabled, delay = 1100 }: { storageKey: string; enabled: boolean; delay?: number }): TourController {
   const [open, setOpen] = useState(false);
+  // true quando a abertura automática já gravou "vista" e o cartão ainda não foi de fato exibido
+  const autoMarked = useRef(false);
 
   useEffect(() => {
     if (!enabled || !storageKey) return;
@@ -66,17 +68,28 @@ export function useTour({ storageKey, enabled, delay = 1100 }: { storageKey: str
     if (seen) return;
     const t = setTimeout(() => {
       if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      // Regra única para todos os perfis: mostrou uma vez, não volta a abrir sozinha.
+      // Grava ao ABRIR (não só ao fechar), para não reaparecer se a pessoa sair da tela no meio.
+      try { localStorage.setItem(storageKey, "1"); autoMarked.current = true; } catch { /* ignora */ }
       setOpen(true);
     }, delay);
     return () => clearTimeout(t);
   }, [storageKey, enabled, delay]);
 
-  const start = useCallback(() => setOpen(true), []);
+  const start = useCallback(() => { autoMarked.current = false; setOpen(true); }, []);
   const close = useCallback(() => {
+    autoMarked.current = false;
     try { localStorage.setItem(storageKey, "1"); } catch { /* ignora */ }
     setOpen(false);
   }, [storageKey]);
-  const cancel = useCallback(() => setOpen(false), []);
+  // Não havia o que mostrar (alvos ausentes): desfaz a marcação automática para tentar na próxima visita.
+  const cancel = useCallback(() => {
+    if (autoMarked.current) {
+      try { localStorage.removeItem(storageKey); } catch { /* ignora */ }
+      autoMarked.current = false;
+    }
+    setOpen(false);
+  }, [storageKey]);
   return { open, start, close, cancel };
 }
 

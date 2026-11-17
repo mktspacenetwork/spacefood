@@ -6,7 +6,6 @@ import { Card } from "../../../../components/ui/Card";
 import { Input } from "../../../../components/ui/input";
 import { Label } from "../../../../components/ui/label";
 import { Textarea } from "../../../../components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../../components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../../../components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../../../components/ui/table";
 import {
@@ -17,7 +16,11 @@ import { campaignsApi } from "../../../../lib/campaigns/api";
 import { AUDIT_ACTION, SUBMISSION_STATUS, fmtDateTime, fromInputValue } from "../../../../lib/campaigns/format";
 import type { AdminSubmissionDetail, AdminSubmissionRow } from "../../../../lib/campaigns/types";
 import { EmptyBox, ErrorBox, LoadingBox, Notice, ReasonDialog, SectionLabel, useBusy, useLoader } from "../shared";
+import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
+import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
 import type { TabProps } from "./types";
+import { TabIntro } from "./ui";
+import { useTabTour } from "./useTabTour";
 
 const FIELD_LIMITS = {
   dish_name: [3, 120], description: [10, 600], ingredients: [5, 3000], preparation: [10, 6000],
@@ -32,8 +35,11 @@ function StatusBadge({ status }: { status: AdminSubmissionRow["status"] }) {
   return <Badge className={cn("border text-[10px]", s.className)}>{s.label}</Badge>;
 }
 
-export function SubmissionsTab({ campaignId, perms, onChanged }: TabProps) {
-  const [status, setStatus] = useState("all");
+type StatusFilter = "all" | "pending" | "approved" | "rejected";
+const isPending = (s: AdminSubmissionRow["status"]) => s === "submitted" || s === "in_review";
+
+export function SubmissionsTab({ campaignId, perms, onChanged, tourUserId, tourSignal }: TabProps) {
+  const [status, setStatus] = useState<StatusFilter>("all");
   const [q, setQ] = useState("");
   const [dq, setDq] = useState("");
   const [from, setFrom] = useState("");
@@ -45,38 +51,73 @@ export function SubmissionsTab({ campaignId, perms, onChanged }: TabProps) {
     return () => clearTimeout(t);
   }, [q]);
 
+  // Busca todas as situações de uma vez; o filtro por situação é feito aqui, para mostrar a contagem de cada uma.
   const list = useLoader<AdminSubmissionRow[]>(() => {
     const p = new URLSearchParams();
-    if (status !== "all") p.set("status", status);
     if (dq) p.set("q", dq);
     const f = fromInputValue(from ? `${from}T00:00` : "");
     const t = fromInputValue(to ? `${to}T23:59` : "");
     if (f) p.set("from", f);
     if (t) p.set("to", t);
     return campaignsApi.get(`/admin/campaigns/${campaignId}/submissions?${p.toString()}`);
-  }, [campaignId, status, dq, from, to]);
+  }, [campaignId, dq, from, to]);
 
-  const rows = list.data ?? [];
+  // A tour desta aba abre sozinha (uma vez) quando a lista já carregou.
+  const tour = useTabTour("submissions", { tourUserId, tourSignal, ready: !!list.data });
+
+  const all = list.data ?? [];
+  const counts = useMemo(() => ({
+    all: all.length,
+    pending: all.filter((r) => isPending(r.status)).length,
+    approved: all.filter((r) => r.status === "approved").length,
+    rejected: all.filter((r) => r.status === "rejected").length,
+  }), [all]);
+
+  // O que precisa de ação (aguardando análise) vem primeiro; dentro de cada grupo, a ordem da API (mais recentes antes).
+  const rows = useMemo(() => {
+    const filtered = all.filter((r) =>
+      status === "all" ? true : status === "pending" ? isPending(r.status) : r.status === status);
+    return [...filtered].sort((a, b) => Number(isPending(b.status)) - Number(isPending(a.status)));
+  }, [all, status]);
+
+  const chips: { value: StatusFilter; label: string; n: number }[] = [
+    { value: "all", label: "Todas", n: counts.all },
+    { value: "pending", label: "Aguardando análise", n: counts.pending },
+    { value: "approved", label: "Aprovadas", n: counts.approved },
+    { value: "rejected", label: "Reprovadas", n: counts.rejected },
+  ];
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-        <div className="relative sm:col-span-2">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por prato ou participante" className="pl-9 rounded-xl h-10" aria-label="Buscar receita" />
+      <TabIntro>Analise as receitas enviadas: aprove ou reprove (reprovar exige uma justificativa de pelo menos 10 caracteres).</TabIntro>
+
+      <div className="space-y-3" data-tutorial="camp-sub-filters">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[14rem] flex-1">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por prato ou participante" className="pl-9 rounded-xl h-10" aria-label="Buscar receita" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-xl h-10 w-[9.5rem]" aria-label="Enviadas a partir de" />
+            <span className="text-xs text-muted-foreground">até</span>
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-xl h-10 w-[9.5rem]" aria-label="Enviadas até" />
+          </div>
         </div>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="rounded-xl h-10" aria-label="Filtrar por situação"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas as situações</SelectItem>
-            <SelectItem value="pending">Aguardando análise</SelectItem>
-            <SelectItem value="approved">Aprovadas</SelectItem>
-            <SelectItem value="rejected">Reprovadas</SelectItem>
-          </SelectContent>
-        </Select>
-        <div className="flex items-center gap-2">
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-xl h-10" aria-label="Enviadas a partir de" />
-          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-xl h-10" aria-label="Enviadas até" />
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Filtrar por situação">
+          {chips.map((c) => (
+            <button
+              key={c.value}
+              type="button"
+              onClick={() => setStatus(c.value)}
+              aria-pressed={status === c.value}
+              className={cn(
+                "h-8 rounded-full border px-3 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
+                status === c.value ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              {c.label} <span className="tabular-nums opacity-80">({c.n})</span>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -84,37 +125,52 @@ export function SubmissionsTab({ campaignId, perms, onChanged }: TabProps) {
         <LoadingBox />
       ) : list.error && !list.data ? (
         <ErrorBox message={list.error} onRetry={list.reload} />
-      ) : rows.length === 0 ? (
+      ) : all.length === 0 ? (
         <EmptyBox icon={<ChefHat size={36} />} title="Nenhuma receita encontrada." hint="Quando colaboradores enviarem receitas, elas aparecerão aqui." />
+      ) : rows.length === 0 ? (
+        <Card className="rounded-3xl border-dashed p-8 text-center hover:shadow-none">
+          <p className="font-medium text-muted-foreground">Nenhuma receita nesta situação.</p>
+          <Button variant="outline" size="sm" className="mt-3 rounded-xl" onClick={() => setStatus("all")}>Ver todas</Button>
+        </Card>
       ) : (
-        <Card className="rounded-3xl border overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="px-4">Participante</TableHead>
-                <TableHead>Prato</TableHead>
-                <TableHead>Situação</TableHead>
-                <TableHead>Enviada em</TableHead>
-                <TableHead className="text-right pr-4"><span className="sr-only">Ações</span></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="px-4">
-                    <p className="font-medium">{r.user_name}</p>
-                    <p className="text-[11px] text-muted-foreground">{r.user_department || "—"}</p>
-                  </TableCell>
-                  <TableCell className="max-w-[16rem] truncate">{r.dish_name}</TableCell>
-                  <TableCell><StatusBadge status={r.status} /></TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{fmtDateTime(r.submitted_at)}</TableCell>
-                  <TableCell className="text-right pr-4">
-                    <Button size="sm" variant="outline" className="rounded-xl" onClick={() => setOpenId(r.id)}>Abrir</Button>
-                  </TableCell>
+        <Card className="rounded-3xl border overflow-hidden" data-tutorial="camp-sub-list">
+          <div className="overflow-x-auto">
+            <Table className="min-w-[36rem]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="px-4">Participante</TableHead>
+                  <TableHead>Prato</TableHead>
+                  <TableHead>Situação</TableHead>
+                  <TableHead>Enviada em</TableHead>
+                  <TableHead className="text-right pr-4"><span className="sr-only">Ações</span></TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {rows.map((r, idx) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="px-4">
+                      <p className="font-medium">{r.user_name}</p>
+                      <p className="text-[11px] text-muted-foreground">{r.user_department || "—"}</p>
+                    </TableCell>
+                    <TableCell className="max-w-[16rem] truncate">{r.dish_name}</TableCell>
+                    <TableCell><StatusBadge status={r.status} /></TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{fmtDateTime(r.submitted_at)}</TableCell>
+                    <TableCell className="text-right pr-4">
+                      <Button
+                        size="sm"
+                        variant={isPending(r.status) ? "primary" : "outline"}
+                        className="rounded-xl"
+                        data-tutorial={idx === 0 ? "camp-sub-open" : undefined}
+                        onClick={() => setOpenId(r.id)}
+                      >
+                        {isPending(r.status) ? "Analisar" : "Abrir"}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </Card>
       )}
 
@@ -125,6 +181,8 @@ export function SubmissionsTab({ campaignId, perms, onChanged }: TabProps) {
         onClose={() => setOpenId(null)}
         onChanged={() => { list.reload(); onChanged(); }}
       />
+
+      <CampaignTour steps={ADMIN_TOUR_TABS.submissions} tour={tour} />
     </div>
   );
 }

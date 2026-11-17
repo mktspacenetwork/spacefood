@@ -53,7 +53,7 @@ export function Campaigns() {
           </h1>
           <p className="text-sm text-muted-foreground">Participe dos concursos e ações do Space Food</p>
         </div>
-        {tourEnabled && <TourButton onClick={tour.start} />}
+        <TourButton onClick={tour.start} />
       </header>
 
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">

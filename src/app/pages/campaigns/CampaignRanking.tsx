@@ -42,13 +42,20 @@ export function CampaignRanking() {
     enabled: !!state.tour?.enabled && !!user && !!data,
   });
 
+  // "Ver tour" fica visível também quando o ranking ainda não foi liberado; a tour sempre é renderizada.
   if (hidden) {
     return (
-      <EmptyState
-        icon={<Lock size={22} aria-hidden="true" />}
-        title="O ranking ainda não está disponível"
-        description="Ele é liberado de acordo com as regras da campanha. Volte depois do encerramento da votação ou da confirmação do vencedor."
-      />
+      <div className="space-y-4">
+        <div className="flex justify-end">
+          <TourButton onClick={tour.start} />
+        </div>
+        <EmptyState
+          icon={<Lock size={22} aria-hidden="true" />}
+          title="O ranking ainda não está disponível"
+          description="Ele é liberado de acordo com as regras da campanha. Volte depois do encerramento da votação ou da confirmação do vencedor."
+        />
+        <CampaignTour steps={RANKING_TOUR} tour={tour} />
+      </div>
     );
   }
   if (error) return <ErrorState message={error} onRetry={() => void load()} />;
@@ -94,6 +101,8 @@ export function CampaignRanking() {
       ) : (
         <RankingList items={data.items} votedId={state.voted_submission_id} />
       )}
+
+      <CampaignTour steps={RANKING_TOUR} tour={tour} />
     </motion.div>
   );
 }

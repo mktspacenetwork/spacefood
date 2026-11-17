@@ -7,12 +7,16 @@ import { Card } from "../../components/ui/Card";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "../../components/ui/carousel";
 import { ErrorState } from "../../components/campaigns/ErrorState";
+import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
 import { useCampaignCtx } from "./CampaignLayout";
+import { useAuth } from "../../context/Store";
 import { campaignsApi, CampaignApiError, errMsg } from "../../lib/campaigns/api";
+import { RECIPE_DETAIL_TOUR } from "../../lib/campaigns/tours-collab";
 import type { RecipeDetail } from "../../lib/campaigns/types";
 
 export function CampaignRecipeDetail() {
-  const { slug } = useCampaignCtx();
+  const { campaign, state, slug } = useCampaignCtx();
+  const { user } = useAuth();
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [recipe, setRecipe] = useState<RecipeDetail | null>(null);
@@ -35,6 +39,12 @@ export function CampaignRecipeDetail() {
     return [...list.filter((m) => m.kind === "main_photo"), ...list.filter((m) => m.kind === "photo")];
   }, [recipe]);
   const video = useMemo(() => (recipe?.media ?? []).find((m) => m.kind === "video" && m.url), [recipe]);
+
+  // Chave por tela (não por receita): vista em uma receita, não abre sozinha nas outras.
+  const tour = useTour({
+    storageKey: tourKey("collab", user?.id, "recipe", campaign.id, state.tour?.version),
+    enabled: !!state.tour?.enabled && !!user && !!recipe && !error,
+  });
 
   const back = (
     <Button variant="outline" size="sm" className="h-11 rounded-xl px-4" onClick={() => navigate(`/campanhas/${slug}/receitas`)}>
@@ -65,8 +75,12 @@ export function CampaignRecipeDetail() {
 
   return (
     <motion.article initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
+      <div className="flex justify-end">
+        <TourButton onClick={tour.start} />
+      </div>
+
       {photos.length > 0 && (
-        <Carousel opts={{ loop: photos.length > 1 }} className="w-full" aria-label="Fotos da receita">
+        <Carousel opts={{ loop: photos.length > 1 }} className="w-full" aria-label="Fotos da receita" data-tutorial="camp-recipe-media">
           <CarouselContent>
             {photos.map((p, i) => (
               <CarouselItem key={p.id}>
@@ -91,7 +105,7 @@ export function CampaignRecipeDetail() {
       )}
 
       {video && (
-        <div className="overflow-hidden rounded-3xl bg-black">
+        <div className="overflow-hidden rounded-3xl bg-black" data-tutorial={photos.length === 0 ? "camp-recipe-media" : undefined}>
           <video
             src={video.url}
             poster={photos[0]?.url}
@@ -113,7 +127,7 @@ export function CampaignRecipeDetail() {
       </header>
 
       {recipe.can_vote && (
-        <Button size="lg" onClick={() => navigate(`/campanhas/${slug}/votacao`)} className="h-14 w-full gap-2 rounded-2xl text-base font-bold">
+        <Button size="lg" data-tutorial="camp-recipe-vote" onClick={() => navigate(`/campanhas/${slug}/votacao`)} className="h-14 w-full gap-2 rounded-2xl text-base font-bold">
           <Vote size={18} aria-hidden="true" />
           Votar nesta receita
         </Button>
@@ -127,7 +141,7 @@ export function CampaignRecipeDetail() {
         <p className="whitespace-pre-line text-sm leading-relaxed text-foreground">{recipe.description}</p>
       </Card>
 
-      <Card className="rounded-3xl p-5 hover:shadow-sm">
+      <Card className="rounded-3xl p-5 hover:shadow-sm" data-tutorial="camp-recipe-ingredients">
         <p className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
           <ListChecks size={14} className="text-primary" aria-hidden="true" />
           Ingredientes
@@ -149,6 +163,8 @@ export function CampaignRecipeDetail() {
         </p>
         <p className="whitespace-pre-line text-sm leading-relaxed text-foreground">{recipe.preparation}</p>
       </Card>
+
+      <CampaignTour steps={RECIPE_DETAIL_TOUR} tour={tour} />
     </motion.article>
   );
 }

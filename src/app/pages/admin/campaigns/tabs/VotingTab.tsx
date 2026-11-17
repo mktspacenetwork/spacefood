@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BellRing, CalendarPlus, Loader2, Pause, Play, Trophy, Users } from "lucide-react";
+import { BellRing, CalendarPlus, ListChecks, Loader2, Pause, Play, SlidersHorizontal, Trophy, Users } from "lucide-react";
 import { Badge } from "../../../../components/ui/Badge";
 import { Button } from "../../../../components/ui/Button";
 import { Card, CardContent } from "../../../../components/ui/Card";
@@ -15,18 +15,27 @@ import { cn } from "../../../../lib/utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
 import { PHASE_STATE, fmtDateTime, fromInputValue, plural, toInputValue } from "../../../../lib/campaigns/format";
 import type { AdminDashboard, AdminResults, TallyRow } from "../../../../lib/campaigns/types";
+import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
+import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
 import { ErrorBox, LoadingBox, Notice, ReasonDialog, SectionLabel, stageState, useBusy, useLoader } from "../shared";
 import { ResultFlow } from "./VoteFlow";
 import type { TabProps } from "./types";
+import { Fold, TabIntro } from "./ui";
+import { useTabTour } from "./useTabTour";
 
 /**
  * VOTAÇÃO — o único lugar para: situação da votação, controles, ranking e o caminho até o resultado.
  *  - Quem votou em quem (votos individuais) e a ação de invalidar ficam em PARTICIPANTES.
  *  - Datas da votação (início/fim) ficam em CONFIGURAÇÕES; aqui só se pausa, prorroga e encerra.
  */
-export function VotingTab({ campaignId, results, perms, onChanged, goTab }: TabProps) {
+export function VotingTab({ campaignId, results, perms, onChanged, goTab, tourUserId, tourSignal }: TabProps) {
   const dash = useLoader<AdminDashboard>(() => campaignsApi.get(`/admin/campaigns/${campaignId}/dashboard`), [campaignId]);
   const { busy, run } = useBusy();
+  // A tour desta aba abre sozinha (uma vez) quando os dados já carregaram.
+  const tour = useTabTour("voting", { tourUserId, tourSignal, ready: !!dash.data });
+  // null = "automático" (depende da fase); depois que a pessoa abre/fecha à mão, vale a escolha dela.
+  const [ctrlOpen, setCtrlOpen] = useState<boolean | null>(null);
+  const [flowOpen, setFlowOpen] = useState<boolean | null>(null);
 
   const [pauseOpen, setPauseOpen] = useState(false);
   const [extendOpen, setExtendOpen] = useState(false);
@@ -102,6 +111,10 @@ export function VotingTab({ campaignId, results, perms, onChanged, goTab }: TabP
   if (!canExtend) whyNot.push(vs?.ends_at ? "Prorrogar: só depois que a votação começa." : "Prorrogar: defina uma data de término em Configurações.");
   if (!canNotify) whyNot.push("Avisar: só com a votação aberta.");
 
+  // Controles abertos com a votação em andamento; "resultado" aberto quando a votação terminou ou já há apuração.
+  const ctrlIsOpen = ctrlOpen ?? (state === "open" || state === "paused");
+  const flowIsOpen = flowOpen ?? (state === "closed" || resultsStatus !== "none");
+
   const winnerRow = tally?.find((t) => t.submission_id === res.winner_submission_id);
   const total = d.tally ? d.tally.reduce((acc, t) => acc + t.votes, 0) : d.votes_valid;
   const maxVotes = Math.max(1, ...(tally ?? []).map((t) => t.votes));
@@ -109,6 +122,8 @@ export function VotingTab({ campaignId, results, perms, onChanged, goTab }: TabP
 
   return (
     <div className="space-y-5">
+      <TabIntro>Acompanhe a votação, veja o ranking e siga o passo a passo até divulgar o resultado.</TabIntro>
+
       {/* 1 — Situação */}
       <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-vote-status">
         <CardContent className="grid gap-5 p-5 md:grid-cols-2">
@@ -149,43 +164,7 @@ export function VotingTab({ campaignId, results, perms, onChanged, goTab }: TabP
         </CardContent>
       </Card>
 
-      {/* 2 — Controles */}
-      <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-vote-controls">
-        <CardContent className="space-y-3 p-5">
-          <SectionLabel>Controles da votação</SectionLabel>
-          {finalized ? (
-            <Notice tone="info">O vencedor já foi confirmado: a votação não pode mais ser alterada.</Notice>
-          ) : !canSchedule ? (
-            <p className="text-xs text-muted-foreground">Você não tem permissão para pausar, prorrogar ou avisar sobre a votação.</p>
-          ) : (
-            <>
-              <div className="flex flex-wrap gap-2">
-                {canReopen ? (
-                  <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => setPauseOpen(true)} disabled={isBusy}>
-                    {busy === "pause" ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Reabrir votação
-                  </Button>
-                ) : (
-                  <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => setPauseOpen(true)} disabled={!canPause || isBusy}>
-                    {busy === "pause" ? <Loader2 size={13} className="animate-spin" /> : <Pause size={13} />} Pausar votação
-                  </Button>
-                )}
-                <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => setExtendOpen(true)} disabled={!canExtend || isBusy}>
-                  <CalendarPlus size={13} /> Prorrogar
-                </Button>
-                <Button variant="ghost" size="sm" className="gap-2 rounded-xl" onClick={() => setNotifyOpen(true)} disabled={!canNotify || isBusy}>
-                  {busy === "notify" ? <Loader2 size={13} className="animate-spin" /> : <BellRing size={13} />} Avisar que a votação começou
-                </Button>
-              </div>
-              {whyNot.length > 0 && <p className="text-[11px] text-muted-foreground">Indisponível agora — {whyNot.join(" ")}</p>}
-            </>
-          )}
-          <p className="text-[11px] text-muted-foreground">
-            Quando a votação começa, as receitas ficam travadas para sempre. Pausar ou prorrogar não libera a edição nem apaga votos. Para encerrar, use o passo 1 abaixo.
-          </p>
-        </CardContent>
-      </Card>
-
-      {/* 3 — Ranking (votos por receita) */}
+      {/* 2 — Ranking (votos por receita) */}
       <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-vote-ranking">
         <CardContent className="space-y-4 p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -234,20 +213,71 @@ export function VotingTab({ campaignId, results, perms, onChanged, goTab }: TabP
         </CardContent>
       </Card>
 
-      {/* 4 — Do fim da votação ao resultado */}
-      <ResultFlow
-        phase={state}
-        res={res}
-        tally={tally}
-        perms={perms}
-        busy={busy}
-        votesValid={d.votes_valid}
-        onEndNow={() => setEndNowOpen(true)}
-        onTally={() => setTallyOpen(true)}
-        onTie={decideTie}
-        onConfirm={() => setConfirmOpen(true)}
-        onAnnounce={() => setAnnounceOpen(true)}
-      />
+      {/* 3 — Controles: aberto enquanto a votação está em andamento; recolhido nas outras fases */}
+      <Fold
+        title="Controles da votação"
+        hint="Pausar, prorrogar e avisar os colaboradores."
+        icon={<SlidersHorizontal size={18} />}
+        open={ctrlIsOpen}
+        onOpenChange={setCtrlOpen}
+        tutorial="camp-vote-controls"
+      >
+        <div className="space-y-3">
+          {finalized ? (
+            <Notice tone="info">O vencedor já foi confirmado: a votação não pode mais ser alterada.</Notice>
+          ) : !canSchedule ? (
+            <p className="text-xs text-muted-foreground">Você não tem permissão para pausar, prorrogar ou avisar sobre a votação.</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-2">
+                {canReopen ? (
+                  <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => setPauseOpen(true)} disabled={isBusy}>
+                    {busy === "pause" ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Reabrir votação
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => setPauseOpen(true)} disabled={!canPause || isBusy}>
+                    {busy === "pause" ? <Loader2 size={13} className="animate-spin" /> : <Pause size={13} />} Pausar votação
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => setExtendOpen(true)} disabled={!canExtend || isBusy}>
+                  <CalendarPlus size={13} /> Prorrogar
+                </Button>
+                <Button variant="ghost" size="sm" className="gap-2 rounded-xl" onClick={() => setNotifyOpen(true)} disabled={!canNotify || isBusy}>
+                  {busy === "notify" ? <Loader2 size={13} className="animate-spin" /> : <BellRing size={13} />} Avisar que a votação começou
+                </Button>
+              </div>
+              {whyNot.length > 0 && <p className="text-[11px] text-muted-foreground">Indisponível agora — {whyNot.join(" ")}</p>}
+            </>
+          )}
+          <p className="text-[11px] text-muted-foreground">
+            Quando a votação começa, as receitas ficam travadas para sempre. Pausar ou prorrogar não libera a edição nem apaga votos. Para encerrar, use o passo 1 do resultado.
+          </p>
+        </div>
+      </Fold>
+
+      {/* 4 — Do fim da votação ao resultado: aberto quando a votação terminou ou já há resultado */}
+      <Fold
+        title="Do fim da votação ao resultado"
+        hint="Encerrar, apurar, decidir empate, confirmar o vencedor e divulgar."
+        icon={<ListChecks size={18} />}
+        open={flowIsOpen}
+        onOpenChange={setFlowOpen}
+        tutorial="camp-vote-flow"
+      >
+        <ResultFlow
+          phase={state}
+          res={res}
+          tally={tally}
+          perms={perms}
+          busy={busy}
+          votesValid={d.votes_valid}
+          onEndNow={() => setEndNowOpen(true)}
+          onTally={() => setTallyOpen(true)}
+          onTie={decideTie}
+          onConfirm={() => setConfirmOpen(true)}
+          onAnnounce={() => setAnnounceOpen(true)}
+        />
+      </Fold>
 
       {/* Diálogos */}
       <ReasonDialog
@@ -312,6 +342,8 @@ export function VotingTab({ campaignId, results, perms, onChanged, goTab }: TabP
         variant="destructive"
         onConfirm={announce}
       />
+
+      <CampaignTour steps={ADMIN_TOUR_TABS.voting} tour={tour} />
     </div>
   );
 }

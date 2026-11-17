@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
@@ -21,8 +21,7 @@ import type { DisplayState } from "../../../lib/campaigns/format";
 import type {
   AdminCampaign, AdminCampaignDetail, AdminDashboard, AdminResults, AdminStageRow, PublishCheck,
 } from "../../../lib/campaigns/types";
-import { CampaignTour, TourButton, tourKey, useTour } from "../../../components/campaigns/CampaignTour";
-import { ADMIN_TOUR_PANEL } from "../../../lib/campaigns/tours-admin";
+import { TourButton } from "../../../components/campaigns/CampaignTour";
 import { useCampaignPerms } from "./useCampaignPerms";
 import { PublishDialog } from "./PublishDialog";
 import { DuplicateDialog } from "./DuplicateDialog";
@@ -321,12 +320,11 @@ export function AdminCampaignPanel() {
   const [dupOpen, setDupOpen] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [reasoned, setReasoned] = useState<Reasoned>(null);
+  // "Ver tour" (sempre visível, para qualquer perfil) sobe este contador: a aba aberta reabre a própria tour.
+  // Cada aba cuida da sua tour e abre sozinha só na primeira visita àquela aba.
+  const [tourSignal, setTourSignal] = useState(0);
 
   const c = detail.data?.campaign;
-  const tour = useTour({
-    storageKey: tourKey("admin", user?.id, "panel2"),
-    enabled: !permsLoading && isAdmin && !!c,
-  });
 
   // Checklist de publicação: só para rascunhos e para quem pode editar (mesma fonte do diálogo Publicar).
   const stagesKey = JSON.stringify(detail.data?.stages ?? []);
@@ -336,15 +334,16 @@ export function AdminCampaignPanel() {
     [id, checkEnabled, stagesKey, c?.version],
   );
 
+  // `short` só aparece em telas estreitas (5 abas lado a lado, sem rolagem lateral); o nome acessível é sempre o completo.
   const tabs = useMemo(() => {
-    if (!c) return [] as { value: string; label: string; icon: React.ReactNode }[];
+    if (!c) return [] as { value: string; label: string; short: string; icon: React.ReactNode }[];
     const f = c.features;
-    const list: { value: string; label: string; icon: React.ReactNode; show: boolean }[] = [
-      { value: "summary", label: "Resumo", icon: <BarChart3 size={14} />, show: true },
-      { value: "submissions", label: "Receitas", icon: <ChefHat size={14} />, show: !!perms.campaigns_review && f.submission },
-      { value: "participants", label: "Participantes", icon: <Users size={14} />, show: !!perms.campaigns_participants },
-      { value: "voting", label: "Votação", icon: <Vote size={14} />, show: f.voting && (!!perms.campaigns_schedule || !!perms.campaigns_votes_view || !!perms.campaigns_results) },
-      { value: "settings", label: "Configurações", icon: <Settings size={14} />, show: true },
+    const list: { value: string; label: string; short: string; icon: React.ReactNode; show: boolean }[] = [
+      { value: "summary", label: "Resumo", short: "Resumo", icon: <BarChart3 size={18} />, show: true },
+      { value: "submissions", label: "Receitas", short: "Receitas", icon: <ChefHat size={18} />, show: !!perms.campaigns_review && f.submission },
+      { value: "participants", label: "Participantes", short: "Pessoas", icon: <Users size={18} />, show: !!perms.campaigns_participants },
+      { value: "voting", label: "Votação", short: "Votação", icon: <Vote size={18} />, show: f.voting && (!!perms.campaigns_schedule || !!perms.campaigns_votes_view || !!perms.campaigns_results) },
+      { value: "settings", label: "Configurações", short: "Ajustes", icon: <Settings size={18} />, show: true },
     ];
     return list.filter((t) => t.show);
   }, [c, perms]);
@@ -409,7 +408,7 @@ export function AdminCampaignPanel() {
     else setConfirm(kind);
   };
 
-  const tabProps: TabProps = { campaignId: c.id, campaign: c, stages, results, perms, onChanged: refreshAll, goTab };
+  const tabProps: TabProps = { campaignId: c.id, campaign: c, stages, results, perms, onChanged: refreshAll, goTab, tourUserId: user?.id, tourSignal };
 
   // Botão principal: muda conforme a situação da campanha.
   type Primary = { label: string; icon: React.ReactNode; onClick: () => void; outline?: boolean };
@@ -428,6 +427,33 @@ export function AdminCampaignPanel() {
     openPublish: () => setPublishOpen(true), openResume: () => setConfirm("resume"), edit: () => navigate(`${base}/edit`),
   });
 
+  // Frase curta sob o título: quem enxerga a campanha agora.
+  const stateHint: Record<DisplayState, string> = {
+    draft: "Rascunho · só a gestão vê.",
+    scheduled: `Agendada · aparece para os colaboradores em ${fmtDateTime(c.visible_from)}.`,
+    published: "Publicada · visível para os colaboradores elegíveis.",
+    unpublished: "Não publicada · oculta dos colaboradores; tudo continua salvo.",
+    closed: "Encerrada · não recebe mais receitas nem votos.",
+    archived: "Arquivada · fora da lista principal.",
+  };
+
+  // Avisos longos, ciclo e próximo passo ficam DENTRO da aba Resumo (o cabeçalho e as abas ficam enxutos).
+  const summaryTop = (
+    <div className="space-y-4">
+      {isDraft && (
+        <Notice tone="info">Os colaboradores só veem a campanha — e o menu Campanhas — depois que alguém com permissão clicar em Publicar.</Notice>
+      )}
+      {display === "unpublished" && (
+        <Notice tone="warn">Está oculta dos colaboradores. Receitas, votos e histórico continuam salvos; use Republicar para voltar a exibi-la.</Notice>
+      )}
+      {display === "scheduled" && (
+        <Notice tone="info">Os colaboradores passam a ver esta campanha em {fmtDateTime(c.visible_from)}.</Notice>
+      )}
+      <CycleStepper steps={buildCycle(c, display, stages, results, dashboard.data)} />
+      <NextStepCard next={next} busy={busy !== null} />
+    </div>
+  );
+
   const CONFIRM_COPY: Record<Exclude<Confirm, null>, { title: string; description: string; label: string; destructive?: boolean }> = {
     resume: { title: "Republicar a campanha?", description: "Ela volta a aparecer para os colaboradores elegíveis, com tudo o que já estava salvo.", label: "Republicar" },
     archive: { title: "Arquivar a campanha?", description: "Ela sai da lista principal. Os dados e o histórico são preservados.", label: "Arquivar" },
@@ -437,32 +463,37 @@ export function AdminCampaignPanel() {
   };
 
   return (
-    <div className="space-y-5">
-      {/* Cabeçalho */}
-      <div className="space-y-4">
-        <button type="button" onClick={() => navigate("/admin/campaigns")} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft size={12} /> Todas as campanhas
-        </button>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0 space-y-2">
-            <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
-              <Megaphone size={24} className="shrink-0 text-primary" />
+    <div className="space-y-4">
+      {/* Cabeçalho enxuto: nome, situação e ações. As abas vêm logo abaixo. */}
+      <div className="space-y-2.5 sm:space-y-3">
+        {/* Linha 1: voltar (esquerda) + Ver tour (direita, pequeno) */}
+        <div className="flex items-center justify-between gap-2">
+          <button type="button" onClick={() => navigate("/admin/campaigns")} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <ArrowLeft size={12} /> Todas as campanhas
+          </button>
+          <TourButton className="h-8 px-2.5 text-[11px]" onClick={() => setTourSignal((n) => n + 1)} />
+        </div>
+        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2.5">
+          <div className="min-w-0 space-y-1 sm:space-y-1.5">
+            <h1 className="flex items-center gap-2 text-xl font-bold text-foreground sm:text-2xl">
+              <Megaphone className="h-5 w-5 shrink-0 text-primary sm:h-6 sm:w-6" />
               <span className="min-w-0 break-words">{c.name}</span>
             </h1>
             <div data-tutorial="camp-panel-state" className="flex flex-wrap items-center gap-2">
               <Badge className={cn("border px-3 py-1 text-xs", state.className)} title={state.hint}>{state.label}</Badge>
               {phase && <Badge className={cn("border text-[10px]", phase.className)}>{phase.label}</Badge>}
               {c.status === "in_review" && !perms.campaigns_publish && <Badge className={cn("border text-[10px]", YELLOW)}>Aguardando publicação</Badge>}
-              <span className="font-mono text-[11px] text-muted-foreground">/campanhas/{c.slug}</span>
+              <span className="hidden font-mono text-[11px] text-muted-foreground sm:inline">/campanhas/{c.slug}</span>
             </div>
+            <p className="text-[11px] text-muted-foreground sm:text-xs">{stateHint[display]}</p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <TourButton onClick={tour.start} />
+          {/* Ações numa linha só: principal (ocupa o espaço) + Editar (só ícone no celular) + ⋯ */}
+          <div className="flex w-full items-center gap-2 sm:w-auto">
             {perms.campaigns_duplicate && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon" className="rounded-xl" aria-label="Mais ações" disabled={busy !== null}>
+                  <Button variant="outline" size="icon" className="order-3 shrink-0 rounded-xl sm:order-1" aria-label="Mais ações" disabled={busy !== null}>
                     {busy !== null ? <Loader2 size={16} className="animate-spin" /> : <MoreHorizontal size={16} />}
                   </Button>
                 </DropdownMenuTrigger>
@@ -472,15 +503,22 @@ export function AdminCampaignPanel() {
               </DropdownMenu>
             )}
             {perms.campaigns_edit && !finished && (
-              <Button data-tutorial="camp-panel-edit" variant="outline" className="gap-2 rounded-xl" onClick={() => navigate(`${base}/edit`)} disabled={busy !== null}>
-                <Pencil size={14} /> Editar
+              <Button
+                data-tutorial="camp-panel-edit"
+                variant="outline"
+                aria-label="Editar campanha"
+                className="order-2 w-11 shrink-0 gap-2 rounded-xl px-0 sm:w-auto sm:px-6"
+                onClick={() => navigate(`${base}/edit`)}
+                disabled={busy !== null}
+              >
+                <Pencil size={14} /> <span className="hidden sm:inline">Editar</span>
               </Button>
             )}
             {primary && (
               <Button
                 data-tutorial="camp-panel-primary"
                 variant={primary.outline ? "outline" : "primary"}
-                className="gap-2 rounded-xl"
+                className="order-1 min-w-0 flex-1 gap-2 rounded-xl sm:order-3 sm:flex-none"
                 onClick={primary.onClick}
                 disabled={busy !== null}
               >
@@ -489,34 +527,32 @@ export function AdminCampaignPanel() {
             )}
           </div>
         </div>
-
-        {/* Uma frase por estado: quem enxerga o quê */}
-        {isDraft && (
-          <Notice tone="info">Rascunho: só a gestão enxerga. Os colaboradores só veem a campanha — e o menu Campanhas — depois que alguém clicar em Publicar.</Notice>
-        )}
-        {display === "unpublished" && (
-          <Notice tone="warn">Não publicada: está oculta dos colaboradores. Receitas, votos e histórico continuam salvos; use Republicar para voltar a exibi-la.</Notice>
-        )}
-        {display === "scheduled" && (
-          <Notice tone="info">Publicação agendada: os colaboradores passam a ver esta campanha em {fmtDateTime(c.visible_from)}.</Notice>
-        )}
       </div>
 
-      {/* Onde estamos e o que fazer agora */}
-      <CycleStepper steps={buildCycle(c, display, stages, results, dashboard.data)} />
-      <NextStepCard next={next} busy={busy !== null} />
-
-      {/* Abas */}
+      {/* Abas: logo abaixo do cabeçalho, grandes, e fixas no topo enquanto a página rola */}
       <Tabs value={tab} onValueChange={(v) => goTab(v)} className="gap-4">
-        <div className="-mx-1 overflow-x-auto px-1 pb-1">
-          <TabsList data-tutorial="camp-panel-tabs" className="h-10 w-max min-w-full justify-start">
+        <StickyBar>
+          <TabsList
+            data-tutorial="camp-panel-tabs"
+            aria-label="Áreas da campanha"
+            className="grid h-auto w-full gap-1 rounded-2xl p-1"
+            style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}
+          >
             {tabs.map((t) => (
-              <TabsTrigger key={t.value} value={t.value} data-tutorial={`camp-tab-${t.value}`} className="flex-none px-3.5">
-                {t.icon} {t.label}
+              <TabsTrigger
+                key={t.value}
+                value={t.value}
+                aria-label={t.label}
+                data-tutorial={`camp-tab-${t.value}`}
+                className="h-auto min-w-0 flex-col gap-1 rounded-xl px-1 py-2 text-[11px] font-semibold sm:flex-row sm:gap-2 sm:px-3 sm:py-2.5 sm:text-sm data-[state=active]:border-primary/30 data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-sm dark:data-[state=active]:border-primary/30 dark:data-[state=active]:bg-primary/15 dark:data-[state=active]:text-primary"
+              >
+                {t.icon}
+                <span className="truncate sm:hidden" aria-hidden="true">{t.short}</span>
+                <span className="hidden truncate sm:inline" aria-hidden="true">{t.label}</span>
               </TabsTrigger>
             ))}
           </TabsList>
-        </div>
+        </StickyBar>
 
         <TabsContent value="summary">
           <SummaryTab
@@ -527,6 +563,7 @@ export function AdminCampaignPanel() {
             onReloadDashboard={dashboard.reload}
             display={display}
             publishCheck={check.data}
+            top={summaryTop}
           />
         </TabsContent>
         {tabs.some((t) => t.value === "submissions") && <TabsContent value="submissions"><SubmissionsTab {...tabProps} /></TabsContent>}
@@ -580,8 +617,56 @@ export function AdminCampaignPanel() {
         pending={busy === "suspend" || busy === "close"}
         onConfirm={onReason}
       />
+    </div>
+  );
+}
 
-      <CampaignTour steps={ADMIN_TOUR_PANEL} tour={tour} />
+// ─────────────────────────────── Barra de abas fixa ───────────────────────────────
+
+/**
+ * Mantém as abas visíveis ao rolar. `position: sticky` não funciona aqui porque o contêiner de conteúdo do admin
+ * tem `overflow: auto` (o sticky ficaria preso a ele), então a barra vira `fixed` logo abaixo da barra superior
+ * do admin (h-16) quando seu lugar original sai da tela, alinhada à largura da coluna de conteúdo.
+ * Se algo falhar, ela simplesmente continua no fluxo normal, no topo da página.
+ */
+const ADMIN_TOP_BAR = 64;
+
+function StickyBar({ children }: { children: React.ReactNode }) {
+  const slot = useRef<HTMLDivElement>(null);
+  const bar = useRef<HTMLDivElement>(null);
+  const [pin, setPin] = useState({ fixed: false, left: 0, width: 0, height: 0 });
+
+  useEffect(() => {
+    const update = () => {
+      const s = slot.current;
+      const b = bar.current;
+      if (!s || !b) return;
+      const r = s.getBoundingClientRect();
+      const height = b.offsetHeight;
+      const fixed = r.top <= ADMIN_TOP_BAR;
+      setPin((p) => (p.fixed === fixed && p.left === r.left && p.width === r.width && p.height === height ? p : { fixed, left: r.left, width: r.width, height }));
+    };
+    update();
+    window.addEventListener("scroll", update, { passive: true, capture: true });
+    window.addEventListener("resize", update);
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    if (ro && bar.current) ro.observe(bar.current);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+      ro?.disconnect();
+    };
+  }, []);
+
+  return (
+    <div ref={slot} style={pin.fixed ? { height: pin.height } : undefined}>
+      <div
+        ref={bar}
+        className={cn(pin.fixed && "fixed z-20 rounded-b-2xl border-b border-border bg-background/95 py-2 shadow-sm backdrop-blur")}
+        style={pin.fixed ? { top: ADMIN_TOP_BAR, left: pin.left, width: pin.width } : undefined}
+      >
+        {children}
+      </div>
     </div>
   );
 }

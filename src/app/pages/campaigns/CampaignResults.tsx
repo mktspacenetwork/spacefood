@@ -46,13 +46,20 @@ export function CampaignResults() {
     enabled: !!state.tour?.enabled && !!user && !!data?.winner,
   });
 
+  // "Ver tour" fica visível também enquanto o resultado não foi divulgado.
   if (hidden) {
     return (
-      <EmptyState
-        icon={<Lock size={22} aria-hidden="true" />}
-        title="Resultado ainda não divulgado"
-        description="Assim que a campanha divulgar o resultado oficial, ele aparece aqui."
-      />
+      <div className="space-y-4">
+        <div className="flex justify-end">
+          <TourButton onClick={tour.start} />
+        </div>
+        <EmptyState
+          icon={<Lock size={22} aria-hidden="true" />}
+          title="Resultado ainda não divulgado"
+          description="Assim que a campanha divulgar o resultado oficial, ele aparece aqui."
+        />
+        <CampaignTour steps={RESULTS_TOUR} tour={tour} />
+      </div>
     );
   }
   if (error) return <ErrorState message={error} onRetry={() => void load()} />;

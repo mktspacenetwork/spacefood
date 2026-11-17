@@ -11,4 +11,8 @@ export type TabProps = {
   onChanged: () => void;
   /** Troca de aba por código (ex.: "Ir para Receitas"). `section` abre uma seção da aba (ex.: settings → schedule). */
   goTab?: (tab: string, section?: string) => void;
+  /** Quem está vendo (a tour de cada aba lembra, por pessoa, que já foi mostrada). */
+  tourUserId?: string;
+  /** Sobe a cada clique em "Ver tour" no cabeçalho: a aba aberta reabre a própria tour. */
+  tourSignal?: number;
 };

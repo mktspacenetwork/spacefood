@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { formatInTimeZone } from "date-fns-tz";
 import { BarChart3, Check, RefreshCw, Trophy, X } from "lucide-react";
@@ -14,8 +14,12 @@ import type { DisplayState } from "../../../../lib/campaigns/format";
 import type {
   AdminDashboard, AdminParticipant, AdminSubmissionRow, PublishCheck,
 } from "../../../../lib/campaigns/types";
+import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
+import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
 import { EmptyBox, ErrorBox, LoadingBox, Notice, SectionLabel, useLoader } from "../shared";
 import type { TabProps } from "./types";
+import { Fold, TabIntro } from "./ui";
+import { useTabTour } from "./useTabTour";
 
 export type SummaryTabProps = TabProps & {
   dashboard: AdminDashboard | null;
@@ -25,28 +29,43 @@ export type SummaryTabProps = TabProps & {
   display: DisplayState;
   /** Resultado do checklist de publicação (só existe para rascunhos e para quem pode editar). */
   publishCheck: PublishCheck | null;
+  /** Avisos de estado + ciclo da campanha + "próximo passo": o painel monta e o Resumo mostra no topo. */
+  top?: React.ReactNode;
 };
 
 /**
- * Painel da campanha: mostra só o que ajuda a decidir. Cada bloco respeita a permissão da pessoa
+ * Resumo da campanha: mostra só o que ajuda a decidir. Cada bloco respeita a permissão da pessoa
  * e some quando a funcionalidade está desligada ou quando a fase ainda não começou (nada de cartões de zeros).
+ * Ordem: situação e próximo passo → números principais → ranking → "Mais indicadores" (recolhido).
  */
 export function SummaryTab(props: SummaryTabProps) {
-  const { campaignId, campaign, perms, goTab, dashboard: d, dashboardLoading, dashboardError, onReloadDashboard, display, publishCheck } = props;
+  const {
+    campaignId, campaign, perms, goTab, dashboard: d, dashboardLoading, dashboardError, onReloadDashboard, display,
+    publishCheck, top, tourUserId, tourSignal,
+  } = props;
   const navigate = useNavigate();
   const f = campaign.features;
   const isDraft = display === "draft";
+  const [moreOpen, setMoreOpen] = useState(false);
 
-  const wantSubs = !isDraft && !!perms.campaigns_review && f.submission && (d?.submissions ?? 0) > 0;
+  // Gráficos secundários só carregam quando a pessoa abre "Mais indicadores".
+  const canSubs = !isDraft && !!perms.campaigns_review && f.submission && (d?.submissions ?? 0) > 0;
+  const canParts = !isDraft && !!perms.campaigns_participants && f.submission;
   const subs = useLoader<AdminSubmissionRow[]>(
-    () => (wantSubs ? campaignsApi.get(`/admin/campaigns/${campaignId}/submissions`) : Promise.resolve([])),
-    [campaignId, wantSubs, d?.submissions],
+    () => (canSubs && moreOpen ? campaignsApi.get(`/admin/campaigns/${campaignId}/submissions`) : Promise.resolve([])),
+    [campaignId, canSubs, moreOpen, d?.submissions],
   );
-  const wantParts = !isDraft && !!perms.campaigns_participants && f.submission;
   const parts = useLoader<{ items: AdminParticipant[] }>(
-    () => (wantParts ? campaignsApi.get(`/admin/campaigns/${campaignId}/participants`) : Promise.resolve({ items: [] })),
-    [campaignId, wantParts, d?.participants],
+    () => (canParts && moreOpen ? campaignsApi.get(`/admin/campaigns/${campaignId}/participants`) : Promise.resolve({ items: [] })),
+    [campaignId, canParts, moreOpen, d?.participants],
   );
+
+  // A tour desta aba só abre sozinha quando o conteúdo (e os alvos) já existe.
+  const tour = useTabTour("summary", {
+    tourUserId, tourSignal,
+    ready: isDraft ? true : !!d && !dashboardLoading,
+  });
+  const tourEl = <CampaignTour steps={ADMIN_TOUR_TABS.summary} tour={tour} />;
 
   // ───────────────────────── Rascunho: checklist em vez de zeros ─────────────────────────
   if (isDraft) {
@@ -58,6 +77,8 @@ export function SummaryTab(props: SummaryTabProps) {
         : () => navigate(`/admin/campaigns/${campaignId}/edit`);
     return (
       <div className="space-y-4">
+        <TabIntro>Acompanhe em que etapa a campanha está e o que fazer agora. Enquanto for rascunho, veja o que falta para publicar.</TabIntro>
+        {top}
         {publishCheck ? (
           <Card className="rounded-3xl border" data-tutorial="camp-summary-checklist">
             <CardContent className="space-y-4 p-5">
@@ -94,11 +115,10 @@ export function SummaryTab(props: SummaryTabProps) {
         ) : (
           <Notice tone="info" title="Rascunho">Complete as informações e as datas; depois a pessoa com permissão clica em Publicar.</Notice>
         )}
-        <EmptyBox
-          icon={<BarChart3 size={34} />}
-          title="Os indicadores aparecem aqui quando a campanha for publicada"
-          hint="Participação, receitas, votos e ranking, sempre com o que está acontecendo agora."
-        />
+        <p className="px-1 text-center text-xs text-muted-foreground">
+          Participação, receitas, votos e ranking aparecem aqui quando a campanha for publicada.
+        </p>
+        {tourEl}
       </div>
     );
   }
@@ -123,21 +143,27 @@ export function SummaryTab(props: SummaryTabProps) {
 
   const refresh = () => {
     onReloadDashboard();
-    subs.reload();
-    parts.reload();
+    if (moreOpen) {
+      subs.reload();
+      parts.reload();
+    }
   };
 
-  const daily = wantSubs && (subs.data?.length ?? 0) > 0;
-  const byUnit = wantParts && (parts.data?.items.length ?? 0) > 0;
-  const chartCount = Number(daily) + Number(byUnit);
+  const hasMore = d.submissions > 0 && (canSubs || canParts);
 
   return (
     <div className="space-y-5">
-      <div className="flex justify-end">
-        <Button variant="ghost" size="sm" className="gap-2 rounded-xl text-muted-foreground" onClick={refresh} disabled={dashboardLoading}>
-          <RefreshCw size={13} className={cn(dashboardLoading && "animate-spin")} /> Atualizar
-        </Button>
-      </div>
+      <TabIntro
+        action={(
+          <Button variant="ghost" size="sm" className="gap-2 rounded-xl text-muted-foreground" onClick={refresh} disabled={dashboardLoading}>
+            <RefreshCw size={13} className={cn(dashboardLoading && "animate-spin")} /> Atualizar
+          </Button>
+        )}
+      >
+        Veja em que etapa a campanha está, o que fazer agora e os números que importam.
+      </TabIntro>
+
+      {top}
 
       <div data-tutorial="camp-summary-cards" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {/* Participação */}
@@ -267,12 +293,28 @@ export function SummaryTab(props: SummaryTabProps) {
         </Card>
       )}
 
-      {/* Ritmo e alcance */}
-      {chartCount > 0 && (
-        <div className={cn("grid grid-cols-1 gap-3", chartCount === 2 && "lg:grid-cols-2")}>
-          {daily && <DailyBars rows={subs.data ?? []} />}
-          {byUnit && <UnitBars items={parts.data?.items ?? []} />}
-        </div>
+      {/* Ritmo e alcance: recolhido para não encher a tela; só carrega ao abrir */}
+      {hasMore && (
+        <Fold
+          title="Mais indicadores"
+          hint="Receitas enviadas por dia e participação por unidade."
+          icon={<BarChart3 size={18} />}
+          open={moreOpen}
+          onOpenChange={setMoreOpen}
+          tutorial="camp-summary-more"
+        >
+          <MoreIndicators
+            wantSubs={canSubs}
+            wantParts={canParts}
+            subsLoading={subs.loading && !subs.data?.length}
+            partsLoading={parts.loading && !parts.data?.items.length}
+            subsError={subs.error}
+            partsError={parts.error}
+            rows={subs.data ?? []}
+            items={parts.data?.items ?? []}
+            onRetry={() => { subs.reload(); parts.reload(); }}
+          />
+        </Fold>
       )}
 
       {d.submissions === 0 && (
@@ -282,6 +324,35 @@ export function SummaryTab(props: SummaryTabProps) {
           hint="Quando as receitas chegarem, o ritmo de envios por dia e a participação por unidade aparecem aqui."
         />
       )}
+      {tourEl}
+    </div>
+  );
+}
+
+function MoreIndicators({
+  wantSubs, wantParts, subsLoading, partsLoading, subsError, partsError, rows, items, onRetry,
+}: {
+  wantSubs: boolean;
+  wantParts: boolean;
+  subsLoading: boolean;
+  partsLoading: boolean;
+  subsError: string | null;
+  partsError: string | null;
+  rows: AdminSubmissionRow[];
+  items: AdminParticipant[];
+  onRetry: () => void;
+}) {
+  const loading = (wantSubs && subsLoading) || (wantParts && partsLoading);
+  if (loading) return <LoadingBox />;
+  const error = (wantSubs && subsError) || (wantParts && partsError);
+  if (error && rows.length === 0 && items.length === 0) return <ErrorBox message={error} onRetry={onRetry} />;
+  const daily = wantSubs && rows.length > 0;
+  const byUnit = wantParts && items.length > 0;
+  if (!daily && !byUnit) return <p className="text-sm text-muted-foreground">Ainda não há dados suficientes para estes gráficos.</p>;
+  return (
+    <div className={cn("grid grid-cols-1 gap-5", daily && byUnit && "lg:grid-cols-2")}>
+      {daily && <DailyBars rows={rows} />}
+      {byUnit && <UnitBars items={items} />}
     </div>
   );
 }
@@ -290,15 +361,13 @@ export function SummaryTab(props: SummaryTabProps) {
 
 function WidgetShell({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
-    <Card className="rounded-3xl border">
-      <CardContent className="space-y-4 p-5">
-        <div>
-          <SectionLabel>{title}</SectionLabel>
-          {hint && <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>}
-        </div>
-        {children}
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      <div>
+        <SectionLabel>{title}</SectionLabel>
+        {hint && <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>}
+      </div>
+      {children}
+    </div>
   );
 }
 

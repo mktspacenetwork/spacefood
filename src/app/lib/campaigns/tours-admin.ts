@@ -1,7 +1,8 @@
 import { createElement } from "react";
 import {
   Megaphone, Power, BarChart3, FilePlus2, ListChecks, IdCard, Users, SlidersHorizontal, CalendarClock,
-  ClipboardCheck, LayoutList, ChefHat, Vote, Activity, MousePointerClick, Pencil, Route, Compass, Settings,
+  ClipboardCheck, ChefHat, Vote, MousePointerClick, Route, LayoutList, Search, Trophy, FileDown, ShieldAlert,
+  ListFilter, Gauge,
 } from "lucide-react";
 import type { TourStep } from "../../components/campaigns/CampaignTour";
 
@@ -92,92 +93,178 @@ export const ADMIN_TOUR_WIZARD: TourStep[] = [
   },
 ];
 
-/** Painel de uma campanha (central da campanha: situação, ciclo, próximo passo e 5 abas). */
-export const ADMIN_TOUR_PANEL: TourStep[] = [
-  {
-    selector: "camp-panel-state",
-    title: "Em que pé está a campanha",
-    description:
-      "Aqui você vê a situação (Rascunho, Publicada, Não publicada ou Encerrada) e a fase atual, como inscrições abertas ou votação aberta. Rascunho e Não publicada ficam escondidos dos colaboradores.",
-    icon: icon(Activity),
-    placement: "bottom",
-  },
-  {
-    selector: "camp-panel-primary",
-    title: "O botão principal",
-    description:
-      "Ele muda conforme a situação: Publicar libera a campanha, Despublicar tira de exibição sem apagar nada e Republicar volta a exibir. Tudo continua salvo.",
-    icon: icon(MousePointerClick),
-    placement: "bottom",
-  },
-  {
-    selector: "camp-panel-edit",
-    title: "Editar",
-    description: "Ajuste nome, descrição, orientações, público e funcionalidades a qualquer momento. Salvar não publica nada.",
-    icon: icon(Pencil),
-    placement: "bottom",
-  },
-  {
-    selector: "camp-panel-cycle",
-    title: "Ciclo da campanha",
-    description:
-      "Inscrições, análise, votação, resultado e divulgação, com as datas de cada etapa. O passo destacado é onde a campanha está agora.",
-    icon: icon(Route),
-    placement: "bottom",
-  },
-  {
-    selector: "camp-panel-next",
-    title: "Próximo passo",
-    description:
-      "Sempre mostra a única coisa que vale fazer agora, com um botão direto: definir datas, analisar receitas, apurar a votação, confirmar ou divulgar o resultado.",
-    icon: icon(Compass),
-    placement: "bottom",
-  },
-  {
-    selector: "camp-panel-tabs",
-    title: "Cinco abas",
-    description: "Resumo, Receitas, Participantes, Votação e Configurações. Você só vê as abas que a sua permissão libera.",
-    icon: icon(LayoutList),
-    placement: "bottom",
-  },
-  {
-    selector: "camp-tab-summary",
-    title: "Resumo",
-    description:
-      "O painel da campanha: participação, receitas por situação, votos, ranking das mais votadas, ritmo de envios por dia e participação por unidade. Antes de publicar, mostra o que falta.",
-    icon: icon(BarChart3),
-    placement: "bottom",
-  },
-  {
-    selector: "camp-tab-submissions",
-    title: "Receitas",
-    description:
-      "Aprove ou reprove cada receita. Para reprovar, a justificativa precisa ter pelo menos 10 caracteres: o colaborador a vê e pode ajustar a receita.",
-    icon: icon(ChefHat),
-    placement: "bottom",
-  },
-  {
-    selector: "camp-tab-participants",
-    title: "Participantes",
-    description:
-      "Uma tabela com cada participante, a receita, os votos que recebeu e a posição. Ao abrir uma linha, quem tem permissão vê quem votou naquela receita.",
-    icon: icon(Users),
-    placement: "bottom",
-  },
-  {
-    selector: "camp-tab-voting",
-    title: "Votação e resultado",
-    description:
-      "Veja se a votação está aberta ou encerrada, pause, prorrogue ou encerre. Depois siga o passo a passo: apurar, decidir empate se houver, confirmar o vencedor e divulgar. A divulgação não pode ser desfeita.",
-    icon: icon(Vote),
-    placement: "bottom",
-  },
-  {
-    selector: "camp-tab-settings",
-    title: "Configurações",
-    description:
-      "Informações da campanha, calendário, relatórios em planilha, histórico completo (quem fez o quê e por quê) e a zona de risco, com encerrar, arquivar e excluir rascunho.",
-    icon: icon(Settings),
-    placement: "bottom",
-  },
-];
+/**
+ * Painel de uma campanha: UMA TOUR POR ABA. Cada uma abre sozinha na primeira vez que a pessoa entra na aba
+ * (para qualquer perfil) e depois só por "Ver tour". Passo cujo alvo não existe na tela é pulado — por isso
+ * quem não tem uma permissão simplesmente não vê o passo correspondente.
+ */
+export type PanelTourKey = "summary" | "submissions" | "participants" | "voting" | "settings";
+
+export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
+  summary: [
+    {
+      selector: "camp-panel-primary",
+      title: "O botão principal",
+      description:
+        "Ele muda conforme a situação: Publicar libera a campanha, Despublicar tira de exibição sem apagar nada e Republicar volta a exibir. Salvar uma edição nunca publica sozinho.",
+      icon: icon(MousePointerClick),
+      placement: "bottom",
+    },
+    {
+      selector: "camp-panel-tabs",
+      title: "As áreas da campanha",
+      description:
+        "Resumo, Receitas, Participantes, Votação e Configurações ficam sempre aqui no topo, fixas enquanto você rola. Cada área abre a sua própria tour na primeira visita.",
+      icon: icon(LayoutList),
+      placement: "bottom",
+    },
+    {
+      selector: "camp-panel-cycle",
+      title: "Ciclo e próximo passo",
+      description:
+        "O ciclo mostra em que etapa a campanha está (inscrições, análise, votação, resultado e divulgação) e o cartão logo abaixo diz a única coisa que vale fazer agora, com um botão direto.",
+      icon: icon(Route),
+      placement: "bottom",
+    },
+    {
+      selector: "camp-summary-checklist",
+      title: "O que falta para publicar",
+      description:
+        "Enquanto é rascunho, esta lista mostra o que ainda impede a publicação. Cada item pendente tem um botão que leva direto ao lugar de resolver.",
+      icon: icon(ClipboardCheck),
+      placement: "top",
+    },
+    {
+      selector: "camp-summary-cards",
+      title: "Os números que importam",
+      description:
+        "Participação, receitas por situação, votos e resultado. O que ainda não faz sentido (como votos antes da votação) nem aparece. Mais abaixo vêm o ranking e, em \"Mais indicadores\", o ritmo de envios e a participação por unidade.",
+      icon: icon(Gauge),
+      placement: "bottom",
+    },
+  ],
+
+  submissions: [
+    {
+      selector: "camp-sub-filters",
+      title: "Encontre receitas",
+      description:
+        "Filtre por situação (com a contagem de cada uma), busque por prato ou participante e, se precisar, limite por data de envio.",
+      icon: icon(ListFilter),
+      placement: "bottom",
+    },
+    {
+      selector: "camp-sub-list",
+      title: "O que precisa de ação vem primeiro",
+      description:
+        "As receitas aguardando análise ficam no topo da lista. Depois que a votação começa, as pendentes ficam de fora dela e o grupo de receitas é fechado.",
+      icon: icon(ChefHat),
+      placement: "top",
+    },
+    {
+      selector: "camp-sub-open",
+      title: "Abrir para analisar",
+      description:
+        "No detalhe você vê fotos, vídeo e texto, e aprova ou reprova. Para reprovar, a justificativa precisa ter pelo menos 10 caracteres: o colaborador a lê e pode ajustar a receita.",
+      icon: icon(ClipboardCheck),
+      placement: "top",
+    },
+  ],
+
+  participants: [
+    {
+      selector: "camp-part-toolbar",
+      title: "Busque e filtre as pessoas",
+      description:
+        "Procure por nome, departamento, unidade ou prato. Os filtros mostram quantas pessoas há em cada grupo, como quem enviou receita e quem ainda não enviou.",
+      icon: icon(Search),
+      placement: "bottom",
+    },
+    {
+      selector: "camp-part-table",
+      title: "Uma tabela só",
+      description:
+        "Cada linha é uma pessoa, com a receita, quantos votos recebeu, a posição e se já votou. As colunas de votos aparecem de acordo com a sua permissão.",
+      icon: icon(Users),
+      placement: "top",
+    },
+    {
+      selector: "camp-part-row",
+      title: "Abra uma linha",
+      description:
+        "Toque em uma pessoa para ver a receita dela e, com a permissão certa, de quem vieram os votos. É aqui também que um voto pode ser invalidado, sempre com justificativa.",
+      icon: icon(Trophy),
+      placement: "top",
+    },
+  ],
+
+  voting: [
+    {
+      selector: "camp-vote-status",
+      title: "A votação está aberta ou encerrada?",
+      description:
+        "A situação, o período, quando ela fecha e quantos elegíveis já votaram ficam juntos aqui, sem números repetidos em outras telas.",
+      icon: icon(Vote),
+      placement: "bottom",
+    },
+    {
+      selector: "camp-vote-ranking",
+      title: "Ranking parcial ou oficial",
+      description:
+        "Votos por receita. Enquanto o vencedor não é confirmado ele aparece como Parcial, e só a gestão vê. Para saber quem votou em quem, use Participantes.",
+      icon: icon(Trophy),
+      placement: "top",
+    },
+    {
+      selector: "camp-vote-controls",
+      title: "Pausar, prorrogar, avisar",
+      description:
+        "Controles da votação em andamento. Pausar ou prorrogar nunca apaga votos nem libera a edição das receitas.",
+      icon: icon(SlidersHorizontal),
+      placement: "top",
+    },
+    {
+      selector: "camp-vote-flow",
+      title: "Do fim da votação ao resultado",
+      description:
+        "Passo a passo: encerrar, apurar, decidir empate se houver, confirmar o vencedor e divulgar. O passo que você pode fazer agora fica destacado, e a divulgação não pode ser desfeita.",
+      icon: icon(ListChecks),
+      placement: "top",
+    },
+  ],
+
+  settings: [
+    {
+      selector: "camp-sec-info",
+      title: "Informações e edição",
+      description:
+        "O que os colaboradores leem sobre a campanha. O botão Editar leva ao assistente, e salvar nunca publica nada.",
+      icon: icon(IdCard),
+      placement: "bottom",
+    },
+    {
+      selector: "camp-sec-schedule",
+      title: "Calendário",
+      description:
+        "Datas e horários de Brasília de cada etapa. Para a votação em andamento, pausar e prorrogar ficam na aba Votação.",
+      icon: icon(CalendarClock),
+      placement: "bottom",
+    },
+    {
+      selector: "camp-sec-reports",
+      title: "Relatórios e histórico",
+      description:
+        "Baixe planilhas da campanha (abrem direto no Excel) e consulte o histórico completo: quem fez o quê, quando e por quê.",
+      icon: icon(FileDown),
+      placement: "bottom",
+    },
+    {
+      selector: "camp-sec-danger",
+      title: "Zona de risco",
+      description:
+        "Voltar a rascunho, encerrar, arquivar e excluir rascunho. Cada ação pede confirmação, e as que mudam o destino da campanha ficam separadas do dia a dia.",
+      icon: icon(ShieldAlert),
+      placement: "top",
+    },
+  ],
+};

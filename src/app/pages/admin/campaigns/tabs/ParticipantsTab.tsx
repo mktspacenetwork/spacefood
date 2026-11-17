@@ -12,8 +12,12 @@ import { cn } from "../../../../lib/utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
 import { SUBMISSION_STATUS, fmtDateTime, plural } from "../../../../lib/campaigns/format";
 import type { AdminParticipant, AdminResults, AdminSubmissionRow, AdminVote, TallyRow } from "../../../../lib/campaigns/types";
+import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
+import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
 import { EmptyBox, ErrorBox, LoadingBox, Notice, ReasonDialog, SectionLabel, useBusy, useLoader } from "../shared";
 import type { TabProps } from "./types";
+import { TabIntro } from "./ui";
+import { useTabTour } from "./useTabTour";
 
 /**
  * PARTICIPANTES — o único lugar para ver pessoas, votos recebidos e de quem vieram.
@@ -24,7 +28,7 @@ import type { TabProps } from "./types";
 
 type PartPayload = { with_votes: boolean; items: AdminParticipant[] };
 type ResPayload = { results: AdminResults | null; tally: TallyRow[] };
-type Seg = "all" | "sent" | "not_sent" | "approved" | "voted" | "not_voted";
+type Seg = "all" | "sent" | "not_sent" | "voted" | "not_voted";
 type SortKey = "auto" | "votes" | "name";
 
 type Row = {
@@ -37,7 +41,7 @@ type Row = {
 
 const byName = (a: Row, b: Row) => a.p.user_name.localeCompare(b.p.user_name, "pt-BR");
 
-export function ParticipantsTab({ campaignId, campaign, results, perms, onChanged }: TabProps) {
+export function ParticipantsTab({ campaignId, campaign, results, perms, onChanged, tourUserId, tourSignal }: TabProps) {
   const hasVoting = !!campaign.features.voting;
   const canResults = hasVoting && !!perms.campaigns_results;
   const canVotes = hasVoting && !!perms.campaigns_votes_view;
@@ -60,6 +64,8 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
     [campaignId, canSubs],
   );
   const { busy, run } = useBusy();
+  // A tour desta aba abre sozinha (uma vez) quando a lista já carregou.
+  const tour = useTabTour("participants", { tourUserId, tourSignal, ready: !!people.data });
 
   const [q, setQ] = useState("");
   const [seg, setSeg] = useState<Seg>("all");
@@ -119,7 +125,6 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
       }
       if (seg === "sent") return !!r.p.submission_id;
       if (seg === "not_sent") return !r.p.submission_id;
-      if (seg === "approved") return r.approved;
       if (seg === "voted") return r.p.voted === true;
       if (seg === "not_voted") return r.p.voted === false;
       return true;
@@ -141,7 +146,6 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
     all: allRows.length,
     sent: allRows.filter((r) => r.p.submission_id).length,
     not_sent: allRows.filter((r) => !r.p.submission_id).length,
-    approved: allRows.filter((r) => r.approved).length,
     voted: allRows.filter((r) => r.p.voted === true).length,
     not_voted: allRows.filter((r) => r.p.voted === false).length,
   }), [allRows]);
@@ -154,13 +158,11 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
   const pct = (n: number) => (total ? Math.round((n / total) * 100) : 0);
   const showVoted = withVotes && hasVoting;
   const selectedRow = selectedId ? allRows.find((r) => r.p.user_id === selectedId) ?? null : null;
-  const approvedCount = allRows.filter((r) => r.approved).length;
 
   const chips: { value: Seg; label: string; show: boolean }[] = [
     { value: "all", label: "Todos", show: true },
     { value: "sent", label: "Com receita", show: true },
     { value: "not_sent", label: "Sem receita", show: true },
-    { value: "approved", label: "Aprovadas", show: hasVoting },
     { value: "voted", label: "Já votaram", show: showVoted },
     { value: "not_voted", label: "Ainda não votaram", show: showVoted },
   ];
@@ -183,21 +185,18 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
 
   return (
     <div className="space-y-4">
-      {/* Faixa-resumo: poucos números, os que importam para a participação */}
-      <Card className="rounded-3xl border hover:shadow-sm">
-        <div className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
-          <StripItem label="Pessoas na campanha" value={total} />
-          <StripItem label="Enviaram receita" value={sent} hint={`${pct(sent)}% de participação`} />
-          <StripItem label="Sem receita" value={counts.not_sent} />
-          {showVoted && <StripItem label="Já votaram" value={counts.voted} hint={`${counts.voted} de ${total} (${pct(counts.voted)}%)`} />}
-          {hasVoting && !showVoted && <StripItem label="Receitas aprovadas" value={approvedCount} />}
-        </div>
-      </Card>
+      <TabIntro>
+        Veja quem participa{hasVoting ? ", quantos votos cada pessoa recebeu e de quem vieram" : ""}. Clique em uma pessoa para abrir o detalhe.
+      </TabIntro>
+      <p className="-mt-2 text-xs text-muted-foreground">
+        <b className="text-foreground">{sent}</b> de {total} enviaram receita ({pct(sent)}%)
+        {showVoted && <> · <b className="text-foreground">{counts.voted}</b> já votaram ({pct(counts.voted)}%)</>}
+      </p>
 
-      {/* Busca, filtros e ordenação */}
-      <div className="space-y-3">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className={cn("relative", canResults ? "sm:col-span-2" : "sm:col-span-3")}>
+      {/* Busca, ordenação e filtros: uma barra só */}
+      <div className="space-y-3" data-tutorial="camp-part-toolbar">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[14rem] flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input
               value={q}
@@ -209,7 +208,7 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
           </div>
           {canResults && (
             <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
-              <SelectTrigger className="h-10 rounded-xl" aria-label="Ordenar participantes"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-10 w-[10.5rem] rounded-xl" aria-label="Ordenar participantes"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="auto">Ordem sugerida</SelectItem>
                 <SelectItem value="votes">Mais votos primeiro</SelectItem>
@@ -234,9 +233,6 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
             </button>
           ))}
         </div>
-        <p className="text-xs text-muted-foreground">
-          Clique em uma pessoa para ver a receita dela{hasVoting ? ", quantos votos recebeu e de quem vieram" : ""}.
-        </p>
         {missing.length > 0 && <Notice tone="info">Nesta tela, {missing.join("; ")}.</Notice>}
         {(res.error && !res.data) && <Notice tone="warn" title="Não foi possível carregar os votos recebidos">{res.error} <button type="button" className="underline" onClick={res.reload}>Tentar de novo</button></Notice>}
       </div>
@@ -251,7 +247,7 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
       ) : (
         <>
           <p className="text-xs text-muted-foreground">{plural(rows.length, "pessoa", "pessoas")}</p>
-          <Card className="overflow-hidden rounded-3xl border hover:shadow-sm">
+          <Card className="overflow-hidden rounded-3xl border hover:shadow-sm" data-tutorial="camp-part-table">
             <div className="overflow-x-auto">
               <Table className="min-w-[40rem]">
                 <TableHeader>
@@ -265,12 +261,13 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((r) => {
+                  {rows.map((r, idx) => {
                     const st = r.p.submission_status ? SUBMISSION_STATUS[r.p.submission_status] : null;
                     const open = () => setSelectedId(r.p.user_id);
                     return (
                       <TableRow
                         key={r.p.user_id}
+                        data-tutorial={idx === 0 ? "camp-part-row" : undefined}
                         tabIndex={0}
                         onClick={open}
                         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } }}
@@ -366,16 +363,7 @@ export function ParticipantsTab({ campaignId, campaign, results, perms, onChange
         onConfirm={invalidate}
       />
 
-    </div>
-  );
-}
-
-function StripItem({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</span>
-      <span className="text-2xl font-bold tabular-nums text-foreground">{value}</span>
-      {hint && <span className="text-[11px] text-muted-foreground">{hint}</span>}
+      <CampaignTour steps={ADMIN_TOUR_TABS.participants} tour={tour} />
     </div>
   );
 }

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Check, Loader2, Megaphone, Minus, ShieldCheck, Square, Trophy, Vote as VoteIcon } from "lucide-react";
 import { Button } from "../../../../components/ui/Button";
-import { Card, CardContent } from "../../../../components/ui/Card";
 import { Label } from "../../../../components/ui/label";
 import { Textarea } from "../../../../components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../../components/ui/select";
@@ -9,7 +8,7 @@ import { cn } from "../../../../lib/utils";
 import { fmtDateTime, plural } from "../../../../lib/campaigns/format";
 import type { PhaseState } from "../../../../lib/campaigns/format";
 import type { AdminResults, TallyRow } from "../../../../lib/campaigns/types";
-import { Notice, SectionLabel } from "../shared";
+import { Notice } from "../shared";
 
 /**
  * Do fim da votação ao resultado, em 5 passos visíveis. O passo "atual" fica destacado e traz o botão certo:
@@ -109,12 +108,8 @@ export function ResultFlow({ phase, res, tally, perms, busy, votesValid, onEndNo
   const reasonLen = tieReason.trim().length;
 
   return (
-    <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-vote-flow">
-      <CardContent className="space-y-4 p-5">
-        <div className="space-y-1">
-          <SectionLabel>Do fim da votação ao resultado</SectionLabel>
-          <p className="text-xs text-muted-foreground">Siga os passos em ordem: o que você pode fazer agora está destacado.</p>
-        </div>
+    <div className="space-y-4">
+        <p className="text-xs text-muted-foreground">Siga os passos em ordem: o que você pode fazer agora está destacado.</p>
 
         <ol className="space-y-0">
           {/* 1 — Encerrar */}
@@ -274,7 +269,6 @@ export function ResultFlow({ phase, res, tally, perms, busy, votesValid, onEndNo
             )}
           </Step>
         </ol>
-      </CardContent>
-    </Card>
+    </div>
   );
 }

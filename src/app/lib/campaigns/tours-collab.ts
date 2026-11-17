@@ -1,16 +1,33 @@
 import { createElement } from "react";
-import { Megaphone, CalendarDays, LayoutGrid, MousePointerClick, UserRound, ListChecks, Camera, Send, Activity, MessageSquareWarning, Pencil, Vote, ShieldCheck, ListOrdered, Trophy, Bell } from "lucide-react";
+import {
+  Megaphone, CalendarDays, LayoutGrid, MousePointerClick, UserRound, ListChecks, Camera, Send, Activity,
+  MessageSquareWarning, Pencil, Vote, ShieldCheck, ListOrdered, Trophy, Bell, BookOpen, Images, NotebookPen,
+  ClipboardList,
+} from "lucide-react";
 import type { TourStep } from "../../components/campaigns/CampaignTour";
 
 const icon = (C: Parameters<typeof createElement>[0]) => createElement(C as never, { size: 20 });
 
+/*
+ * Regra única de todas as tours (colaborador e admin):
+ *  - abre sozinha UMA vez, na primeira vez que a pessoa vê a tela com o conteúdo carregado;
+ *  - depois só reabre pelo botão "Ver tour", que existe em toda tela.
+ * Telas que podem aparecer sem alvos na tela (aviso, lista vazia, etapa fechada) começam com um passo
+ * SEM `selector`: ele aparece centralizado e garante que o "Ver tour" sempre mostre alguma orientação.
+ */
+
 /** Lista de campanhas (/campanhas). `camp-nav` fica no item "Campanhas" do menu (AppLayout). */
 export const LIST_TOUR: TourStep[] = [
+  {
+    icon: icon(Megaphone),
+    title: "Campanhas",
+    description: "Aqui ficam as campanhas e os concursos do Space Food. Quando houver uma campanha para você, ela aparece em um cartão nesta tela.",
+  },
   {
     selector: "camp-nav",
     icon: icon(Bell),
     title: "Menu Campanhas",
-    description: "Aqui você encontra as campanhas e concursos do Space Food. Toque neste item sempre que quiser voltar para cá.",
+    description: "Toque neste item do menu sempre que quiser voltar para cá.",
   },
   {
     selector: "camp-card",
@@ -48,6 +65,49 @@ export const HOME_TOUR: TourStep[] = [
   },
 ];
 
+/** Galeria de receitas. */
+export const RECIPES_TOUR: TourStep[] = [
+  {
+    icon: icon(Images),
+    title: "Galeria de receitas",
+    description: "Aqui ficam as receitas aprovadas, com foto e autor. Quando a galeria ainda não está liberada ou não há receitas, você vê um aviso no lugar.",
+  },
+  {
+    selector: "camp-recipe-card",
+    icon: icon(BookOpen),
+    title: "Abra uma receita",
+    description: "Toque em uma receita para ver as fotos, os ingredientes e o modo de preparo.",
+  },
+  {
+    selector: "camp-load-more",
+    icon: icon(LayoutGrid),
+    title: "Veja mais receitas",
+    description: "Quando houver mais receitas do que cabe na tela, use este botão para carregar as próximas.",
+  },
+];
+
+/** Uma receita da galeria. */
+export const RECIPE_DETAIL_TOUR: TourStep[] = [
+  {
+    selector: "camp-recipe-media",
+    icon: icon(Images),
+    title: "Fotos e vídeo",
+    description: "Deslize para ver todas as fotos. Se a receita tiver vídeo, toque em play para assistir.",
+  },
+  {
+    selector: "camp-recipe-ingredients",
+    icon: icon(ListChecks),
+    title: "Ingredientes e preparo",
+    description: "Aqui estão a lista de ingredientes e, logo abaixo, o passo a passo do modo de preparo.",
+  },
+  {
+    selector: "camp-recipe-vote",
+    icon: icon(Vote),
+    title: "Votar nesta receita",
+    description: "Quando a votação estiver aberta, você vota por aqui. O voto é definitivo e não vale para a sua própria receita.",
+  },
+];
+
 /** Enviar / editar receita. */
 export const SUBMIT_TOUR: TourStep[] = [
   {
@@ -79,6 +139,11 @@ export const SUBMIT_TOUR: TourStep[] = [
 /** Minha participação. */
 export const MYENTRY_TOUR: TourStep[] = [
   {
+    icon: icon(ClipboardList),
+    title: "Minha participação",
+    description: "Aqui você acompanha a sua receita: status, datas, o motivo se ela for reprovada e o seu voto. Se ainda não enviou, você vê o convite para participar.",
+  },
+  {
     selector: "camp-status",
     icon: icon(Activity),
     title: "Acompanhe o status",
@@ -101,6 +166,11 @@ export const MYENTRY_TOUR: TourStep[] = [
 /** Votação. */
 export const VOTE_TOUR: TourStep[] = [
   {
+    icon: icon(NotebookPen),
+    title: "Votação",
+    description: "Aqui você escolhe a receita favorita da campanha. Os votos só são aceitos enquanto a votação estiver aberta; fora desse período esta tela mostra o andamento.",
+  },
+  {
     selector: "camp-vote-rules",
     icon: icon(ShieldCheck),
     title: "Regras da votação",
@@ -117,6 +187,11 @@ export const VOTE_TOUR: TourStep[] = [
 /** Ranking. */
 export const RANKING_TOUR: TourStep[] = [
   {
+    icon: icon(ListOrdered),
+    title: "Ranking",
+    description: "Mostra a classificação das receitas por votos. Enquanto o ranking não é liberado, você vê um aviso no lugar.",
+  },
+  {
     selector: "camp-ranking",
     icon: icon(ListOrdered),
     title: "Parcial ou oficial",
@@ -126,6 +201,11 @@ export const RANKING_TOUR: TourStep[] = [
 
 /** Resultado. */
 export const RESULTS_TOUR: TourStep[] = [
+  {
+    icon: icon(Trophy),
+    title: "Resultado",
+    description: "Aqui aparece a receita vencedora, depois que a campanha divulga o resultado oficial.",
+  },
   {
     selector: "camp-winner",
     icon: icon(Trophy),

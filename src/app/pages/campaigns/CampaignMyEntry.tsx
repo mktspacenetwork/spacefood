@@ -69,20 +69,26 @@ export function CampaignMyEntry() {
 
   if (!s) {
     return (
-      <EmptyState
-        icon={<ClipboardList size={22} aria-hidden="true" />}
-        title="Você ainda não enviou uma receita"
-        description={state.can_submit ? "Envie a sua receita para participar da campanha." : "As inscrições não estão abertas para você neste momento."}
-        action={
-          state.can_submit ? (
-            <Button onClick={() => navigate(`${base}/enviar`)} className="h-12 gap-2 rounded-xl px-6">
-              <Send size={16} aria-hidden="true" /> Enviar minha receita
-            </Button>
-          ) : (
-            <Button variant="outline" onClick={() => navigate(base)} className="h-11 rounded-xl px-5">Voltar à campanha</Button>
-          )
-        }
-      />
+      <div className="space-y-4">
+        <div className="flex justify-end">
+          <TourButton onClick={tour.start} />
+        </div>
+        <EmptyState
+          icon={<ClipboardList size={22} aria-hidden="true" />}
+          title="Você ainda não enviou uma receita"
+          description={state.can_submit ? "Envie a sua receita para participar da campanha." : "As inscrições não estão abertas para você neste momento."}
+          action={
+            state.can_submit ? (
+              <Button onClick={() => navigate(`${base}/enviar`)} className="h-12 gap-2 rounded-xl px-6">
+                <Send size={16} aria-hidden="true" /> Enviar minha receita
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={() => navigate(base)} className="h-11 rounded-xl px-5">Voltar à campanha</Button>
+            )
+          }
+        />
+        <CampaignTour steps={MYENTRY_TOUR} tour={tour} />
+      </div>
     );
   }
 

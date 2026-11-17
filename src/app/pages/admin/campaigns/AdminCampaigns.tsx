@@ -2,33 +2,27 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import {
-  CheckCircle2, ChevronDown, ChevronUp, Copy, EyeOff, History as HistoryIcon, Loader2, Megaphone, MoreHorizontal,
-  Pencil, Plus, Power, RotateCcw, Rocket, Search, Settings2, ShieldCheck,
+  ChevronDown, ChevronUp, Loader2, Megaphone, Plus, Power, Search, ShieldCheck,
 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card, CardContent } from "../../../components/ui/Card";
-import { Badge } from "../../../components/ui/Badge";
 import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
 import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from "../../../components/ui/dropdown-menu";
 import { cn } from "../../../lib/utils";
 import { useAuth } from "../../../context/auth-context";
 import { campaignsApi } from "../../../lib/campaigns/api";
-import {
-  AUDIT_ACTION, DISPLAY_STATE, PHASE_STATE, campaignDisplayState, fmtDateTime, fmtShort, plural,
-} from "../../../lib/campaigns/format";
+import { AUDIT_ACTION, campaignDisplayState, fmtDateTime } from "../../../lib/campaigns/format";
 import type { DisplayState } from "../../../lib/campaigns/format";
-import type { AdminCampaignListItem, AdminOverview, AdminStageRow, PublishCheck } from "../../../lib/campaigns/types";
+import type { AdminCampaignListItem, AdminOverview, PublishCheck } from "../../../lib/campaigns/types";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_OVERVIEW } from "../../../lib/campaigns/tours-admin";
 import { useCampaignPerms } from "./useCampaignPerms";
 import { AccessTab } from "./tabs/AccessTab";
 import { DuplicateDialog } from "./DuplicateDialog";
 import { PublishDialog } from "./PublishDialog";
+import { CampaignListCard, LIST_ROW_GRID } from "./CampaignListCard";
 import { ErrorBox, LoadingBox, ReasonDialog, RestrictedBox, stageState, useBusy, useLoader } from "./shared";
 
 // ───────────────────────────── Filtros por situação ─────────────────────────────
@@ -52,179 +46,6 @@ function matchesFilter(f: FilterKey, s: DisplayState): boolean {
     case "unpublished": return s === "unpublished";
     case "closed": return s === "closed" || s === "archived";
   }
-}
-
-// ──────────────────────────── "O que falta" (rascunho) ────────────────────────────
-
-const MISSING_WORDS: Record<string, string> = {
-  basics: "nome e descrição",
-  features: "formulário de participação",
-  dependencies: "funcionalidades compatíveis",
-  registration_dates: "datas das inscrições",
-  voting_dates: "datas da votação",
-  audience: "público",
-};
-
-/** Resume os itens pendentes do checklist de publicação em uma frase curta. */
-function missingText(check: PublishCheck): string {
-  const words = check.items.filter((i) => !i.ok).map((i) => MISSING_WORDS[i.key] ?? i.message);
-  if (words.length === 0) return "";
-  const list = words.length === 1 ? words[0] : `${words.slice(0, -1).join(", ")} e ${words[words.length - 1]}`;
-  return `Faltam: ${list}`;
-}
-
-// ─────────────────────────────────── Cartão ───────────────────────────────────
-
-function PhaseLine({ label, stage }: { label: string; stage?: AdminStageRow }) {
-  const p = PHASE_STATE[stageState(stage)];
-  return (
-    <span className="inline-flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-      <b className="text-foreground/80">{label}</b>
-      <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-semibold", p.className)}>{p.label}</span>
-      {stage?.starts_at && (
-        <span>{fmtShort(stage.starts_at)} → {fmtShort(stage.ends_at)}</span>
-      )}
-    </span>
-  );
-}
-
-type CardProps = {
-  c: AdminCampaignListItem;
-  moduleEnabled: boolean | null;
-  /** undefined = ainda verificando; null = indisponível (sem permissão/erro) */
-  check: PublishCheck | null | undefined;
-  canEdit: boolean;
-  canPublish: boolean;
-  canDuplicate: boolean;
-  busy: boolean;
-  onOpen: () => void;
-  onEdit: () => void;
-  onHistory: () => void;
-  onPublish: () => void;
-  onUnpublish: () => void;
-  onRepublish: () => void;
-  onDuplicate: () => void;
-};
-
-function CampaignListCard(p: CardProps) {
-  const { c } = p;
-  const state = campaignDisplayState(c);
-  const st = DISPLAY_STATE[state];
-  const editable = state !== "closed" && state !== "archived";
-  const stage = (k: "registration" | "voting") => c.stages.find((s) => s.stage_key === k);
-
-  // Frase única de "situação / o que falta"
-  let hint: { tone: "ok" | "warn" | "muted"; text: React.ReactNode } = { tone: "muted", text: st.hint };
-  if (state === "draft") {
-    if (p.check === undefined && p.canEdit) hint = { tone: "muted", text: "Verificando o que falta para publicar…" };
-    else if (p.check && p.check.ok) hint = { tone: "ok", text: "Pronta para publicar" };
-    else if (p.check) hint = { tone: "warn", text: missingText(p.check) };
-  } else if (state === "scheduled") {
-    hint = { tone: "muted", text: `Vai aparecer para os colaboradores em ${fmtDateTime(c.visible_from)}.` };
-  } else if (state === "unpublished") {
-    hint = { tone: "warn", text: "Retirada de exibição. Tudo continua salvo — republique quando quiser." };
-  }
-  const moduleOff = (state === "published" || state === "scheduled") && p.moduleEnabled === false;
-
-  const main: { label: string; icon: React.ReactNode; onClick: () => void } | null =
-    !p.canPublish ? null
-      : state === "draft" ? { label: "Publicar", icon: <Rocket size={14} />, onClick: p.onPublish }
-      : state === "published" || state === "scheduled" ? { label: "Despublicar", icon: <EyeOff size={14} />, onClick: p.onUnpublish }
-      : state === "unpublished" ? { label: "Republicar", icon: <RotateCcw size={14} />, onClick: p.onRepublish }
-      : null;
-  // O botão de maior destaque é a ação que faz a campanha avançar; senão, Gerenciar.
-  const mainIsPrimary = main !== null && (state === "draft" || state === "unpublished");
-
-  return (
-    <Card className="rounded-3xl border">
-      <CardContent className="p-5 space-y-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <button
-              type="button"
-              className="text-left font-bold text-base text-foreground hover:text-primary transition-colors break-words"
-              onClick={p.onOpen}
-            >
-              {c.name}
-            </button>
-            <p className="text-[11px] text-muted-foreground font-mono mt-0.5 break-all">/campanhas/{c.slug}</p>
-          </div>
-          <Badge className={cn("border text-xs font-bold px-3 py-1 gap-1.5 shrink-0", st.className)}>
-            <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
-            {st.label}
-          </Badge>
-        </div>
-
-        <p
-          className={cn(
-            "text-sm flex items-start gap-1.5",
-            hint.tone === "ok" && "text-green-700 dark:text-green-300 font-medium",
-            hint.tone === "warn" && "text-amber-700 dark:text-amber-300 font-medium",
-            hint.tone === "muted" && "text-muted-foreground",
-          )}
-        >
-          {hint.tone === "ok" && <CheckCircle2 size={16} className="mt-0.5 shrink-0" aria-hidden="true" />}
-          <span>{hint.text}</span>
-        </p>
-        {moduleOff && (
-          <p className="text-xs text-amber-700 dark:text-amber-300">
-            O módulo de campanhas está desligado: ninguém vê esta campanha até você ligá-lo.
-          </p>
-        )}
-
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
-          <PhaseLine label="Inscrições" stage={stage("registration")} />
-          <PhaseLine label="Votação" stage={stage("voting")} />
-          <span className="text-xs text-muted-foreground">
-            <b className="text-foreground/80">Receitas</b> {plural(c.submissions, "enviada", "enviadas")}
-          </span>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 pt-1">
-          {mainIsPrimary && main && (
-            <Button className="h-10 gap-1.5 rounded-xl" size="sm" onClick={main.onClick} disabled={p.busy}>
-              {main.icon} {main.label}
-            </Button>
-          )}
-          <Button
-            className="h-10 gap-1.5 rounded-xl"
-            size="sm"
-            variant={mainIsPrimary ? "outline" : "primary"}
-            onClick={p.onOpen}
-          >
-            <Settings2 size={13} /> Gerenciar
-          </Button>
-          {p.canEdit && editable && (
-            <Button className="h-10 gap-1.5 rounded-xl" size="sm" variant="outline" onClick={p.onEdit}>
-              <Pencil size={13} /> Editar
-            </Button>
-          )}
-          {!mainIsPrimary && main && (
-            <Button className="h-10 gap-1.5 rounded-xl" size="sm" variant="outline" onClick={main.onClick} disabled={p.busy}>
-              {main.icon} {main.label}
-            </Button>
-          )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="h-10 w-10 rounded-xl" size="icon" variant="ghost" aria-label={`Mais ações de ${c.name}`}>
-                <MoreHorizontal size={16} />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              {p.canDuplicate && (
-                <DropdownMenuItem onSelect={p.onDuplicate} className="gap-2 cursor-pointer">
-                  <Copy size={14} /> Duplicar
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onSelect={p.onHistory} className="gap-2 cursor-pointer">
-                <HistoryIcon size={14} /> Histórico
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </CardContent>
-    </Card>
-  );
 }
 
 // ─────────────────────────────────── Página ───────────────────────────────────
@@ -329,16 +150,11 @@ export function AdminCampaigns() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <Megaphone size={24} className="text-primary" />
-            Campanhas
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Crie e acompanhe campanhas internas, como o concurso de receitas
-          </p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
+          <Megaphone size={24} className="text-primary" />
+          Campanhas
+        </h1>
         <div className="flex items-center gap-2">
           <TourButton onClick={tour.start} />
           {perms.campaigns_create && (
@@ -403,40 +219,38 @@ export function AdminCampaigns() {
             </div>
           )}
 
-          {/* Filtros por situação, com contagem */}
-          <div data-tutorial="camp-kpis" className="flex flex-wrap gap-2" role="group" aria-label="Filtrar campanhas por situação">
-            {FILTERS.map((f) => {
-              const active = filter === f.key;
-              return (
-                <button
-                  key={f.key}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => setFilter(f.key)}
-                  className={cn(
-                    "inline-flex h-10 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
-                    active
-                      ? "border-primary bg-primary text-primary-foreground shadow-sm"
-                      : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )}
-                >
-                  {f.label}
-                  <span
+          {/* Filtros por situação (com contagem) e busca, na mesma linha em telas largas */}
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div data-tutorial="camp-kpis" className="flex flex-wrap gap-2" role="group" aria-label="Filtrar campanhas por situação">
+              {FILTERS.map((f) => {
+                const active = filter === f.key;
+                return (
+                  <button
+                    key={f.key}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setFilter(f.key)}
                     className={cn(
-                      "min-w-[1.5rem] rounded-full px-1.5 py-0.5 text-center text-[11px] font-bold tabular-nums",
-                      active ? "bg-primary-foreground/20 text-primary-foreground" : counts[f.key] > 0 ? "bg-muted text-foreground" : "bg-muted text-muted-foreground/60",
+                      "inline-flex h-10 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
+                      active
+                        ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                        : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
                   >
-                    {list.data ? counts[f.key] : "–"}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Lista */}
-          <div data-tutorial="camp-list" className="space-y-4">
-            <div className="relative">
+                    {f.label}
+                    <span
+                      className={cn(
+                        "min-w-[1.5rem] rounded-full px-1.5 py-0.5 text-center text-[11px] font-bold tabular-nums",
+                        active ? "bg-primary-foreground/20 text-primary-foreground" : counts[f.key] > 0 ? "bg-muted text-foreground" : "bg-muted text-muted-foreground/60",
+                      )}
+                    >
+                      {list.data ? counts[f.key] : "–"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="relative lg:w-72">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={search}
@@ -446,7 +260,10 @@ export function AdminCampaigns() {
                 aria-label="Buscar campanha"
               />
             </div>
+          </div>
 
+          {/* Lista */}
+          <div data-tutorial="camp-list" className="space-y-3">
             {list.loading && !list.data ? (
               <LoadingBox />
             ) : list.error && !list.data ? (
@@ -484,6 +301,16 @@ export function AdminCampaigns() {
               </Card>
             ) : (
               <div className="space-y-3">
+                {/* Cabeçalho de colunas (só em tela larga, onde cada campanha é uma linha) */}
+                <div
+                  className={cn("hidden px-5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground", LIST_ROW_GRID)}
+                  aria-hidden="true"
+                >
+                  <span>Campanha</span>
+                  <span>Situação</span>
+                  <span className="text-center">Receitas</span>
+                  <span className="text-right">Ações</span>
+                </div>
                 {rows.map((c) => (
                   <CampaignListCard
                     key={c.id}

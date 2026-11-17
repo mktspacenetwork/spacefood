@@ -4,10 +4,11 @@ import { Card } from "../ui/Card";
 import type { RecipeListItem } from "../../lib/campaigns/types";
 
 /** Cartão da galeria de receitas (2 colunas no celular). */
-export function RecipeCard({ recipe, to }: { recipe: RecipeListItem; to: string }) {
+export function RecipeCard({ recipe, to, first }: { recipe: RecipeListItem; to: string; first?: boolean }) {
   return (
     <Link
       to={to}
+      data-tutorial={first ? "camp-recipe-card" : undefined}
       aria-label={`Ver a receita ${recipe.dish_name}, de ${recipe.author}`}
       className="group block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >

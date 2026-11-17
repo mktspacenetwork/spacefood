@@ -6,15 +6,19 @@ import { Skeleton } from "../../components/ui/skeleton";
 import { RecipeCard } from "../../components/campaigns/RecipeCard";
 import { EmptyState } from "../../components/campaigns/EmptyState";
 import { ErrorState } from "../../components/campaigns/ErrorState";
+import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
 import { useCampaignCtx } from "./CampaignLayout";
+import { useAuth } from "../../context/Store";
 import { campaignsApi, CampaignApiError, errMsg } from "../../lib/campaigns/api";
 import { plural } from "../../lib/campaigns/format";
+import { RECIPES_TOUR } from "../../lib/campaigns/tours-collab";
 import type { RecipeListItem } from "../../lib/campaigns/types";
 
 type Page = { total: number; items: RecipeListItem[] };
 
 export function CampaignRecipes() {
-  const { slug } = useCampaignCtx();
+  const { campaign, state, slug } = useCampaignCtx();
+  const { user } = useAuth();
   const [items, setItems] = useState<RecipeListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [initial, setInitial] = useState(true);
@@ -54,6 +58,12 @@ export function CampaignRecipes() {
 
   useEffect(() => { void load(true); }, [load]);
 
+  // Abre sozinha uma vez, só quando a galeria já tem receitas na tela.
+  const tour = useTour({
+    storageKey: tourKey("collab", user?.id, "recipes", campaign.id, state.tour?.version),
+    enabled: !!state.tour?.enabled && !!user && !initial && !locked && items.length > 0,
+  });
+
   if (initial) {
     return (
       <div className="grid grid-cols-2 gap-3" aria-busy="true" aria-live="polite">
@@ -68,45 +78,56 @@ export function CampaignRecipes() {
     );
   }
 
+  // "Ver tour" fica visível em todos os estados da tela (galeria bloqueada, vazia ou com receitas).
+  const withTour = (node: React.ReactNode) => (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <TourButton onClick={tour.start} />
+      </div>
+      {node}
+      <CampaignTour steps={RECIPES_TOUR} tour={tour} />
+    </div>
+  );
+
   if (locked) {
-    return (
+    return withTour(
       <EmptyState
         icon={<Lock size={22} aria-hidden="true" />}
         title="A galeria ainda não está disponível"
         description="As receitas aparecem aqui assim que a campanha liberar a galeria. Acompanhe as datas na página inicial da campanha."
-      />
+      />,
     );
   }
 
-  if (error && items.length === 0) return <ErrorState message={error} onRetry={() => void load(true)} />;
+  if (error && items.length === 0) return withTour(<ErrorState message={error} onRetry={() => void load(true)} />);
 
   if (items.length === 0) {
-    return (
+    return withTour(
       <EmptyState
         icon={<BookOpen size={22} aria-hidden="true" />}
         title="Ainda não há receitas aprovadas"
         description="Quando as primeiras receitas forem aprovadas, elas aparecem aqui."
-      />
+      />,
     );
   }
 
-  return (
+  return withTour(
     <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4" aria-label="Galeria de receitas">
       <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{plural(total, "receita aprovada", "receitas aprovadas")}</p>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {items.map((r) => (
-          <RecipeCard key={r.id} recipe={r} to={`/campanhas/${slug}/receitas/${r.id}`} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3" data-tutorial="camp-gallery">
+        {items.map((r, i) => (
+          <RecipeCard key={r.id} recipe={r} to={`/campanhas/${slug}/receitas/${r.id}`} first={i === 0} />
         ))}
       </div>
       {error && <p role="alert" className="text-center text-xs font-medium text-destructive">{error}</p>}
       {items.length < total && (
         <div className="flex justify-center pt-1">
-          <Button variant="outline" onClick={() => void load(false)} disabled={loadingMore} className="h-11 gap-2 rounded-xl px-6">
+          <Button variant="outline" onClick={() => void load(false)} disabled={loadingMore} data-tutorial="camp-load-more" className="h-11 gap-2 rounded-xl px-6">
             {loadingMore && <Loader2 size={16} className="animate-spin" />}
             {loadingMore ? "Carregando…" : "Carregar mais"}
           </Button>
         </div>
       )}
-    </motion.section>
+    </motion.section>,
   );
 }
