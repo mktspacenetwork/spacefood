@@ -438,7 +438,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
             <Button onClick={() => navigate(`${base}/participacao`)} className="h-12 rounded-xl px-6">Ver minhas receitas</Button>
             {canSendAnother && (
               <Button variant="outline" onClick={resetForm} className="h-12 gap-2 rounded-xl px-6">
-                <Plus size={16} aria-hidden="true" /> Enviar outra receita
+                <Plus size={16} aria-hidden="true" /> Cadastrar outra receita
               </Button>
             )}
             <Button variant="ghost" onClick={() => navigate(base)} className="h-12 rounded-xl px-6">Voltar à campanha</Button>
@@ -477,7 +477,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-lg font-bold text-foreground">
-          {isEdit ? "Editar receita" : count > 0 ? "Enviar outra receita" : "Enviar minha receita"}
+          {isEdit ? "Editar receita" : count > 0 ? "Cadastrar outra receita" : "Cadastrar receita"}
         </h2>
         <TourButton onClick={tour.start} />
       </div>

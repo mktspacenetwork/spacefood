@@ -15,8 +15,7 @@
 import { Hono } from "npm:hono@4";
 import { cors } from "npm:hono@4/cors";
 import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
-import { registerBookRoutes, bookPublishedIds } from "./book.ts";
-import { registerDrawRoutes } from "./draw.ts";
+import { registerRecipeBookRoutes } from "./recipebook.ts";
 
 const BUCKET = "make-c3078087-campaigns";
 const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
@@ -83,16 +82,13 @@ const ERR: Record<string, [number, string]> = {
   ANNOUNCE_IN_PAST: [422, "Escolha uma data e hora futuras para divulgar o resultado."],
   RESULTS_NOT_CONFIRMED: [409, "Confirme o vencedor antes de divulgar ou agendar a divulgação."],
   TOUR_LIMIT: [422, "Limite de histórico de tours atingido."],
-  DRAW_DISABLED: [409, "Esta campanha não tem sorteio."],
-  DRAW_ALREADY_RUN: [409, "O sorteio já foi realizado."],
-  DRAW_NO_ELIGIBLE: [409, "Não há ninguém com receita aprovada para sortear."],
-  DRAW_REGISTRATION_OPEN: [409, "O sorteio só pode ser feito depois do encerramento da participação."],
-  DRAW_PENDING_REVIEW: [409, "Ainda há receitas aguardando análise. Analise todas antes de sortear."],
-  DRAW_NOT_DRAWN: [409, "O sorteio ainda não foi realizado."],
-  DRAW_NOT_CONFIRMED: [409, "Confirme o sorteio antes de divulgar ou agendar a divulgação."],
-  DRAW_ALREADY_CONFIRMED: [409, "O sorteio já foi confirmado."],
-  DRAW_LOCKED: [409, "O sorteio já foi realizado: esta alteração não é mais permitida."],
-  DRAW_HIDDEN: [403, "O resultado do sorteio ainda não foi divulgado."],
+  ANNOUNCE_BEFORE_END: [422, "A data de anúncio deve ser depois do encerramento."],
+  BOOK_NOT_FOUND: [404, "Receita não encontrada no livro."],
+  BOOK_NOT_APPROVED: [409, "Só receitas aprovadas entram no livro."],
+  BOOK_DUPLICATE: [409, "Esta receita já está no livro."],
+  BOOK_UNAVAILABLE: [404, "O Livro de Receitas ainda não está disponível."],
+  BOOK_PHOTO_INVALID: [422, "A foto enviada não é válida. Use JPG, PNG ou WebP de até 5 MB."],
+  BOOK_IMMUTABLE: [409, "Esta alteração não é permitida no livro."],
 };
 // Mensagens específicas do INVALID_DATES (o banco manda o motivo em `detail`).
 const DATES_MSG: Record<string, string> = {
@@ -106,7 +102,7 @@ const DATES_MSG: Record<string, string> = {
 // Nomes dos campos da receita nas mensagens de erro (o banco devolve a chave técnica em `details`).
 const FIELD_LABELS: Record<string, string> = {
   dish_name: "Título da receita", description: "História e memória afetiva", ingredients: "Ingredientes",
-  preparation: "Modo de preparo", name: "Nome da campanha", key: "Chave",
+  preparation: "Modo de preparo", name: "Nome da campanha", key: "Chave", story: "História", author_label: "Autor",
 };
 // deno-lint-ignore no-explicit-any
 function fromPg(error: any): AppError {
@@ -427,14 +423,16 @@ app.get("/campaigns/availability", async (c) => {
   const user = await requireUser(c);
   runDueAnnouncements();
   const enabled = await rpc<boolean>("campaign_module_enabled", {});
-  if (!enabled) return c.json({ enabled: false, hasVisible: false, campaigns: [] });
+  if (!enabled) return c.json({ enabled: false, hasVisible: false, book: false, campaigns: [] });
   const { data: list } = await sb.from("campaigns").select("id,slug,features").eq("status", "authorized");
   const out: Row[] = [];
   for (const camp of list ?? []) {
     const st = await rpc<Row>("campaign_collab_state", { p_campaign: camp.id, p_user: user.id });
     if (st.visible) out.push({ id: camp.id, slug: camp.slug, tour: st.tour });
   }
-  return c.json({ enabled: true, hasVisible: out.length > 0, campaigns: out });
+  // Livro de Receitas único: aparece no menu/tela de Campanhas quando o administrador publica
+  const { data: bs } = await sb.from("recipe_book_settings").select("published").eq("id", 1).maybeSingle();
+  return c.json({ enabled: true, hasVisible: out.length > 0, book: bs?.published === true, campaigns: out });
 });
 
 app.get("/campaigns", async (c) => {
@@ -450,17 +448,14 @@ app.get("/campaigns", async (c) => {
     rows.push({ camp, st, stages: await getStages(camp.id) });
   }
   const urls = await signPaths(rows.map((r) => r.camp.cover_path).filter(Boolean));
-  const bookPub = await bookPublishedIds(sb, rows.map((r) => r.camp.id)); // Livro de Receitas publicado?
   return c.json(rows.map((r) => ({
     ...publicCampaign(r.camp, r.stages, urls[r.camp.cover_path]),
     description: String(r.camp.description).slice(0, 240),
     state: {
       stage: r.st.stage, released: r.st.released, my_submission_status: r.st.my_submission_status ?? null,
       my_submissions_count: r.st.my_submissions_count ?? 0, max_submissions: r.st.max_submissions ?? 1,
-      book_published: bookPub.has(r.camp.id),
       can_submit: r.st.can_submit === true, can_vote: r.st.can_vote === true,
       has_voted: r.st.has_voted === true, results_visible: r.st.results_visible === true,
-      draw_visible: r.st.draw_visible === true, i_won: r.st.i_won === true,
     },
     ended: campaignEnded(r.camp, r.stages),
   })));
@@ -469,9 +464,7 @@ app.get("/campaigns", async (c) => {
 app.get("/campaigns/:slug", async (c) => {
   const { camp, state } = await collab(c, c.req.param("slug"));
   const urls = await signPaths([camp.cover_path]);
-  // `book_published`: aparece o item "Livro de Receitas" (o banco só libera a leitura se o livro estiver publicado)
-  const book_published = (await bookPublishedIds(sb, [camp.id])).has(camp.id);
-  return c.json({ campaign: publicCampaign(camp, await getStages(camp.id), urls[camp.cover_path]), state: { ...state, book_published } });
+  return c.json({ campaign: publicCampaign(camp, await getStages(camp.id), urls[camp.cover_path]), state });
 });
 
 app.get("/campaigns/:slug/recipes", async (c) => {
@@ -641,7 +634,8 @@ app.get("/campaigns/:slug/ranking", async (c) => {
   if (!state.ranking_visible) throw new AppError(403, "RANKING_HIDDEN", "O ranking ainda não está disponível.");
   const tally = await rpc<Row[]>("campaign_tally", { p_campaign: camp.id });
   const { data: res } = await sb.from("campaign_results").select("status").eq("campaign_id", camp.id).maybeSingle();
-  return c.json({ official: ["confirmed", "announced"].includes(res?.status ?? ""), items: tally.map((t, i) => ({ position: i + 1, submission_id: t.submission_id, dish_name: t.dish_name, author: t.user_name, votes: Number(t.votes) })) });
+  // oficial só depois da DIVULGAÇÃO; antes disso só aparece se o administrador liberou o ranking parcial da campanha
+  return c.json({ official: res?.status === "announced", partial: state.ranking_partial === true, items: tally.map((t, i) => ({ position: i + 1, submission_id: t.submission_id, dish_name: t.dish_name, author: t.user_name, votes: Number(t.votes) })) });
 });
 
 app.get("/campaigns/:slug/results", async (c) => {
@@ -777,17 +771,39 @@ for (const [route, key] of [["stages/:key", "campaigns_schedule"]] as const) {
     return c.json({ ok: true });
   });
 }
-// Período da campanha: participação = [starts_at, ends_at]; com votação, a votação usa a MESMA janela, a menos
-// que venham voting_starts_at/voting_ends_at (tudo no banco, em uma transação, com uma linha de auditoria SET_PERIOD).
+// Período da campanha: participação = [starts_at, ends_at]; a votação (se houver) usa a MESMA janela.
+// `announce_at` = data de ANÚNCIO do resultado (só com votação): referência — o banco só divulga sozinho se o ganhador
+// já estiver confirmado antes dela. Nulo limpa; ausente não mexe. Reenviar o mesmo período não mexe em nada.
 app.put("/admin/campaigns/:id/period", async (c) => {
   const a = await requireAdmin(c, "campaigns_schedule");
   const b = await body(c);
-  // Sem `voting_*` a votação usa a mesma janela da participação; com os dois campos, a votação tem janela própria.
-  await rpc("campaign_set_periods", {
-    p_actor: a.actor, p_campaign: c.req.param("id"),
-    p_reg_starts: isoOrNull(b.starts_at), p_reg_ends: isoOrNull(b.ends_at),
-    p_vot_starts: isoOrNull(b.voting_starts_at), p_vot_ends: isoOrNull(b.voting_ends_at),
-  });
+  const id = c.req.param("id");
+  const camp = await getCampaignById(id);
+  const startsAt = isoOrNull(b.starts_at);
+  const endsAt = isoOrNull(b.ends_at);
+  const reg = (await getStages(id)).find((s) => s.stage_key === "registration");
+  const t = (x: unknown) => (x ? new Date(String(x)).getTime() : null);
+  const changed = t(startsAt) !== t(reg?.starts_at) || t(endsAt) !== t(reg?.ends_at);
+  let announce: string | null | undefined; // undefined = não mexe
+  if ("announce_at" in b && camp.features?.voting === true) {
+    announce = isoOrNull(b.announce_at);
+    const endRef = t(endsAt) ?? t(reg?.ends_at);
+    if (announce && endRef !== null && (t(announce) as number) < endRef) throw new AppError(422, "ANNOUNCE_BEFORE_END", ERR.ANNOUNCE_BEFORE_END[1]);
+  }
+  if (changed) {
+    await rpc("campaign_set_periods", {
+      p_actor: a.actor, p_campaign: id,
+      p_reg_starts: startsAt, p_reg_ends: endsAt, p_vot_starts: null, p_vot_ends: null,
+    });
+  }
+  if (announce !== undefined) {
+    if (announce) {
+      await rpc("campaign_schedule_announcement", { p_actor: a.actor, p_campaign: id, p_at: announce });
+    } else {
+      const { data: res } = await sb.from("campaign_results").select("status").eq("campaign_id", id).maybeSingle();
+      if (res?.status !== "announced") await rpc("campaign_cancel_announcement", { p_actor: a.actor, p_campaign: id });
+    }
+  }
   return c.json({ ok: true });
 });
 app.post("/admin/campaigns/:id/stages/:key/extend", async (c) => {
@@ -1000,19 +1016,13 @@ app.post("/admin/campaigns/:id/results/announce", async (c) => {
   await rpc<Row>("campaign_announce", { p_actor: a.actor, p_campaign: id });
   return c.json({ ok: true });
 });
-// Agendar a divulgação (data + hora). O banco divulga e notifica sozinho na hora marcada; o último agendamento vale.
-app.post("/admin/campaigns/:id/results/schedule", async (c) => {
+// ranking PARCIAL para os colaboradores: opção do administrador, por campanha (desligada por padrão)
+app.put("/admin/campaigns/:id/partial-ranking", async (c) => {
   const a = await requireAdmin(c, "campaigns_announce");
   const b = await body(c);
-  const at = isoOrNull(b.announce_at);
-  if (!at) throw new AppError(422, "ANNOUNCE_IN_PAST", ERR.ANNOUNCE_IN_PAST[1]);
-  const r = await rpc<Row>("campaign_schedule_announcement", { p_actor: a.actor, p_campaign: c.req.param("id"), p_at: at });
-  return c.json({ ok: true, announce_at: r.announce_at });
-});
-app.delete("/admin/campaigns/:id/results/schedule", async (c) => {
-  const a = await requireAdmin(c, "campaigns_announce");
-  await rpc("campaign_cancel_announcement", { p_actor: a.actor, p_campaign: c.req.param("id") });
-  return c.json({ ok: true });
+  if (typeof b.enabled !== "boolean") throw new AppError(422, "INVALID_FIELDS", ERR.INVALID_FIELDS[1]);
+  const r = await rpc<Row>("campaign_set_partial_ranking", { p_actor: a.actor, p_campaign: c.req.param("id"), p_enabled: b.enabled });
+  return c.json({ ok: true, enabled: r.enabled === true });
 });
 app.post("/admin/campaigns/:id/notify", async (c) => {
   await requireAdmin(c, "campaigns_schedule");
@@ -1082,12 +1092,6 @@ app.get("/admin/campaigns/:id/export/:kind", async (c) => {
     const names = Object.fromEntries((subs ?? []).map((s) => [s.id, s.dish_name]));
     columns = ["Votante", "Receita votada", "Votou em", "Invalidado em", "Justificativa da invalidação"];
     rows = (votes ?? []).map((v) => [v.voter_name, names[v.submission_id], v.created_at, v.invalidated_at ?? "", v.invalidation_reason ?? ""]);
-  } else if (kind === "draw") {
-    if (!a.perms.campaigns_results) throw new AppError(403, "FORBIDDEN", "Você não tem permissão para esta ação.");
-    const { data: d } = await sb.from("campaign_draws").select("*").eq("campaign_id", id).maybeSingle();
-    const dst: Record<string, string> = { drawn: "Sorteado (falta confirmar)", confirmed: "Confirmado", announced: "Divulgado" };
-    columns = ["Posição", "Nome", "Departamento", "Unidade", "Receita", "Situação do sorteio", "Sorteado em", "Confirmado por", "Confirmado em", "Divulgado em"];
-    rows = ((d?.winners ?? []) as Row[]).map((w) => [w.position, w.name, w.department ?? "", w.unit ?? "", w.dish_name, dst[d?.status] ?? "", d?.drawn_at ?? "", d?.confirmed_by_name ?? "", d?.confirmed_at ?? "", d?.announced_at ?? ""]);
   } else throw new AppError(400, "INVALID_FIELDS", "Relatório inválido.");
   await rpc("campaign_audit", { p_campaign: id, p_actor: a.actor, p_action: "EXPORT_REPORT", p_entity_type: "report", p_entity_id: kind, p_before: null, p_after: { rows: rows.length }, p_reason: null });
   return c.json({ kind, columns, rows });
@@ -1125,10 +1129,7 @@ app.delete("/admin/access/:userId", async (c) => {
   return c.json({ ok: true });
 });
 
-// Livro de Receitas da campanha (rotas em book.ts; as regras vivem nas funções campaign_book_* do banco)
-registerBookRoutes(app, { sb, BUCKET, AppError, rpc, requireUser, requireAdmin, body, signPaths, getCampaignBySlug, getCampaignById });
-
-// Sorteio (rotas em draw.ts; regras no banco)
-registerDrawRoutes(app, { sb, AppError, rpc, requireAdmin, body, collab, mediaFor, isoOrNull, strOrUndef });
+// Livro de Receitas ÚNICO (rotas em recipebook.ts; as regras vivem nas funções recipe_book_* do banco)
+registerRecipeBookRoutes(app, { sb, BUCKET, AppError, rpc, requireUser, requireAdmin, body, signPaths, verifyObject });
 
 Deno.serve(app.fetch);

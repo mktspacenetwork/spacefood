@@ -74,9 +74,10 @@ export function ParticipantsTab({ campaignId, campaign, results, stages, perms, 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [invalidateTarget, setInvalidateTarget] = useState<AdminVote | null>(null);
 
-  // A gestão acompanha votos ao vivo; só vale o bloqueio se o servidor ainda o aplicar (versão antiga da API).
+  // A gestão acompanha votos ao vivo (parcial até a divulgação); só vale o bloqueio se o servidor ainda o aplicar
+  // (versão antiga da API). `tally_locked` só diz "ainda não é o resultado oficial", não esconde a contagem.
   const votingStage = stages.find((s) => s.stage_key === "voting");
-  const locked = hasVoting && (!!res.data?.tally_locked || !!votes.data?.locked);
+  const locked = hasVoting && !!votes.data?.locked;
   const votingEnds = votingStage?.ends_at ?? null;
   const showVotesCols = canResults && !locked;
   const items = people.data?.items ?? [];

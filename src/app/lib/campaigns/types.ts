@@ -24,10 +24,6 @@ export type Features = {
   tour: TourConfig;
   /** Permite mais de uma receita por colaborador (até MAX_SUBMISSIONS_PER_USER). Ausente = false (uma só). */
   multiple_submissions?: boolean;
-  /** Esta campanha tem sorteio entre quem tem receita aprovada? Ausente = false. */
-  draw?: boolean;
-  /** Quantidade de ganhadores do sorteio (1 a 10). Só vale com `draw`. */
-  draw_winners?: number;
 };
 
 /** Máximo de fotos por receita (aplicado no banco). `features.photos` desligado = nenhuma foto. */
@@ -40,6 +36,8 @@ export const MAX_STORY_TEXT = 5000;
 export const MAX_SUBMISSIONS_PER_USER = 10;
 
 export type Visibility = {
+  /** O administrador pode mostrar o ranking PARCIAL aos colaboradores (padrão: não). Ajustado por `PUT /admin/campaigns/:id/partial-ranking`. */
+  show_partial?: boolean;
   ranking_mode: "hidden_until_confirmed" | "after_close" | "live";
   gallery_visibility: "on_approval" | "on_voting_start" | "on_results";
   show_podium: boolean;
@@ -105,11 +103,8 @@ export type CollabState = {
   /** Quantas receitas o colaborador já enviou nesta campanha e o máximo permitido (1, ou até 10 com várias). */
   my_submissions_count?: number;
   max_submissions?: number;
-  /** Livro de Receitas publicado para esta campanha (aparece o item "Livro de Receitas"). */
-  book_published?: boolean;
-  /** Sorteio divulgado (só depois da divulgação oficial) e se esta pessoa foi sorteada. */
-  draw_visible?: boolean;
-  i_won?: boolean;
+  /** O ranking exibido ao colaborador é PARCIAL (o administrador liberou); o oficial só depois da divulgação. */
+  ranking_partial?: boolean;
   my_submission_id?: string | null;
   my_submission_status?: SubmissionStatus | null;
   has_voted?: boolean;
@@ -127,8 +122,6 @@ export type CollabCampaignListItem = PublicCampaign & {
     /** Opcionais: se o servidor enviar, o botão do cartão usa; senão a lista deduz pelas datas. */
     can_submit?: boolean; can_vote?: boolean; has_voted?: boolean; results_visible?: boolean;
     my_submissions_count?: number; max_submissions?: number;
-    /** Sorteio divulgado / livro publicado (opcionais: o cartão só os usa se o servidor enviar). */
-    draw_visible?: boolean; i_won?: boolean; book_published?: boolean;
   };
   /** true quando o período da campanha já acabou (último fim entre inscrições e votação): o slide some da Home. */
   ended: boolean;
@@ -222,11 +215,19 @@ export type AdminResults = {
   announce_scheduled_at?: string | null;
 };
 
-/** `PUT /admin/campaigns/:id/period`. Sem os campos `voting_*` a votação usa a mesma janela das inscrições. */
+/**
+ * `PUT /admin/campaigns/:id/period`. Três informações: início e encerramento das participações (a votação, quando
+ * existe, usa a MESMA janela) e a data de anúncio do resultado (só com votação; `null` limpa).
+ * Os campos `voting_*` ficaram de fora da tela e do contrato novo.
+ */
 export type PeriodPayload = {
   starts_at: string | null;
   ends_at: string | null;
+  /** ISO. A divulgação automática só acontece se o ganhador já estiver confirmado antes dessa data. */
+  announce_at?: string | null;
+  /** @deprecated saíram da tela e da API: a votação usa a janela da participação. Serão apagados. */
   voting_starts_at?: string | null;
+  /** @deprecated idem. */
   voting_ends_at?: string | null;
 };
 
@@ -300,32 +301,6 @@ export type AdminResultsPayload = { results: AdminResults | null; tally: TallyRo
 
 // ───────────────────────── Livro de Receitas ─────────────────────────
 
-export type BookStatus = "draft" | "published" | "superseded" | "withdrawn";
-
-/** Resumo de uma versão do livro (rascunho ou publicada). */
-export type BookMeta = {
-  version: number;
-  status: BookStatus;
-  recipes_count: number;
-  generated_at: string;
-  generated_by_name: string | null;
-  published_at: string | null;
-  published_by_name: string | null;
-  /** Já existe o PDF desta versão guardado (necessário para publicar). */
-  has_pdf: boolean;
-  /** Receitas aprovadas que o administrador tirou desta versão do livro. */
-  excluded: string[];
-};
-
-/** `GET /admin/campaigns/:id/book` */
-export type AdminBookState = {
-  approved_count: number;
-  can_generate: boolean;
-  reason?: string | null;
-  draft: BookMeta | null;
-  published: BookMeta | null;
-};
-
 export type BookPhoto = { url: string; kind: "main_photo" | "photo" };
 
 export type BookRecipe = {
@@ -342,65 +317,48 @@ export type BookRecipe = {
   photos: BookPhoto[];
 };
 
-/** Conteúdo completo de uma versão do livro (o que o leitor e o gerador de PDF consomem). */
-export type BookView = {
-  campaign: { name: string; slug: string; cover_url: string | null };
-  version: number;
-  status?: BookStatus;
-  generated_at: string;
-  recipes: BookRecipe[];
-};
+// ─────────────── Livro de Receitas: UM acervo único e permanente ───────────────
 
-// ───────────────────────────── Sorteio ─────────────────────────────
+export type RecipeBookSettings = { published: boolean; auto_include: boolean };
 
-export type DrawStatus = "none" | "drawn" | "confirmed" | "announced";
-
-export type DrawWinner = {
-  position: number;
-  user_id?: string;
-  name: string;
-  department?: string;
-  unit?: string;
-  submission_id: string;
+/** Linha da lista do administrador. `ref` é opaco ("s:<receita>" ou "e:<entrada>") e identifica a receita em todas as ações. */
+export type AdminBookItem = {
+  ref: string;
+  /** campaign = vem de uma receita enviada em campanha (autoria original preservada); manual = cadastrada pela administração. */
+  source: "campaign" | "manual";
+  /** Só para source=campaign: entrou sozinha (auto) ou foi adicionada pelo administrador (added). */
+  via: "auto" | "added" | null;
+  status: "in_book" | "removed";
   dish_name: string;
+  author: string;
+  campaign_name: string | null;
+  campaign_id: string | null;
+  submission_id: string | null;
+  photo_url: string | null;
+  /** O administrador editou o texto do livro (o cadastro original da campanha não muda). */
+  edited: boolean;
+  created_at: string | null;
 };
 
-export type DrawEligible = {
-  user_id: string;
-  name: string;
-  department: string;
-  unit: string;
-  recipes: { id: string; dish_name: string }[];
+export type AdminRecipeBook = {
+  settings: RecipeBookSettings;
+  counts: { in_book: number; removed: number; manual: number; from_campaigns: number };
+  items: AdminBookItem[];
 };
 
-/** `GET /admin/campaigns/:id/draw` */
-export type AdminDraw = {
-  enabled: boolean;
-  status: DrawStatus;
-  winners_count: number;
-  eligible_count: number;
-  eligible: DrawEligible[];
-  /** Receitas ainda sem análise (o sorteio só roda sem pendências e com a participação encerrada). */
-  pending_review: number;
-  registration_open: boolean;
-  can_run: boolean;
-  reason?: string | null;
-  draw: null | {
-    drawn_at: string;
-    drawn_by_name: string | null;
-    winners: DrawWinner[];
-    confirmed_at: string | null;
-    confirmed_by_name: string | null;
-    announced_at: string | null;
-    announce_at: string | null;
-    announce_scheduled_by_name: string | null;
-    announce_scheduled_at: string | null;
-  };
+export type AdminBookItemDetail = AdminBookItem & {
+  story: string;
+  ingredients: string;
+  preparation: string;
+  photos: BookPhoto[];
+  /** Só para source=campaign: o texto original do cadastro, para comparar com a versão do livro. */
+  original: null | { dish_name: string; story: string; ingredients: string; preparation: string };
 };
 
-/** `GET /campaigns/:slug/draw` — só depois da divulgação oficial. */
-export type CollabDraw = {
-  announced_at: string;
-  winners: { position: number; name: string; dish_name: string; photo_url: string | null }[];
-  i_won: boolean;
-};
+/** Receita aprovada de campanha que ainda NÃO está no livro (para "Adicionar da plataforma"). */
+export type BookCandidate = { submission_id: string; dish_name: string; author: string; campaign_name: string; photo_url: string | null };
+
+export type RecipeBookRecipe = BookRecipe & { campaign_name: string | null };
+
+/** `GET /recipe-book` (colaborador; 404 BOOK_UNAVAILABLE enquanto não estiver publicado). */
+export type RecipeBookView = { title: string; generated_at: string; recipes: RecipeBookRecipe[] };

@@ -197,7 +197,7 @@ export function CampaignListCard(p: CampaignListCardProps) {
             <ms.Icon size={14} /> {main.label}
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem onSelect={p.onOpen} title="Abrir o painel da campanha: resumo, receitas, participantes e votação" className="cursor-pointer gap-2">
+        <DropdownMenuItem onSelect={p.onOpen} title="Abrir o painel da campanha: visão geral, receitas e resultados" className="cursor-pointer gap-2">
           <Settings2 size={14} /> Gerenciar
         </DropdownMenuItem>
         {p.canEdit && editable && (

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ListOrdered, Lock, ShieldCheck } from "lucide-react";
+import { Hourglass, ListOrdered, Lock, ShieldCheck } from "lucide-react";
 import { motion } from "motion/react";
 import { Badge } from "../../components/ui/Badge";
 import { Skeleton } from "../../components/ui/skeleton";
@@ -13,7 +13,8 @@ import { campaignsApi, CampaignApiError, errMsg } from "../../lib/campaigns/api"
 import { RANKING_TOUR } from "../../lib/campaigns/tours-collab";
 import type { RankingItem } from "../../lib/campaigns/types";
 
-type Payload = { official: boolean; items: RankingItem[] };
+/** `partial`: o administrador liberou a classificação PARCIAL (ainda pode mudar). Sem isso, só o oficial. */
+type Payload = { official: boolean; partial?: boolean; items: RankingItem[] };
 
 export function CampaignRanking() {
   const { campaign, state, slug } = useCampaignCtx();
@@ -28,8 +29,8 @@ export function CampaignRanking() {
     setData(null);
     try {
       const r = await campaignsApi.get<Payload>(`/campaigns/${encodeURIComponent(slug)}/ranking`);
-      // O colaborador só vê o ranking OFICIAL (depois da divulgação). Qualquer coisa parcial é tratada como oculta.
-      if (!r.official) setHidden(true);
+      // Oficial (depois da divulgação) ou parcial liberado pelo administrador; qualquer outra coisa é tratada como oculta.
+      if (!r.official && r.partial !== true) setHidden(true);
       else setData(r);
     } catch (e) {
       if (e instanceof CampaignApiError && e.code === "RANKING_HIDDEN") setHidden(true);
@@ -54,7 +55,7 @@ export function CampaignRanking() {
         <EmptyState
           icon={<Lock size={22} aria-hidden="true" />}
           title="O ranking ainda não está disponível"
-          description="Ele aparece depois que o resultado for divulgado."
+          description="A classificação aparece depois que o resultado for divulgado."
         />
         <CampaignTour steps={RANKING_TOUR} tour={tour} />
       </div>
@@ -82,10 +83,17 @@ export function CampaignRanking() {
       </div>
 
       <div data-tutorial="camp-ranking">
-        <Badge className="gap-1.5 border border-green-200 bg-green-100 text-[11px] font-semibold text-green-700 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300">
-          <ShieldCheck size={12} aria-hidden="true" />
-          Resultado oficial
-        </Badge>
+        {data.official ? (
+          <Badge className="gap-1.5 border border-green-200 bg-green-100 text-[11px] font-semibold text-green-700 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300">
+            <ShieldCheck size={12} aria-hidden="true" />
+            Resultado oficial
+          </Badge>
+        ) : (
+          <Badge className="gap-1.5 border border-amber-200 bg-amber-100 text-[11px] font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+            <Hourglass size={12} aria-hidden="true" />
+            Parcial — ainda pode mudar
+          </Badge>
+        )}
       </div>
 
       {data.items.length === 0 ? (

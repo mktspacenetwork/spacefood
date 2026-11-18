@@ -132,7 +132,6 @@ export function SettingsTab(props: SettingsTabProps) {
           <Row label="Detalhes">{lines > 0 ? `${plural(lines, "linha", "linhas")} de regras e orientações` : "—"}</Row>
           <Row label="Visível para colaboradores">{visibleText}</Row>
           <Row label="Votação">{c.features.voting ? "Sim" : "Não"}</Row>
-          <Row label="Sorteio">{c.features.draw ? `Sim · ${plural(c.features.draw_winners ?? 1, "ganhador", "ganhadores")}` : "Não"}</Row>
           <Row label="Fotos">{c.features.photos === false ? "Não" : `Sim · de 1 a ${MAX_PHOTOS_PER_RECIPE}`}</Row>
           <Row label="Receitas por pessoa">{c.features.multiple_submissions ? `Até ${MAX_SUBMISSIONS_PER_USER}` : "Uma"}</Row>
           <Row label="Capa e banner">{c.cover_url ? "Imagem cadastrada (a mesma do banner da Home)" : "Sem imagem — o banner usa o fundo laranja com o nome"}</Row>
@@ -141,7 +140,7 @@ export function SettingsTab(props: SettingsTabProps) {
       </Fold>
 
       {perms.campaigns_schedule && (
-        <Fold {...foldProps("period")} icon={<CalendarClock size={18} />} title={c.features.voting ? "Períodos" : "Período"} hint={c.features.voting ? "Participação e votação: início e encerramento de cada uma." : "Início e encerramento da campanha."}>
+        <Fold {...foldProps("period")} icon={<CalendarClock size={18} />} title="Período" hint={c.features.voting ? "Início e encerramento das participações e data de anúncio do resultado." : "Início e encerramento das participações."}>
           <PeriodSection {...tabProps} />
         </Fold>
       )}

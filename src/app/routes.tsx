@@ -51,7 +51,8 @@ const CampaignMyEntry = lazy(() => import("./pages/campaigns/CampaignMyEntry").t
 const CampaignVote = lazy(() => import("./pages/campaigns/CampaignVote").then(m => ({ default: m.CampaignVote })));
 const CampaignRanking = lazy(() => import("./pages/campaigns/CampaignRanking").then(m => ({ default: m.CampaignRanking })));
 const CampaignResults = lazy(() => import("./pages/campaigns/CampaignResults").then(m => ({ default: m.CampaignResults })));
-const CampaignBook = lazy(() => import("./pages/campaigns/CampaignBook").then(m => ({ default: m.CampaignBook })));
+const RecipeBookPage = lazy(() => import("./pages/campaigns/RecipeBookPage").then(m => ({ default: m.RecipeBookPage })));
+const AdminRecipeBook = lazy(() => import("./pages/admin/AdminRecipeBook").then(m => ({ default: m.AdminRecipeBook })));
 
 // Shown briefly while an admin page chunk downloads (fast on repeat visits — cached by the browser).
 function AdminPageFallback() {
@@ -128,6 +129,7 @@ export const router = createBrowserRouter([
           { path: "receitas", element: <WithBoundary name="Receitas"><Recipes /></WithBoundary> },
           // Campanhas: o servidor só libera o conteúdo depois que um admin publica a campanha.
           { path: "campanhas", element: <WithBoundary name="Campanhas"><LazyAdminPage><Campaigns /></LazyAdminPage></WithBoundary> },
+          { path: "campanhas/livro", element: <WithBoundary name="Livro de Receitas"><LazyAdminPage><RecipeBookPage /></LazyAdminPage></WithBoundary> },
           {
             path: "campanhas/:slug",
             element: <WithBoundary name="Campanha"><LazyAdminPage><CampaignLayout /></LazyAdminPage></WithBoundary>,
@@ -141,7 +143,6 @@ export const router = createBrowserRouter([
               { path: "votacao", element: <LazyAdminPage><CampaignVote /></LazyAdminPage> },
               { path: "ranking", element: <LazyAdminPage><CampaignRanking /></LazyAdminPage> },
               { path: "resultado", element: <LazyAdminPage><CampaignResults /></LazyAdminPage> },
-              { path: "livro", element: <LazyAdminPage><CampaignBook /></LazyAdminPage> },
             ],
           },
         ],
@@ -181,6 +182,7 @@ export const router = createBrowserRouter([
 
           // Campanhas (acesso decidido pela lista própria do módulo, no servidor)
           { path: "campaigns", element: <WithBoundary name="Campanhas"><LazyAdminPage><AdminCampaigns /></LazyAdminPage></WithBoundary> },
+          { path: "recipe-book", element: <WithBoundary name="Livro de Receitas"><LazyAdminPage><AdminRecipeBook /></LazyAdminPage></WithBoundary> },
           { path: "campaigns/new", element: <WithBoundary name="Nova campanha"><LazyAdminPage><AdminCampaignWizard /></LazyAdminPage></WithBoundary> },
           { path: "campaigns/:id/edit", element: <WithBoundary name="Editar campanha"><LazyAdminPage><AdminCampaignWizard /></LazyAdminPage></WithBoundary> },
           { path: "campaigns/:id", element: <WithBoundary name="Painel da campanha"><LazyAdminPage><AdminCampaignPanel /></LazyAdminPage></WithBoundary> },

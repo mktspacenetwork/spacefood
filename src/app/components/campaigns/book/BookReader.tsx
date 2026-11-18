@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, List } from "lucide-react";
 import { cn } from "../../../lib/utils";
-import { ingredientItems, preparationSteps, storyParagraphs } from "../../../lib/campaigns/bookText";
+import { describeBook, ingredientItems, preparationSteps, recipeCampaign, storyParagraphs } from "../../../lib/campaigns/bookText";
+import type { AnyBook } from "../../../lib/campaigns/bookText";
 import { plural } from "../../../lib/campaigns/format";
-import type { BookRecipe, BookView } from "../../../lib/campaigns/types";
+import type { BookRecipe } from "../../../lib/campaigns/types";
 
 /**
  * Leitor do Livro de Receitas (colaborador e prévia do administrador).
@@ -12,7 +13,7 @@ import type { BookRecipe, BookView } from "../../../lib/campaigns/types";
  * botões grandes, deslizar para os lados e setas do teclado. Na impressão (Ctrl+P) todas as páginas saem,
  * uma receita por folha, sem os botões. O texto das receitas nunca é cortado.
  */
-export function BookReader({ book, className, initialPage = 0 }: { book: BookView; className?: string; initialPage?: number }) {
+export function BookReader({ book, className, initialPage = 0 }: { book: AnyBook; className?: string; initialPage?: number }) {
   const total = book.recipes.length;
   const [page, setPage] = useState(() => Math.min(Math.max(initialPage, 0), total));
   const topRef = useRef<HTMLDivElement>(null);
@@ -120,13 +121,14 @@ function ReaderButtonStyles() {
 
 // ───────────────────────────── Capa e sumário ─────────────────────────────
 
-function Cover({ book }: { book: BookView }) {
+function Cover({ book }: { book: AnyBook }) {
   const n = book.recipes.length;
+  const info = describeBook(book);
   return (
     <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-orange-600 via-orange-700 to-orange-800 text-white shadow-lg">
-      {book.campaign.cover_url && (
+      {info.coverUrl && (
         <img
-          src={book.campaign.cover_url}
+          src={info.coverUrl}
           alt=""
           className="aspect-[2/1] w-full object-cover"
           onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
@@ -135,8 +137,8 @@ function Cover({ book }: { book: BookView }) {
       <div className="px-6 py-10 text-center sm:py-12">
         <p className="text-[11px] font-bold uppercase tracking-[0.35em] text-white/85">SpaceFood</p>
         <div className="mx-auto my-5 h-px w-14 bg-white/50" aria-hidden="true" />
-        <h2 className="font-serif text-3xl font-bold leading-tight [overflow-wrap:anywhere] sm:text-4xl">{book.campaign.name}</h2>
-        <p className="mt-3 font-serif text-lg italic text-white/90">Livro de Receitas</p>
+        <h2 className="font-serif text-3xl font-bold leading-tight [overflow-wrap:anywhere] sm:text-4xl">{info.title}</h2>
+        <p className="mt-3 font-serif text-lg italic text-white/90">{info.subtitle}</p>
         <p className="mt-8 text-xs font-semibold uppercase tracking-widest text-white/85">
           {plural(n, "receita", "receitas")}
         </p>
@@ -184,6 +186,7 @@ function RecipePage({ recipe, index, total }: { recipe: BookRecipe; index: numbe
   const story = storyParagraphs(recipe.story);
   const ingredients = ingredientItems(recipe.ingredients);
   const { steps, numbered } = preparationSteps(recipe.preparation);
+  const campaign = recipeCampaign(recipe);
 
   return (
     <article aria-labelledby={`livro-r-${recipe.id}`} className="space-y-6">
@@ -195,6 +198,7 @@ function RecipePage({ recipe, index, total }: { recipe: BookRecipe; index: numbe
           {recipe.dish_name}
         </h2>
         <p className="mt-1.5 font-serif text-sm italic text-muted-foreground">por {recipe.author}</p>
+        {campaign && <p className="mt-1 text-xs font-semibold text-muted-foreground">Campanha: {campaign}</p>}
       </header>
 
       {current && (

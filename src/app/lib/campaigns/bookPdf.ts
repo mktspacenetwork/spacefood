@@ -1,10 +1,11 @@
 import type { PDFDocument, PDFFont, PDFImage, PDFPage } from "pdf-lib";
-import { ingredientItems, preparationSteps, storyParagraphs } from "./bookText";
-import type { BookRecipe, BookView } from "./types";
+import { describeBook, ingredientItems, preparationSteps, recipeCampaign, storyParagraphs } from "./bookText";
+import type { AnyBook } from "./bookText";
+import type { BookRecipe } from "./types";
 
 /**
- * Gerador do PDF do Livro de Receitas — roda no NAVEGADOR do administrador (a função do servidor tem pouco
- * tempo de CPU para montar um PDF com fotos). A biblioteca `pdf-lib` é carregada só quando o PDF é gerado.
+ * Gerador do PDF do Livro de Receitas — roda no NAVEGADOR de quem baixa (nada é guardado no servidor e o PDF
+ * sempre sai com o conteúdo atual do livro). A biblioteca `pdf-lib` é carregada só quando o PDF é gerado.
  *
  * Formato A5 (cabe bem no celular e imprime em folha comum). Capa, sumário com página e uma receita por
  * página inicial; textos longos continuam nas páginas seguintes SEM cortar nada. Fontes padrão do PDF
@@ -17,6 +18,8 @@ export type BookPdfOptions = {
   onProgress?: (info: { done: number; total: number; label: string }) => void;
   /** Carrega uma foto como JPEG/PNG. Padrão: navegador (fetch + canvas → JPEG). Injetável para testes. */
   loadImage?: (url: string) => Promise<PdfImageData | null>;
+  /** Cancela a geração (lança `AbortError`). */
+  signal?: AbortSignal;
 };
 
 export type BookPdfResult = { bytes: Uint8Array; pages: number };
@@ -190,8 +193,9 @@ class Flow {
   }
 }
 
-function drawCover(ctx: Ctx, book: BookView, cover: PDFImage | null, recipesCount: number, dateLabel: string): void {
+function drawCover(ctx: Ctx, book: AnyBook, cover: PDFImage | null, recipesCount: number, dateLabel: string): void {
   const { doc, lib, f, clean } = ctx;
+  const info = describeBook(book);
   const p = doc.addPage([W, H]);
   const white = lib.rgb(...C.white);
   p.drawRectangle({ x: 0, y: 0, width: W, height: H, color: lib.rgb(...C.deep) });
@@ -211,13 +215,13 @@ function drawCover(ctx: Ctx, book: BookView, cover: PDFImage | null, recipesCoun
   p.drawText(brand, { x: (W - f.sansBold.widthOfTextAtSize(brand, 10)) / 2, y: top, size: 10, font: f.sansBold, color: white, opacity: 0.9 });
   p.drawLine({ start: { x: W / 2 - 28, y: top - 18 }, end: { x: W / 2 + 28, y: top - 18 }, thickness: 0.8, color: white, opacity: 0.6 });
 
-  const nameLines = wrap(clean(book.campaign.name), f.serifBold, 30, W - 100);
+  const nameLines = wrap(clean(info.title), f.serifBold, 30, W - 100);
   let y = Math.min(top - 70, H * 0.58);
   for (const l of nameLines) {
     p.drawText(l, { x: (W - f.serifBold.widthOfTextAtSize(l, 30)) / 2, y, size: 30, font: f.serifBold, color: white });
     y -= 36;
   }
-  const sub = "Livro de Receitas";
+  const sub = clean(info.subtitle);
   p.drawText(sub, { x: (W - f.serifItalic.widthOfTextAtSize(sub, 17)) / 2, y: y - 8, size: 17, font: f.serifItalic, color: white, opacity: 0.95 });
 
   const count = `${recipesCount} ${recipesCount === 1 ? "RECEITA" : "RECEITAS"}`;
@@ -277,6 +281,11 @@ async function drawRecipe(ctx: Ctx, flow: Flow, r: BookRecipe, index: number, to
   if (author) {
     flow.gap(3);
     flow.lines(wrap(`por ${author}`, f.serifItalic, 10.5, CW), { font: f.serifItalic, size: 10.5, lh: 14, color: C.muted });
+  }
+  const origin = clean(recipeCampaign(r) ?? "").trim();
+  if (origin) {
+    flow.gap(2);
+    flow.lines(wrap(`Campanha: ${origin}`, f.sans, 8.5, CW), { font: f.sans, size: 8.5, lh: 12, color: C.muted });
   }
   flow.gap(12);
 
@@ -345,9 +354,11 @@ async function drawRecipe(ctx: Ctx, flow: Flow, r: BookRecipe, index: number, to
 // ─────────────────────────────────── Entrada ───────────────────────────────────
 
 /** Monta o PDF do livro. Lança erro se a biblioteca não carregar; foto que falhar é só omitida. */
-export async function generateBookPdf(book: BookView, opts: BookPdfOptions = {}): Promise<BookPdfResult> {
+export async function generateBookPdf(book: AnyBook, opts: BookPdfOptions = {}): Promise<BookPdfResult> {
   const progress = opts.onProgress ?? (() => {});
   const loadImage = opts.loadImage ?? loadImageAsJpeg;
+  const info = describeBook(book);
+  const checkAbort = () => { if (opts.signal?.aborted) throw new DOMException("Geração cancelada.", "AbortError"); };
   const total = book.recipes.length + 2; // capa + receitas + sumário
   let done = 0;
   const step = (label: string) => progress({ done: ++done, total, label });
@@ -363,19 +374,19 @@ export async function generateBookPdf(book: BookView, opts: BookPdfOptions = {})
     sansBold: await doc.embedFont(lib.StandardFonts.HelveticaBold),
   };
   const clean = makeCleaner(f.serif);
-  const name = clean(book.campaign.name) || "Campanha";
+  const name = clean(info.title) || "Livro de Receitas";
   const ctx: Ctx = { lib, doc, f, clean, footerText: `SpaceFood  ·  ${fit(name, f.sans, 7.5, CW - 60)}` };
 
-  doc.setTitle(`${name} - Livro de Receitas`);
+  doc.setTitle(name === "Livro de Receitas" ? name : `${name} - Livro de Receitas`);
   doc.setAuthor("SpaceFood");
   doc.setCreator("SpaceFood");
   doc.setProducer("SpaceFood");
-  doc.setSubject(`Livro de Receitas da campanha ${name}`);
+  doc.setSubject(clean(info.subtitle));
 
-  const when = book.generated_at ? new Date(book.generated_at) : new Date();
+  const when = info.generatedAt ? new Date(info.generatedAt) : new Date();
   const dateLabel = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "long", year: "numeric" }).format(when);
 
-  const coverImg = book.campaign.cover_url ? await embed(doc, await loadImage(book.campaign.cover_url)) : null;
+  const coverImg = info.coverUrl ? await embed(doc, await loadImage(info.coverUrl)) : null;
   drawCover(ctx, book, coverImg, book.recipes.length, dateLabel);
   step("Capa pronta");
 
@@ -388,12 +399,16 @@ export async function generateBookPdf(book: BookView, opts: BookPdfOptions = {})
 
   const startPages: number[] = [];
   for (let i = 0; i < book.recipes.length; i++) {
+    checkAbort();
     const r = book.recipes[i];
+    // as até 3 fotos da receita carregam juntas (a ordem é mantida)
+    const loaded = await Promise.all(r.photos.slice(0, 3).map((ph) => loadImage(ph.url)));
     const photos: PDFImage[] = [];
-    for (const ph of r.photos.slice(0, 3)) {
-      const e = await embed(doc, await loadImage(ph.url));
+    for (const img of loaded) {
+      const e = await embed(doc, img);
       if (e) photos.push(e);
     }
+    checkAbort();
     startPages.push(await drawRecipe(ctx, flow, r, i, book.recipes.length, photos));
     step(`Receita ${i + 1} de ${book.recipes.length}`);
   }

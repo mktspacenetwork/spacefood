@@ -4,6 +4,8 @@
  * jeito no leitor da tela e no PDF. O texto original nunca é alterado nem cortado: só é fatiado para exibir.
  */
 
+import type { BookRecipe, RecipeBookView } from "./types";
+
 /** Marcadores de lista que as pessoas digitam à mão: "- ", "• ", "* ", "– ". */
 const BULLET = /^\s*(?:[-•*·–—▪●◦]|•)\s+/;
 /** Numeração que a pessoa já digitou: "1.", "2)", "3 -", "Passo 4:" */
@@ -59,4 +61,25 @@ export function storyParagraphs(text: string): string[] {
     .split(/\n\s*\n/)
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
+}
+
+// ───────────────────────── Livro (leitor e PDF) ─────────────────────────
+
+/** O leitor e o gerador de PDF trabalham com o livro único (acervo). */
+export type AnyBook = RecipeBookView;
+
+/** Título/subtítulo/capa do livro, no mesmo formato para a tela e para o PDF. */
+export function describeBook(book: AnyBook): { title: string; subtitle: string; coverUrl: string | null; generatedAt: string } {
+  return { title: book.title || "Livro de Receitas", subtitle: "Receitas das campanhas SpaceFood", coverUrl: null, generatedAt: book.generated_at };
+}
+
+/** Nome da campanha de origem (só as receitas do acervo trazem). */
+export function recipeCampaign(r: BookRecipe): string | null {
+  const c = (r as { campaign_name?: string | null }).campaign_name;
+  return c && c.trim() ? c.trim() : null;
+}
+
+/** Para buscas: sem acento, minúsculas e sem espaços nas pontas. */
+export function normText(s: string): string {
+  return String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }

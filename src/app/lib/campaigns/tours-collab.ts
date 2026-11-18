@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import {
-  Megaphone, CalendarDays, MousePointerClick, Camera, Send, Activity, Pencil, Vote, ShieldCheck, ListOrdered,
-  Trophy, Images, ClipboardList, Info, UtensilsCrossed, ListChecks, BookOpen, Sparkles,
+  Megaphone, CalendarDays, MousePointerClick, Camera, Send, Pencil, Vote, ShieldCheck, ListOrdered,
+  Trophy, Images, ClipboardList, Info, UtensilsCrossed, ListChecks, BookOpen, PlusCircle,
 } from "lucide-react";
 import type { TourStep } from "../../components/campaigns/CampaignTour";
 
@@ -15,12 +15,24 @@ const icon = (C: Parameters<typeof createElement>[0]) => createElement(C as neve
  * começam com um passo SEM `selector`: ele aparece centralizado e garante que o "Ver tour" sempre mostre algo.
  */
 
-/** Lista de campanhas (/campanhas). */
+/** Lista de campanhas (/campanhas). Passos sem alvo na tela (ex.: livro não publicado) são pulados. */
 export const LIST_TOUR: TourStep[] = [
   {
     icon: icon(Megaphone),
     title: "Campanhas",
-    description: "Aqui ficam as campanhas do Space Food. Toque em uma para participar.",
+    description: "Aqui ficam as campanhas ativas. Toque em uma para participar.",
+  },
+  {
+    selector: "camp-submit-cta",
+    icon: icon(PlusCircle),
+    title: "Cadastrar receita",
+    description: "Cadastre sua receita por aqui, enquanto a campanha estiver aberta.",
+  },
+  {
+    selector: "camp-book-card",
+    icon: icon(BookOpen),
+    title: "Livro de Receitas",
+    description: "O livro reúne as receitas da plataforma. Leia aqui e baixe em PDF.",
   },
   {
     selector: "camp-card",
@@ -39,15 +51,23 @@ export const LIST_TOUR: TourStep[] = [
 /**
  * Início da campanha. Os textos se adaptam: campanha sem votação nunca fala de voto, ranking ou resultado.
  */
-export function homeTour(hasVoting: boolean, hasBook = false): TourStep[] {
+export function homeTour(hasVoting: boolean): TourStep[] {
   return [
     {
       selector: "camp-cta",
       icon: icon(MousePointerClick),
       title: "Ação do momento",
       description: hasVoting
-        ? "Este botão leva ao que dá para fazer agora: enviar sua receita, votar ou ver o resultado."
-        : "Este botão leva ao que dá para fazer agora: enviar sua receita ou ver as suas receitas.",
+        ? "Este botão leva ao que dá para fazer agora: cadastrar sua receita, votar ou ver o resultado."
+        : "Este botão leva ao que dá para fazer agora: cadastrar sua receita ou ver as suas receitas.",
+    },
+    {
+      selector: "camp-sections",
+      icon: icon(ListChecks),
+      title: "Menu da campanha",
+      description: hasVoting
+        ? "Veja as receitas, as suas receitas, cadastre uma nova e vote quando a votação estiver aberta."
+        : "Veja as receitas, as suas receitas e cadastre uma nova.",
     },
     {
       selector: "camp-period",
@@ -57,14 +77,6 @@ export function homeTour(hasVoting: boolean, hasBook = false): TourStep[] {
         ? "Aqui estão as datas para participar e para votar."
         : "Aqui estão as datas para participar.",
     },
-    ...(hasBook
-      ? [{
-          selector: "camp-book",
-          icon: icon(BookOpen),
-          title: "Livro de Receitas",
-          description: "As receitas da campanha reunidas em um livro. Dá para ler aqui e baixar em PDF.",
-        } satisfies TourStep]
-      : []),
     {
       selector: "camp-details",
       icon: icon(Info),
@@ -82,10 +94,16 @@ export const RECIPES_TOUR: TourStep[] = [
     description: "Aqui ficam as receitas aprovadas. Se ainda não houver nenhuma, você vê um aviso.",
   },
   {
+    selector: "camp-view-toggle",
+    icon: icon(ListChecks),
+    title: "Cards ou lista",
+    description: "Escolha como ver as receitas. A escolha fica salva no seu aparelho.",
+  },
+  {
     selector: "camp-recipe-card",
     icon: icon(UtensilsCrossed),
     title: "Abra uma receita",
-    description: "Toque para ver a foto e os detalhes.",
+    description: "Toque para ver a foto, os ingredientes e o modo de preparo.",
   },
 ];
 
@@ -111,7 +129,7 @@ export const SUBMIT_TOUR: TourStep[] = [
     selector: "camp-fields",
     icon: icon(ListChecks),
     title: "Sua receita",
-    description: "Dê um título e escreva os ingredientes e o modo de preparo. A história e a memória afetiva são opcionais.",
+    description: "Informe o título, os ingredientes e o modo de preparo. A história e a memória afetiva são opcionais.",
   },
   {
     selector: "camp-photo",
@@ -132,30 +150,25 @@ export const MYENTRY_TOUR: TourStep[] = [
   {
     icon: icon(ClipboardList),
     title: "Minhas receitas",
-    description: "Aqui você vê as receitas que enviou: em análise, aprovadas ou que precisam de ajuste.",
+    description: "Aqui estão as receitas que você cadastrou. Use Cards ou Lista para ver do seu jeito.",
   },
   {
+    selector: "camp-recipe-card",
     icon: icon(UtensilsCrossed),
-    title: "Ver a receita completa",
-    description: "Em cada receita, toque em “Ver receita completa” para conferir ingredientes e modo de preparo.",
+    title: "Abra uma receita",
+    description: "O selo mostra a situação: em análise, aprovada ou não aprovada. Toque para ver ingredientes, modo de preparo e o motivo, se não for aprovada.",
   },
   {
-    selector: "camp-status",
-    icon: icon(Activity),
-    title: "Situação",
-    description: "Se a receita não for aprovada, o motivo aparece aqui.",
+    selector: "camp-new-recipe",
+    icon: icon(Send),
+    title: "Cadastrar receita",
+    description: "Use este botão para cadastrar uma receita. Quando a campanha permitir, dá para cadastrar outras.",
   },
   {
     selector: "camp-edit",
     icon: icon(Pencil),
     title: "Editar",
     description: "Dá para editar enquanto ela não for aprovada.",
-  },
-  {
-    selector: "camp-new-recipe",
-    icon: icon(Send),
-    title: "Enviar receita",
-    description: "Use este botão para enviar uma receita. Quando a campanha permitir, dá para enviar outras.",
   },
 ];
 
@@ -177,6 +190,12 @@ export const VOTE_TOUR: TourStep[] = [
     title: "Votar",
     description: "Depois de escolher, toque em “Votar em…” e confirme. Depois de confirmado, não dá para mudar.",
   },
+  {
+    selector: "camp-partial",
+    icon: icon(ListOrdered),
+    title: "Ranking parcial",
+    description: "A equipe liberou a classificação até agora. Ela ainda pode mudar.",
+  },
 ];
 
 /** Ranking. */
@@ -184,13 +203,13 @@ export const RANKING_TOUR: TourStep[] = [
   {
     icon: icon(ListOrdered),
     title: "Ranking",
-    description: "Mostra a classificação final das receitas por votos, depois que o resultado for divulgado.",
+    description: "Mostra a classificação das receitas por votos.",
   },
   {
     selector: "camp-ranking",
     icon: icon(ListOrdered),
-    title: "Resultado oficial",
-    description: "Esta é a classificação final da votação.",
+    title: "Classificação",
+    description: "Se aparecer como parcial, ainda pode mudar. A final só vale depois que o resultado for divulgado.",
   },
 ];
 
@@ -199,18 +218,12 @@ export const RESULTS_TOUR: TourStep[] = [
   {
     icon: icon(Trophy),
     title: "Resultado",
-    description: "Aqui aparece o resultado da campanha (vencedora e/ou sorteio), depois que for divulgado.",
+    description: "Aqui aparece o resultado da votação, depois que a equipe divulgar.",
   },
   {
     selector: "camp-winner",
     icon: icon(Trophy),
     title: "Receita vencedora",
     description: "Parabéns a todas as pessoas que participaram!",
-  },
-  {
-    selector: "camp-draw",
-    icon: icon(Sparkles),
-    title: "Sorteio",
-    description: "Aqui estão as pessoas sorteadas, divulgadas pela equipe.",
   },
 ];

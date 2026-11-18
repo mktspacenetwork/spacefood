@@ -129,15 +129,22 @@ export function uploadToSignedUrl(
 }
 
 /** Ponto único de verificação: "este usuário vê o menu Campanhas?" (não bloqueia a tela em caso de erro). */
-export async function fetchCampaignAvailability(): Promise<{
+export type CampaignAvailability = {
   enabled: boolean;
+  /** Há campanha visível OU o Livro de Receitas está publicado: o item "Campanhas" aparece no menu. */
   hasVisible: boolean;
+  /** O Livro de Receitas (único) está publicado para os colaboradores. */
+  book: boolean;
   campaigns: { id: string; slug: string; tour: { enabled: boolean; version: number } }[];
-}> {
+};
+
+export async function fetchCampaignAvailability(): Promise<CampaignAvailability> {
   try {
-    return await campaignsApi.get("/campaigns/availability");
+    const r = await campaignsApi.get<Partial<CampaignAvailability>>("/campaigns/availability");
+    const book = r.book === true;
+    return { enabled: r.enabled === true, hasVisible: r.hasVisible === true || book, book, campaigns: r.campaigns ?? [] };
   } catch {
-    return { enabled: false, hasVisible: false, campaigns: [] };
+    return { enabled: false, hasVisible: false, book: false, campaigns: [] };
   }
 }
 

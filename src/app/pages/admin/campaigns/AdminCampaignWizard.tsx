@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "../../../components/ui/Button";
 import { Card, CardContent } from "../../../components/ui/Card";
 import { Checkbox } from "../../../components/ui/checkbox";
+import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../../../components/ui/collapsible";
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
@@ -36,12 +37,13 @@ const mediaLimits = (hasPhotos: boolean): MediaLimits =>
 const SIMPLE_VISIBILITY: Visibility = { ranking_mode: "hidden_until_confirmed", gallery_visibility: "on_approval", show_podium: false, allow_preview: false };
 
 /** `tour` entra só com `enabled`: o servidor mescla e preserva a versão da tour. */
-type Options = { hasVoting: boolean; multiple: boolean; hasPhotos: boolean; hasDraw: boolean; drawWinners: number };
+type Options = { hasVoting: boolean; multiple: boolean; hasPhotos: boolean };
+/** Votação e as funcionalidades que dependem dela (ranking, resultado, divulgação) ligam e desligam juntas. */
+const votingFlags = (on: boolean) => ({ voting: on, ranking: on, results: on, announcement: on });
 const simpleFeatures = (o: Options) => ({
   submission: true, photos: o.hasPhotos, video: false, approval: true, gallery: true,
-  voting: o.hasVoting, ranking: o.hasVoting, results: o.hasVoting, announcement: o.hasVoting,
+  ...votingFlags(o.hasVoting),
   multiple_submissions: o.multiple,
-  draw: o.hasDraw, draw_winners: o.hasDraw ? o.drawWinners : 1,
   tour: { enabled: true },
 }) as unknown as Features;
 
@@ -56,9 +58,6 @@ type Form = {
   multiple: boolean;
   /** Receita com fotos (de 1 a 3). Desligado: sem campo de foto. */
   hasPhotos: boolean;
-  /** Sorteio entre quem tem receita aprovada, com `drawWinners` ganhadores (1 a 10). */
-  hasDraw: boolean;
-  drawWinners: number;
   period: PeriodValues;
   audienceMode: "all" | "users";
   users: string[];
@@ -70,8 +69,10 @@ type Snapshot = {
   audienceKey: string;
   multiple: boolean;
   hasVoting: boolean;
-  /** A votação já tem datas próprias gravadas no servidor. */
-  votingDatesSet: boolean;
+  /** Votos já registrados (para pedir confirmação ao desligar a votação). */
+  votesRegistered: number;
+  /** Situação do resultado: confirmado/divulgado trava o desligamento da votação. */
+  resultsStatus: string;
   /** Já há quem tenha enviado mais de uma receita (para o aviso ao desmarcar a opção). */
   hasMultipleSent: boolean;
   /** Campanha antiga filtrada por unidade/departamento: o modo é mantido como está. */
@@ -81,7 +82,7 @@ type SiteUser = { id: string; name: string; department: string; unit: string };
 
 const initialForm = (): Form => ({
   name: "", description: "", instructions: "", coverPath: null, coverUrl: null,
-  hasVoting: false, multiple: false, hasPhotos: true, hasDraw: false, drawWinners: 1,
+  hasVoting: false, multiple: false, hasPhotos: true,
   period: EMPTY_PERIOD, audienceMode: "all", users: [],
 });
 
@@ -173,6 +174,7 @@ export function AdminCampaignWizard() {
   const [conflict, setConflict] = useState(false);
   const [eligibleCount, setEligibleCount] = useState<number | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [votingOffOpen, setVotingOffOpen] = useState(false);
 
   const [siteUsers, setSiteUsers] = useState<SiteUser[] | null>(null);
   const [usersError, setUsersError] = useState<string | null>(null);
@@ -203,8 +205,7 @@ export function AdminCampaignWizard() {
     if (!d) return;
     const c: AdminCampaign = d.campaign;
     const reg = d.stages.find((s) => s.stage_key === "registration");
-    const vot = d.stages.find((s) => s.stage_key === "voting");
-    const period = periodFromStages(reg, c.features?.voting ? vot : undefined);
+    const period = periodFromStages(reg, c.features?.voting ? d.results?.announce_at : null);
     const audience: Audience = c.audience ?? { mode: "all" };
     const legacy = audience.mode === "units" || audience.mode === "departments" ? audience : null;
     const mode: Form["audienceMode"] = audience.mode === "users" ? "users" : "all";
@@ -215,24 +216,27 @@ export function AdminCampaignWizard() {
       hasVoting: !!c.features?.voting,
       multiple: !!c.features?.multiple_submissions,
       hasPhotos: c.features?.photos !== false,
-      hasDraw: !!c.features?.draw,
-      drawWinners: Math.min(10, Math.max(1, Number(c.features?.draw_winners ?? 1) || 1)),
       period, audienceMode: mode, users,
     });
     setSnap({
       version: c.version, status: c.status, period,
       audienceKey: JSON.stringify({ m: mode, u: [...users].sort() }),
       multiple: !!c.features?.multiple_submissions, hasMultipleSent: false,
-      hasVoting: !!c.features?.voting, votingDatesSet: !!(vot?.starts_at && vot?.ends_at),
+      hasVoting: !!c.features?.voting, votesRegistered: 0, resultsStatus: d.results?.status ?? "none",
       legacyAudience: legacy,
     });
     setDetailsOpen(!!(c.instructions ?? "").trim());
     setConflict(false);
-    campaignsApi.get<{ eligible: number; submissions: number; participants: number }>(`/admin/campaigns/${c.id}/dashboard`)
+    campaignsApi.get<{ eligible: number; submissions: number; participants: number; votes_registered?: number; votes_valid?: number; results?: { status?: string } | null }>(`/admin/campaigns/${c.id}/dashboard`)
       .then((r) => {
         setEligibleCount(r.eligible);
         // Mais receitas do que pessoas = alguém já enviou mais de uma.
-        setSnap((s) => (s ? { ...s, hasMultipleSent: r.submissions > r.participants } : s));
+        setSnap((s) => (s ? {
+          ...s,
+          hasMultipleSent: r.submissions > r.participants,
+          votesRegistered: r.votes_registered ?? r.votes_valid ?? 0,
+          resultsStatus: r.results?.status ?? s.resultsStatus,
+        } : s));
       })
       .catch(() => {});
   }, [detail.data]);
@@ -286,20 +290,30 @@ export function AdminCampaignWizard() {
   const validate = (): string | null => {
     const name = form.name.trim();
     if (name.length < 3 || name.length > 120) return "Informe um nome com 3 a 120 caracteres.";
-    const periodProblem = validatePeriod(form.period, form.hasVoting);
+    const periodProblem = validatePeriod(form.period, form.hasVoting, snap?.period.announce ?? "");
     if (periodProblem) return periodProblem;
-    if (form.hasDraw && (!Number.isInteger(form.drawWinners) || form.drawWinners < 1 || form.drawWinners > 10)) return "O sorteio precisa de 1 a 10 ganhadores.";
     if (form.audienceMode === "users" && form.users.length === 0) return "Escolha pelo menos uma pessoa ou volte para \"Todos\".";
     return null;
   };
 
+  // Votação: ligar/desligar vale mesmo com a campanha publicada. Desligar com votos registrados pede confirmação
+  // (os votos ficam guardados e escondidos); com o resultado já confirmado/divulgado o servidor não permite.
+  const votesAtRisk = isEdit && !!snap?.hasVoting && !form.hasVoting && (snap?.votesRegistered ?? 0) > 0;
+  const votingLocked = !!snap?.hasVoting && (snap.resultsStatus === "confirmed" || snap.resultsStatus === "announced");
+
   // ── Salvar ──
-  const save = async () => {
+  const save = () => {
     const problem = validate();
     if (problem) {
       toast.error(problem);
       return;
     }
+    if (votesAtRisk) { setVotingOffOpen(true); return; }
+    void doSave();
+  };
+
+  const doSave = async () => {
+    setVotingOffOpen(false);
     const r = await run("save", async () => {
       let cid = id ?? null;
       let phase = "criar a campanha";
@@ -322,14 +336,17 @@ export function AdminCampaignWizard() {
             name: form.name.trim(), description: form.description.trim(), instructions: form.instructions.trim(),
             cover_path: form.coverPath, version: snap?.version,
           };
-          // Rascunho: normaliza para o modelo simples (inclui o rascunho antigo). Publicada: o servidor trava funcionalidades.
+          // Rascunho: normaliza para o modelo simples (inclui o rascunho antigo). Publicada: o servidor trava
+          // fotos/outras funcionalidades; só "várias receitas" e a votação (com ranking/resultado/divulgação) mudam.
           if (!snap || snap.status === "draft" || snap.status === "in_review") {
             body.features = simpleFeatures(form);
             body.media_limits = mediaLimits(form.hasPhotos);
             body.visibility = SIMPLE_VISIBILITY;
-          } else if (snap.multiple !== form.multiple) {
-            // Publicada: só esta chave pode mudar (as receitas já enviadas continuam como estão).
-            body.features = { multiple_submissions: form.multiple };
+          } else {
+            const changed: Record<string, unknown> = {};
+            if (snap.multiple !== form.multiple) changed.multiple_submissions = form.multiple;
+            if (snap.hasVoting !== form.hasVoting) Object.assign(changed, votingFlags(form.hasVoting));
+            if (Object.keys(changed).length > 0) body.features = changed;
           }
           await campaignsApi.put(`/admin/campaigns/${cid}`, body);
         }
@@ -352,13 +369,15 @@ export function AdminCampaignWizard() {
         throw wrap(e);
       }
 
-      // Período: participação e, quando há votação, o período próprio da votação
+      // Período: início e encerramento das participações (a votação usa a mesma janela) + data de anúncio do resultado
       phase = "salvar o período";
       try {
-        const payload = periodPayload(form.period, form.hasVoting);
-        // Também regrava quando a votação foi ligada agora ou ainda não tinha datas próprias no servidor.
-        const votingStale = form.hasVoting && (!snap?.votingDatesSet || snap.hasVoting !== form.hasVoting);
-        if (payload && (!isEdit || !snap || votingStale || !samePeriod(snap.period, form.period, form.hasVoting))) {
+        const base = periodPayload(form.period, form.hasVoting);
+        const votingOff = !!snap?.hasVoting && !form.hasVoting; // desligou a votação: limpa a data de anúncio
+        const payload = base && votingOff ? { ...base, announce_at: null } : base;
+        // Também regrava quando a votação foi ligada agora (a votação passa a usar a janela das participações).
+        const votingOn = form.hasVoting && !!snap && !snap.hasVoting;
+        if (payload && (!isEdit || !snap || votingOn || votingOff || !samePeriod(snap.period, form.period, form.hasVoting))) {
           await campaignsApi.put(`/admin/campaigns/${cid}/period`, payload);
         }
       } catch (e) {
@@ -502,40 +521,18 @@ export function AdminCampaignWizard() {
           <Option
             tutorial="camp-wiz-voting"
             title="Esta campanha terá votação?"
-            hint={form.hasVoting ? "Cada pessoa tem um voto. O ranking é só da gestão." : "Sem votação: nada sobre votos aparece."}
-            note={published ? "Não dá para mudar depois de publicada." : undefined}
+            hint={form.hasVoting ? "Cada pessoa tem um voto." : "Sem votação: nada sobre votos aparece."}
+            note={
+              votingLocked
+                ? "Ganhador já confirmado: a votação não pode mais ser desligada."
+                : published
+                ? "Pode ligar ou desligar a qualquer momento. Votos já registrados ficam guardados."
+                : undefined
+            }
             checked={form.hasVoting}
             onChange={(v) => set("hasVoting", v)}
-            disabled={published || closed}
+            disabled={closed || votingLocked}
           />
-          <Option
-            tutorial="camp-wiz-draw"
-            title="Esta campanha terá sorteio?"
-            hint={form.hasDraw ? "Sorteia entre quem tem receita aprovada, uma chance por pessoa." : "Sem sorteio."}
-            note={published ? "Não dá para mudar depois de publicada." : undefined}
-            checked={form.hasDraw}
-            onChange={(v) => set("hasDraw", v)}
-            disabled={published || closed}
-          >
-            {form.hasDraw && (
-              <div className="flex items-center gap-3">
-                <Label htmlFor="draw-winners" className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Ganhadores</Label>
-                <Input
-                  id="draw-winners"
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  max={10}
-                  value={Number.isNaN(form.drawWinners) ? "" : form.drawWinners}
-                  onChange={(e) => set("drawWinners", e.target.value === "" ? Number.NaN : Math.trunc(Number(e.target.value)))}
-                  className="h-10 w-20 rounded-xl text-center"
-                  disabled={published || closed}
-                  aria-label="Quantidade de ganhadores do sorteio"
-                />
-                <span className="text-[11px] text-muted-foreground">de 1 a 10</span>
-              </div>
-            )}
-          </Option>
           <Option
             tutorial="camp-wiz-photos"
             title="Permitir envio de fotos?"
@@ -566,10 +563,14 @@ export function AdminCampaignWizard() {
       {/* Período */}
       <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-wiz-period">
         <CardContent className="space-y-3 p-5">
-          <SectionLabel>{form.hasVoting ? "Períodos" : "Período"}</SectionLabel>
-          <PeriodFields values={form.period} onChange={(p) => set("period", p)} hasVoting={form.hasVoting} disabled={closed} />
+          <SectionLabel>Período</SectionLabel>
+          <PeriodFields
+            values={form.period} onChange={(p) => set("period", p)} hasVoting={form.hasVoting}
+            disabled={closed} datesDisabled={snap?.resultsStatus === "confirmed" || snap?.resultsStatus === "announced"}
+          />
           <p className="text-[11px] text-muted-foreground">
             Abre às 00:00 do início e fecha no fim do dia do encerramento (horário de Brasília).
+            {form.hasVoting ? " A votação acontece nesse mesmo período." : ""}
           </p>
         </CardContent>
       </Card>
@@ -654,6 +655,16 @@ export function AdminCampaignWizard() {
           {saveLabel}
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={votingOffOpen}
+        onOpenChange={setVotingOffOpen}
+        title="Desligar a votação?"
+        description={`Os ${snap?.votesRegistered ?? 0} votos registrados ficam guardados, mas a votação e o ranking somem para todos. Se você ligar de novo, eles voltam.`}
+        confirmLabel="Desligar e salvar"
+        variant="destructive"
+        onConfirm={() => void doSave()}
+      />
 
       <CampaignTour steps={ADMIN_TOUR_WIZARD} tour={tour} />
     </div>

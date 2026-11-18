@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { CheckCircle2, ChevronDown, ClipboardList, Pencil, Plus } from "lucide-react";
+import { CheckCircle2, ClipboardList, Pencil, Plus } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "../../components/ui/Button";
-import { Card } from "../../components/ui/Card";
 import { Skeleton } from "../../components/ui/skeleton";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../components/ui/sheet";
+import { RecipeTile, RecipeViewToggle, StatusBadge, useRecipeView } from "../../components/campaigns/RecipeView";
 import { SubmissionStatus } from "../../components/campaigns/SubmissionStatus";
 import { EmptyState } from "../../components/campaigns/EmptyState";
 import { RecipePhotos, RecipeText } from "../../components/campaigns/RecipeBody";
@@ -13,7 +14,6 @@ import { CampaignTour, TourButton, tourKey, useTour } from "../../components/cam
 import { useCampaignCtx } from "./CampaignLayout";
 import { useAuth } from "../../context/Store";
 import { campaignsApi, CampaignApiError, errMsg } from "../../lib/campaigns/api";
-import { cn } from "../../lib/utils";
 import { fmtDateTime, plural } from "../../lib/campaigns/format";
 import { MYENTRY_TOUR } from "../../lib/campaigns/tours-collab";
 import type { CollabState, MySubmission, MySubmissions } from "../../lib/campaigns/types";
@@ -22,7 +22,9 @@ type Payload = MySubmissions;
 
 /**
  * Minhas receitas: tudo o que a pessoa enviou nesta campanha (uma, ou várias se a campanha permitir),
- * com a situação de cada uma, o motivo quando não foi aprovada e o caminho para enviar/editar.
+ * no mesmo padrão visual de "Receitas" (cards ou lista, com selo da situação).
+ * Tocar numa receita abre a folha com o texto completo, a situação, o motivo quando não foi aprovada
+ * e o botão de editar.
  */
 export function CampaignMyEntry() {
   const { campaign, state: ctxState, slug } = useCampaignCtx();
@@ -32,8 +34,9 @@ export function CampaignMyEntry() {
   const api = `/campaigns/${encodeURIComponent(slug)}`;
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Receitas com o texto completo aberto (ingredientes e modo de preparo).
-  const [openIds, setOpenIds] = useState<Record<string, boolean>>({});
+  // Receita aberta na folha (texto completo, situação e botão de editar).
+  const [selId, setSelId] = useState<string | null>(null);
+  const [view, setView] = useRecipeView();
 
   const load = useCallback(async () => {
     setError(null);
@@ -83,6 +86,9 @@ export function CampaignMyEntry() {
   const regOpen = !!state.released && state.registration === "open" && state.stage !== "closed";
   const canEdit = (s: MySubmission) => (multi ? regOpen && s.status !== "approved" : !!state.can_edit);
   const limitReached = multi && items.length >= max && regOpen;
+  const selected = items.find((x) => x.id === selId) ?? null;
+  const photoOf = (s: MySubmission) =>
+    (s.media.find((m) => m.kind === "main_photo") ?? s.media.find((m) => m.kind === "photo"))?.url ?? null;
 
   const newButton = (
     <Button
@@ -92,7 +98,7 @@ export function CampaignMyEntry() {
       className="h-14 w-full gap-2 rounded-2xl text-base font-bold"
     >
       <Plus size={18} aria-hidden="true" />
-      {items.length === 0 ? "Enviar minha receita" : "Enviar outra receita"}
+      {items.length === 0 ? "Cadastrar receita" : "Cadastrar outra receita"}
     </Button>
   );
 
@@ -105,12 +111,12 @@ export function CampaignMyEntry() {
         </div>
         <EmptyState
           icon={<ClipboardList size={22} aria-hidden="true" />}
-          title="Você ainda não enviou receitas"
-          description={canSendMore ? (campaign.features.photos !== false ? "Escreva os ingredientes e o modo de preparo e envie uma foto." : "Escreva os ingredientes e o modo de preparo.") : "A participação não está aberta para você agora."}
+          title="Você ainda não cadastrou receitas"
+          description={canSendMore ? "Informe os ingredientes e o modo de preparo." : "A participação não está aberta para você agora."}
           action={
             canSendMore ? (
               <Button data-tutorial="camp-new-recipe" onClick={() => navigate(`${base}/enviar`)} className="h-12 gap-2 rounded-xl px-6">
-                <Plus size={18} aria-hidden="true" /> Enviar minha receita
+                <Plus size={18} aria-hidden="true" /> Cadastrar receita
               </Button>
             ) : (
               <Button variant="outline" onClick={() => navigate(base)} className="h-11 rounded-xl px-5">Voltar à campanha</Button>
@@ -132,45 +138,25 @@ export function CampaignMyEntry() {
         <TourButton onClick={tour.start} />
       </div>
 
-      {items.map((s, i) => {
-        const editable = canEdit(s);
-        const isOpen = !!openIds[s.id];
-        return (
-          <section key={s.id} className="space-y-3" aria-label={`Receita ${s.dish_name}`}>
-            <RecipePhotos media={s.media} alt={s.dish_name} />
-            <div className="space-y-1">
-              <h3 className="text-xl font-bold leading-tight text-foreground">{s.dish_name}</h3>
-              <p className="text-xs text-muted-foreground">Enviada por você</p>
-            </div>
+      <div className="flex justify-end">
+        <RecipeViewToggle view={view} onChange={setView} />
+      </div>
 
-            {isOpen && <RecipeText story={s.description} ingredients={s.ingredients} preparation={s.preparation} />}
-            <button
-              type="button"
-              aria-expanded={isOpen}
-              onClick={() => setOpenIds((o) => ({ ...o, [s.id]: !o[s.id] }))}
-              className="flex h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-border bg-background text-sm font-semibold text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-            >
-              {isOpen ? "Esconder a receita" : "Ver receita completa"}
-              <ChevronDown size={16} className={cn("transition-transform", isOpen && "rotate-180")} aria-hidden="true" />
-            </button>
-
-            <SubmissionStatus status={s.status} submittedAt={s.submitted_at} reviewedAt={s.reviewed_at} reason={s.rejection_reason} canEdit={editable} />
-
-            {editable && (
-              <Button
-                size="lg"
-                variant={s.status === "rejected" || s.status === "pending_media" ? "primary" : "outline"}
-                data-tutorial={i === 0 ? "camp-edit" : undefined}
-                onClick={() => navigate(`${base}/enviar/${s.id}`)}
-                className="h-14 w-full gap-2 rounded-2xl text-base font-bold"
-              >
-                <Pencil size={18} aria-hidden="true" />
-                {s.status === "pending_media" ? "Terminar o envio" : s.status === "rejected" ? "Corrigir e reenviar" : "Editar receita"}
-              </Button>
-            )}
-          </section>
-        );
-      })}
+      <div className={view === "cards" ? "grid grid-cols-2 gap-3 sm:grid-cols-3" : "space-y-2"}>
+        {items.map((s, i) => (
+          <RecipeTile
+            key={s.id}
+            layout={view}
+            title={s.dish_name}
+            subtitle="Enviada por você"
+            photoUrl={photoOf(s)}
+            badge={<StatusBadge status={s.status} />}
+            onClick={() => setSelId(s.id)}
+            first={i === 0}
+            ariaLabel={`Abrir a receita ${s.dish_name}`}
+          />
+        ))}
+      </div>
 
       {canSendMore && newButton}
       {limitReached && !canSendMore && (
@@ -188,6 +174,42 @@ export function CampaignMyEntry() {
           </span>
         </p>
       )}
+
+      <Sheet open={!!selected} onOpenChange={(o) => { if (!o) setSelId(null); }}>
+        <SheetContent side="bottom" className="max-h-[90vh] overflow-y-auto rounded-t-3xl px-1 pb-6">
+          {selected && (
+            <>
+              <SheetHeader className="text-left">
+                <SheetTitle className="pr-8 text-lg leading-snug">{selected.dish_name}</SheetTitle>
+                <SheetDescription className="sr-only">Sua receita</SheetDescription>
+              </SheetHeader>
+              <div className="space-y-4 px-4">
+                <RecipePhotos media={selected.media} alt={selected.dish_name} />
+                <SubmissionStatus
+                  status={selected.status}
+                  submittedAt={selected.submitted_at}
+                  reviewedAt={selected.reviewed_at}
+                  reason={selected.rejection_reason}
+                  canEdit={canEdit(selected)}
+                />
+                <RecipeText story={selected.description} ingredients={selected.ingredients} preparation={selected.preparation} />
+                {canEdit(selected) && (
+                  <Button
+                    size="lg"
+                    variant={selected.status === "rejected" || selected.status === "pending_media" ? "primary" : "outline"}
+                    data-tutorial="camp-edit"
+                    onClick={() => navigate(`${base}/enviar/${selected.id}`)}
+                    className="h-14 w-full gap-2 rounded-2xl text-base font-bold"
+                  >
+                    <Pencil size={18} aria-hidden="true" />
+                    {selected.status === "pending_media" ? "Terminar o envio" : selected.status === "rejected" ? "Corrigir e reenviar" : "Editar receita"}
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
 
       <CampaignTour steps={MYENTRY_TOUR} tour={tour} />
     </motion.div>

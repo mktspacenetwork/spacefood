@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { tourKey, useTour } from "../../../../components/campaigns/CampaignTour";
 import type { TourController } from "../../../../components/campaigns/CampaignTour";
 
-export type PanelTabKey = "summary" | "submissions" | "participants" | "voting" | "draw" | "reports" | "settings";
+export type PanelTabKey = "summary" | "submissions" | "participants" | "results" | "reports" | "settings";
 
 /**
  * Tour de UMA aba do painel, igual para qualquer perfil:

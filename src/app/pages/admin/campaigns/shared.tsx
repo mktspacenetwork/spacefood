@@ -298,3 +298,17 @@ export function slugify(s: string): string {
       .slice(0, 50) || ""
   );
 }
+
+/**
+ * Itens do checklist de publicação que valem mostrar. A votação usa a MESMA janela da participação, então os itens
+ * "datas da votação" e "votação coerente" só aparecem quando estão pendentes — e as datas da votação só quando as
+ * da participação já estão certas (senão é a mesma causa e o aviso ficaria em dobro).
+ */
+export function visibleCheckItems<T extends { key: string; ok: boolean }>(items: T[]): T[] {
+  const regOk = items.find((i) => i.key === "registration_dates")?.ok ?? true;
+  return items.filter((i) => {
+    if (i.key === "voting_order") return !i.ok;
+    if (i.key === "voting_dates") return !i.ok && regOk;
+    return true;
+  });
+}

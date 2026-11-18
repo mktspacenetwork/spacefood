@@ -32,7 +32,7 @@ export function RankingCard({
     <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-vote-ranking">
       <CardContent className="space-y-4 p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <SectionLabel>Receitas mais votadas</SectionLabel>
+          <SectionLabel>2 · Ranking: receitas mais votadas</SectionLabel>
           <div className="flex items-center gap-2">
             {updatedAt && live && (
               <span className="text-[11px] text-muted-foreground">Atualizado às {formatInTimeZone(updatedAt, TIMEZONE, "HH:mm")}</span>

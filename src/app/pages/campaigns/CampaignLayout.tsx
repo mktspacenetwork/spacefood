@@ -104,25 +104,23 @@ export function CampaignLayout() {
   const isHome = pathname.replace(/\/+$/, "") === base;
   const isForm = /\/enviar(\/|$)/.test(pathname);
 
-  // Seções: só as que existem para esta campanha e esta pessoa agora.
-  // "Minhas receitas" aparece para quem já enviou ou ainda pode enviar (é a porta de entrada para cadastrar).
-  // "Votação" só existe em campanha COM votação; "Resultado" quando a votação e/ou o sorteio foram divulgados;
-  // "Livro de Receitas" só depois que o administrador publica o livro.
+  // Menu interno (a tela da campanha já traz nome, período e o botão do momento, então não há chip "Início"):
+  //   Receitas · Minhas receitas · Cadastrar receita · Votação (só com votação) · Resultado (só depois de divulgado).
+  // Só aparece o que existe para esta campanha e esta pessoa agora; o Livro de Receitas é global (tela de Campanhas).
   const hasVoting = !!campaign.features.voting;
-  const hasDraw = !!campaign.features.draw;
-  const sections: { to: string; label: string; short?: string; end?: boolean }[] = [{ to: base, label: "Início", end: true }];
+  const sections: { to: string; label: string; short?: string }[] = [];
   if (state.gallery_visible) sections.push({ to: `${base}/receitas`, label: "Receitas" });
   if (state.released && (submissionsCount(state) > 0 || state.can_submit)) {
     sections.push({ to: `${base}/participacao`, label: "Minhas receitas" });
   }
+  if (state.released && state.can_submit) {
+    sections.push({ to: `${base}/enviar`, label: "Cadastrar receita", short: "Cadastrar" });
+  }
   if (hasVoting && !state.results_visible && state.released && (state.voting === "open" || state.has_voted || state.voting === "closed")) {
     sections.push({ to: `${base}/votacao`, label: state.can_vote ? "Votar" : "Votação" });
   }
-  if ((hasVoting && state.results_visible) || (hasDraw && state.draw_visible)) {
+  if (hasVoting && state.results_visible) {
     sections.push({ to: `${base}/resultado`, label: "Resultado" });
-  }
-  if (state.book_published) {
-    sections.push({ to: `${base}/livro`, label: "Livro de Receitas", short: "Livro" });
   }
 
   return (
@@ -140,7 +138,7 @@ export function CampaignLayout() {
         {!isHome && <p className="min-w-0 flex-1 truncate text-base font-bold text-foreground">{campaign.name}</p>}
       </header>
 
-      {sections.length > 1 && !isForm && (
+      {sections.length > 0 && !isForm && (
         <nav
           aria-label="Seções da campanha"
           data-tutorial="camp-sections"
@@ -150,12 +148,11 @@ export function CampaignLayout() {
             <NavLink
               key={s.to}
               to={s.to}
-              end={s.end}
               className={({ isActive }) =>
                 cn(
                   "flex h-10 flex-1 shrink-0 items-center justify-center whitespace-nowrap rounded-xl font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-                  // com 5 ou mais seções o menu fica mais compacto para caber no celular sem rolagem
-                  sections.length >= 5 ? "px-1.5 text-[12px]" : "px-3 text-[13px]",
+                  // com 4 ou mais seções o menu fica mais compacto para caber no celular sem rolagem
+                  sections.length >= 4 ? "px-1.5 text-[12px]" : "px-3 text-[13px]",
                   isActive ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground",
                 )
               }

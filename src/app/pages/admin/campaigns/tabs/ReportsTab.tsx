@@ -18,7 +18,6 @@ const REPORTS: Report[] = [
   { kind: "voting", title: "Votação por receita", hint: "Votos válidos por receita.", show: (p, c) => c.features.voting && !!p.campaigns_results },
   { kind: "ranking", title: "Ranking", hint: "Classificação por votos válidos.", show: (p, c) => c.features.voting && !!p.campaigns_results },
   { kind: "result", title: "Resultado", hint: "Vencedor, confirmação e divulgação.", show: (p, c) => c.features.results && !!p.campaigns_results },
-  { kind: "draw", title: "Sorteio", hint: "Ganhadores e quem concorreu ao sorteio.", show: (p, c) => !!c.features.draw && !!p.campaigns_results },
   { kind: "history", title: "Histórico completo", hint: "Todas as ações da campanha: quem, quando e por quê.", show: () => true },
   { kind: "votes", title: "Votos individuais", hint: "Quem votou em qual receita. Dado sensível.", show: (p, c) => c.features.voting && !!p.campaigns_export_votes && !!p.campaigns_votes_view },
 ];

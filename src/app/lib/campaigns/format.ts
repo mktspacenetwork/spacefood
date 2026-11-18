@@ -141,6 +141,18 @@ export const RESULT_STATUS: Record<ResultStatus, { label: string; className: str
   announced: { label: "Resultado divulgado", className: PURPLE },
 };
 
+/**
+ * Os três momentos do resultado, em palavras simples (gestão): Em apuração → Definido (ganhador confirmado) →
+ * Divulgado. Confirmar o ganhador e divulgar são ações separadas.
+ */
+export const RESULT_STAGE: Record<ResultStatus, { label: string; className: string }> = {
+  none: { label: "Em apuração", className: YELLOW },
+  preliminary: { label: "Em apuração", className: YELLOW },
+  tie_pending: { label: "Em apuração · empate", className: ORANGE },
+  confirmed: { label: "Definido", className: GREEN },
+  announced: { label: "Divulgado", className: PURPLE },
+};
+
 /** Etapa que o colaborador enxerga (calculada no banco com o relógio do servidor). */
 export const COLLAB_STAGE: Record<CollabStage, { label: string; className: string }> = {
   upcoming: { label: "Em breve", className: GRAY },

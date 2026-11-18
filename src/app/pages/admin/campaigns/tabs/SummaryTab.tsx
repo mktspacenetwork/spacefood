@@ -9,14 +9,14 @@ import { Progress } from "../../../../components/ui/progress";
 import { cn } from "../../../../lib/utils";
 import { TIMEZONE } from "../../../../lib/date-utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
-import { AUDIT_ACTION, RESULT_STATUS, fmtDateTime, fmtDayTime, plural } from "../../../../lib/campaigns/format";
+import { AUDIT_ACTION, DISPLAY_STATE, PHASE_STATE, RESULT_STAGE, fmtDateTime, fmtDayTime, fmtRange, plural } from "../../../../lib/campaigns/format";
 import type { DisplayState } from "../../../../lib/campaigns/format";
 import type {
-  AdminAuditRow, AdminDashboard, AdminDraw, AdminParticipant, AdminSubmissionRow, PublishCheck,
+  AdminAuditRow, AdminDashboard, AdminParticipant, AdminSubmissionRow, PublishCheck,
 } from "../../../../lib/campaigns/types";
 import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
-import { EmptyBox, ErrorBox, LoadingBox, Notice, SectionLabel, stageState, useLoader } from "../shared";
+import { EmptyBox, ErrorBox, LoadingBox, Notice, SectionLabel, stageState, useLoader, visibleCheckItems } from "../shared";
 import type { TabProps } from "./types";
 import { Cronograma } from "./Cronograma";
 import { Fold } from "./ui";
@@ -52,7 +52,6 @@ export function SummaryTab(props: SummaryTabProps) {
   // As receitas alimentam "Últimas atividades" e os gráficos; a lista de pessoas só carrega em "Mais indicadores".
   const canSubs = !isDraft && !!perms.campaigns_review && f.submission && (d?.submissions ?? 0) > 0;
   const canParts = !isDraft && !!perms.campaigns_participants && f.submission;
-  const canDraw = !isDraft && !!f.draw && !!perms.campaigns_results;
   const subs = useLoader<AdminSubmissionRow[]>(
     () => (canSubs ? campaignsApi.get(`/admin/campaigns/${campaignId}/submissions`) : Promise.resolve([])),
     [campaignId, canSubs, d?.submissions],
@@ -60,11 +59,6 @@ export function SummaryTab(props: SummaryTabProps) {
   const parts = useLoader<{ items: AdminParticipant[] }>(
     () => (canParts && moreOpen ? campaignsApi.get(`/admin/campaigns/${campaignId}/participants`) : Promise.resolve({ items: [] })),
     [campaignId, canParts, moreOpen, d?.participants],
-  );
-  // Estado do sorteio (só campanhas com sorteio). Falha = sem informação extra, nunca quebra a tela.
-  const draw = useLoader<AdminDraw | null>(
-    () => (canDraw ? campaignsApi.get<AdminDraw>(`/admin/campaigns/${campaignId}/draw`).catch(() => null) : Promise.resolve(null)),
-    [campaignId, canDraw, d?.results?.status],
   );
   const audit = useLoader<AdminAuditRow[]>(
     () => (isDraft ? Promise.resolve([]) : campaignsApi.get<AdminAuditRow[]>(`/admin/campaigns/${campaignId}/audit`).catch(() => [])),
@@ -98,7 +92,7 @@ export function SummaryTab(props: SummaryTabProps) {
 
   // ───────────────────────── Rascunho: checklist em vez de zeros ─────────────────────────
   if (isDraft) {
-    const items = publishCheck?.items ?? [];
+    const items = visibleCheckItems(publishCheck?.items ?? []);
     const missing = items.filter((i) => !i.ok);
     const fix = (key: string) =>
       key === "registration_dates" || key === "voting_dates"
@@ -155,42 +149,35 @@ export function SummaryTab(props: SummaryTabProps) {
   if (!d) return null;
 
   const hasVoting = f.voting;
-  const hasDraw = !!f.draw;
+  const regStage = d.stages.find((x) => x.stage_key === "registration");
+  const regPhase = stageState(regStage);
+  // Votação usa a janela da participação; `voting_live` vem do servidor (ranking parcial só para a gestão).
   const votingStage = d.stages.find((x) => x.stage_key === "voting");
-  // Ranking parcial: enquanto a votação está aberta, os números são só da gestão e ainda podem mudar.
   const votingOpen = hasVoting && (d.voting_live ?? ["open", "paused"].includes(stageState(votingStage)));
+  const votingEnded = hasVoting && stageState(votingStage) === "closed";
   const rs = d.results?.status ?? "none";
-  const rsMeta = RESULT_STATUS[rs];
-  const announceAt = rs === "confirmed" ? (results?.announce_at ?? d.results?.announce_at ?? null) : null;
+  const announceAt = rs !== "announced" ? (results?.announce_at ?? d.results?.announce_at ?? null) : null;
   const share = (n: number) => (d.submissions > 0 ? (n / d.submissions) * 100 : 0);
 
   // Cada indicador leva à tela detalhada (quando a pessoa tem acesso a ela).
   const go = (tab: string, section?: string) => (goTab ? () => goTab(tab, section) : undefined);
   const toRecipes = perms.campaigns_review ? go("submissions") : perms.campaigns_participants ? go("submissions", "people") : undefined;
   const toPeople = perms.campaigns_participants ? go("submissions", "people") : perms.campaigns_review ? go("submissions") : undefined;
-  const toVoting = hasVoting ? go("voting") : undefined;
-  const drawView = draw.data;
-  const toDraw = hasDraw && (perms.campaigns_results || perms.campaigns_winner_confirm || perms.campaigns_announce) ? go("draw") : undefined;
+  const toResults = hasVoting ? go("results") : undefined;
+  const toSettings = go("settings");
+  // Sem votação, o indicador leva à edição da campanha (onde a votação pode ser ligada).
+  const toVotingSetup = perms.campaigns_edit ? () => navigate(`/admin/campaigns/${campaignId}/edit`) : undefined;
+  const autoAt = !!announceAt && new Date(announceAt).getTime() > Date.now();
 
   const refresh = () => {
     onReloadDashboard();
     subs.reload();
     audit.reload();
-    draw.reload();
     if (moreOpen) parts.reload();
   };
 
   const hasMore = d.submissions > 0 && (canSubs || canParts);
-
-  const drawStatus = (() => {
-    const x = drawView?.draw;
-    if (x?.announced_at) return { label: "Divulgado", hint: `Divulgado em ${fmtDateTime(x.announced_at)}.`, className: "border-purple-200 bg-purple-100 text-purple-700 dark:border-purple-800 dark:bg-purple-950/40 dark:text-purple-300" };
-    if (x?.announce_at) return { label: "Divulgação programada", hint: `Será divulgado em ${fmtDayTime(x.announce_at)}.`, className: "border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300" };
-    if (x?.confirmed_at) return { label: "Confirmado", hint: "Falta divulgar os ganhadores.", className: "border-green-200 bg-green-100 text-green-700 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300" };
-    if (x) return { label: "Sorteado", hint: "Confira e confirme os ganhadores.", className: "border-yellow-200 bg-yellow-100 text-yellow-700 dark:border-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300" };
-    if (drawView?.can_run) return { label: "Pronto para sortear", hint: `${plural(drawView.eligible_count, "pessoa concorre", "pessoas concorrem")}.`, className: "border-green-200 bg-green-100 text-green-700 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300" };
-    return { label: "Aguardando", hint: drawView?.reason ?? "Disponível depois do fim da participação.", className: "border-border bg-muted text-muted-foreground" };
-  })();
+  const display_ = DISPLAY_STATE[display];
 
   return (
     <div className="space-y-5">
@@ -202,10 +189,34 @@ export function SummaryTab(props: SummaryTabProps) {
 
       {top}
 
-      <div data-tutorial="camp-summary-cards" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div data-tutorial="camp-summary-cards" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Status */}
+        <Kpi label="Status" onClick={toSettings}>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className={cn("border px-3 py-1 text-xs", display_.className)}>{display_.label}</Badge>
+            {regPhase !== "unset" && (
+              <Badge className={cn("border text-[10px]", PHASE_STATE[regPhase].className)}>Participação {PHASE_STATE[regPhase].label.toLowerCase()}</Badge>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground">{fmtRange(regStage?.starts_at, regStage?.ends_at)}</p>
+        </Kpi>
+
+        {/* Participantes */}
+        <Kpi label="Participantes" onClick={toPeople}>
+          <div className="flex items-end justify-between gap-3">
+            <p className="text-foreground">
+              <span className="text-3xl font-bold tabular-nums">{d.participants}</span>
+              <span className="ml-1.5 text-sm text-muted-foreground">de {d.eligible}</span>
+            </p>
+            <span className="text-lg font-bold tabular-nums text-primary">{d.participation_pct}%</span>
+          </div>
+          <Progress value={d.participation_pct} aria-label="Participação" />
+          <p className="text-[11px] text-muted-foreground">elegíveis que enviaram receita</p>
+        </Kpi>
+
         {/* Receitas */}
         {f.submission && (
-          <Kpi label="Receitas" onClick={toRecipes}>
+          <Kpi label="Receitas cadastradas" onClick={toRecipes}>
             <p className="text-foreground">
               <span className="text-3xl font-bold tabular-nums">{d.submissions}</span>
               <span className="ml-1.5 text-sm text-muted-foreground">cadastradas</span>
@@ -227,69 +238,51 @@ export function SummaryTab(props: SummaryTabProps) {
           </Kpi>
         )}
 
-        {/* Participantes */}
-        <Kpi label="Participantes" onClick={toPeople}>
-          <div className="flex items-end justify-between gap-3">
-            <p className="text-foreground">
-              <span className="text-3xl font-bold tabular-nums">{d.participants}</span>
-              <span className="ml-1.5 text-sm text-muted-foreground">de {d.eligible}</span>
-            </p>
-            <span className="text-lg font-bold tabular-nums text-primary">{d.participation_pct}%</span>
-          </div>
-          <Progress value={d.participation_pct} aria-label="Participação" />
-          <p className="text-[11px] text-muted-foreground">elegíveis que enviaram receita</p>
+        {/* Votação (habilitada ou não) */}
+        <Kpi label="Votação" onClick={hasVoting ? toResults : toVotingSetup}>
+          {hasVoting ? (
+            <>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <p className="text-foreground">
+                  <span className="text-3xl font-bold tabular-nums">{d.votes_valid}</span>
+                  <span className="ml-1.5 text-sm text-muted-foreground">{d.votes_valid === 1 ? "voto válido" : "votos válidos"}</span>
+                </p>
+                {votingOpen && (
+                  <Badge className="border border-yellow-200 bg-yellow-100 text-[10px] text-yellow-700 dark:border-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300">Parcial</Badge>
+                )}
+              </div>
+              <Progress value={d.voting_pct} aria-label="Quem já votou" />
+              <p className="text-[11px] text-muted-foreground">{d.voting_pct}% dos elegíveis votaram ({d.voters} de {d.eligible})</p>
+            </>
+          ) : (
+            <>
+              <Badge className="border border-border bg-muted text-[11px] text-muted-foreground">Desabilitada</Badge>
+              <p className="text-[12px] leading-relaxed text-muted-foreground">
+                Esta campanha não tem votação.{toVotingSetup ? " Para ligar, toque aqui e edite a campanha." : ""}
+              </p>
+            </>
+          )}
         </Kpi>
 
-        {/* Votos */}
+        {/* Resultado (só com votação): Em apuração → Definido → Divulgado */}
         {hasVoting && (
-          <Kpi label="Votos" onClick={toVoting}>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <p className="text-foreground">
-                <span className="text-3xl font-bold tabular-nums">{d.votes_valid}</span>
-                <span className="ml-1.5 text-sm text-muted-foreground">{d.votes_valid === 1 ? "voto válido" : "votos válidos"}</span>
-              </p>
-              {votingOpen && (
-                <Badge className="border border-yellow-200 bg-yellow-100 text-[10px] text-yellow-700 dark:border-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300">Parcial</Badge>
-              )}
-            </div>
-            <Progress value={d.voting_pct} aria-label="Quem já votou" />
-            <p className="text-[11px] text-muted-foreground">{d.voting_pct}% dos elegíveis votaram ({d.voters} de {d.eligible})</p>
-          </Kpi>
-        )}
-
-        {/* Resultado da votação */}
-        {hasVoting && f.announcement && (
-          <Kpi label="Resultado" onClick={toVoting}>
-            <Badge className={cn("border text-[11px]",
-              announceAt || (rs === "none" && votingOpen)
-                ? "border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300"
-                : rsMeta.className)}>
-              {announceAt ? "Divulgação programada" : rs === "none" && votingOpen ? "Votação em andamento" : rsMeta.label}
+          <Kpi label="Resultado" onClick={toResults}>
+            <Badge className={cn("border text-[11px]", rs === "none" && votingOpen ? "border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300" : RESULT_STAGE[rs].className)}>
+              {rs === "none" && votingOpen ? "Votação em andamento" : RESULT_STAGE[rs].label}
             </Badge>
             <p className="text-[12px] leading-relaxed text-muted-foreground">
-              {rs === "none" && votingOpen && "O ranking parcial está na aba Votação."}
-              {rs === "none" && !votingOpen && "A votação encerrou. Veja o ganhador."}
+              {rs === "none" && votingOpen && "O ranking parcial está em Resultados."}
+              {rs === "none" && !votingOpen && (votingEnded ? "A votação encerrou. Veja o ganhador." : "A votação ainda não começou.")}
               {rs === "preliminary" && "Confira o resultado e confirme o ganhador."}
               {rs === "tie_pending" && "Há empate: registre a decisão."}
-              {rs === "confirmed" && !announceAt && "Ganhador confirmado. Falta divulgar."}
-              {rs === "confirmed" && announceAt && `Será divulgado em ${fmtDayTime(announceAt)}.`}
+              {rs === "confirmed" && (autoAt ? `Divulgação automática em ${fmtDayTime(announceAt)}.` : "Ganhador definido. Falta divulgar.")}
               {rs === "announced" && `Divulgado em ${fmtDateTime(d.results?.announced_at)}.`}
-            </p>
-          </Kpi>
-        )}
-
-        {/* Sorteio */}
-        {hasDraw && (
-          <Kpi label="Sorteio" onClick={toDraw}>
-            <Badge className={cn("border text-[11px]", drawStatus.className)}>{drawStatus.label}</Badge>
-            <p className="text-[12px] leading-relaxed text-muted-foreground">
-              {drawStatus.hint} {f.draw_winners ? `${plural(f.draw_winners, "ganhador", "ganhadores")}.` : ""}
             </p>
           </Kpi>
         )}
       </div>
 
-      <Cronograma campaign={campaign} stages={props.stages} results={results} display={display} draw={drawView} />
+      <Cronograma campaign={campaign} stages={props.stages} results={results} display={display} />
 
       {/* Últimas atividades: só o necessário para um olhar rápido */}
       <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-summary-recent">
@@ -353,8 +346,7 @@ export function SummaryTab(props: SummaryTabProps) {
 const RECENT_ACTIONS = new Set([
   "PUBLISH_CAMPAIGN", "SUSPEND_CAMPAIGN", "RESUME_CAMPAIGN", "CLOSE_CAMPAIGN", "UPDATE_CAMPAIGN", "SET_PERIOD",
   "APPROVE_SUBMISSION", "REJECT_SUBMISSION", "END_VOTING_NOW", "CLOSE_VOTING", "DECIDE_TIE", "CONFIRM_WINNER",
-  "ANNOUNCE_RESULTS", "SCHEDULE_ANNOUNCEMENT", "RUN_DRAW", "DISCARD_DRAW", "CONFIRM_DRAW", "ANNOUNCE_DRAW",
-  "GENERATE_BOOK", "PUBLISH_BOOK", "WITHDRAW_BOOK",
+  "ANNOUNCE_RESULTS", "SCHEDULE_ANNOUNCEMENT",
 ]);
 
 /** Indicador do painel. Com `onClick` vira um botão (abre a tela detalhada); sem acesso a ela, fica só informativo. */

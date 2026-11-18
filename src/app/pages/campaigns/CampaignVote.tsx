@@ -8,6 +8,7 @@ import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { Skeleton } from "../../components/ui/skeleton";
 import { VoteConfirmDialog } from "../../components/campaigns/VoteConfirmDialog";
+import { PartialRanking } from "../../components/campaigns/PartialRanking";
 import { EmptyState } from "../../components/campaigns/EmptyState";
 import { ErrorState } from "../../components/campaigns/ErrorState";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
@@ -23,7 +24,8 @@ type Payload = { state: CollabState; candidates: VoteCandidate[]; voting: AdminS
 
 /**
  * Votação do colaborador: escolher (toque na receita), votar (botão claro), confirmar (diálogo) e ver a confirmação.
- * O colaborador NUNCA vê ranking, contagem de votos nem posição: só as receitas e o próprio voto.
+ * Ranking, contagem de votos e posição só aparecem se o administrador liberar o parcial (`ranking_partial`),
+ * sempre rotulado "Parcial — ainda pode mudar". Por padrão: só as receitas e o próprio voto.
  */
 export function CampaignVote() {
   const { campaign, state: ctxState, refresh, slug } = useCampaignCtx();
@@ -247,6 +249,8 @@ export function CampaignVote() {
           })}
         </section>
       )}
+
+      {state.ranking_visible && state.ranking_partial && <PartialRanking slug={slug} votedId={state.voted_submission_id} />}
 
       {phase === "open" && candidates.length === 0 && (
         <EmptyState icon={<UtensilsCrossed size={22} aria-hidden="true" />} title="Ainda não há receitas para votar" description="Quando houver receitas aprovadas, elas aparecem aqui." />

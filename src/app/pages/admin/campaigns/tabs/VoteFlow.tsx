@@ -1,30 +1,27 @@
 import { useState } from "react";
-import { CalendarClock, Loader2, Megaphone, ShieldCheck, Trophy, Users } from "lucide-react";
+import { Loader2, Megaphone, ShieldCheck, Trophy, Users } from "lucide-react";
 import { Badge } from "../../../../components/ui/Badge";
 import { Button } from "../../../../components/ui/Button";
 import { Card, CardContent } from "../../../../components/ui/Card";
 import { ConfirmDialog } from "../../../../components/ui/ConfirmDialog";
-import { Input } from "../../../../components/ui/input";
 import { Label } from "../../../../components/ui/label";
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "../../../../components/ui/dialog";
 import { Progress } from "../../../../components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../../components/ui/select";
 import { Textarea } from "../../../../components/ui/textarea";
 import { cn } from "../../../../lib/utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
-import { RESULT_STATUS, fmtDateTime, fmtDayTime, fromInputValue, plural, toInputValue } from "../../../../lib/campaigns/format";
+import { RESULT_STAGE, fmtDateTime, fmtDayTime, plural } from "../../../../lib/campaigns/format";
 import type { AdminResultsPayload, AdminSubmissionDetail, TallyRow } from "../../../../lib/campaigns/types";
 import { ErrorBox, LoadingBox, Notice, SectionLabel, useBusy, useLoader } from "../shared";
 import type { TabProps } from "./types";
 
 /**
- * RESULTADO da votação, numa tela só (aparece depois do encerramento oficial):
- *   vencedor → conferência (totais e ranking) → [Confirmar vencedor] → [Divulgar agora] ou [Programar divulgação].
+ * RESULTADO da votação (aparece depois do encerramento oficial), em ordem:
+ *   Apuração (vencedor + conferência) → 4 Confirmar ganhador → 5 Divulgar.
+ * Estados: Em apuração → Definido (ganhador confirmado) → Divulgado. Confirmar e divulgar são ações separadas.
  * Em caso de empate, a decisão (com justificativa) vem antes. Cada ação pede confirmação e não dá duplo clique.
- * Programada, a divulgação acontece sozinha no horário (o banco divulga e avisa quem participou, uma vez só);
- * até lá dá para alterar o horário ou cancelar. Esta tela só agenda, altera, cancela e mostra o estado.
+ * A data de anúncio é só referência (Configurações → Período): o resultado é divulgado sozinho nessa data SE o
+ * ganhador já estiver confirmado antes dela; senão, divulgar continua sendo uma ação daqui.
  */
 export function ResultView({
   campaignId, campaign, perms, goTab, onChanged, totals,
@@ -36,9 +33,6 @@ export function ResultView({
   const { busy, run } = useBusy();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [announceOpen, setAnnounceOpen] = useState(false);
-  const [schedOpen, setSchedOpen] = useState(false);
-  const [schedValue, setSchedValue] = useState(""); // datetime-local em Brasília
-  const [cancelOpen, setCancelOpen] = useState(false);
   const [tieChoice, setTieChoice] = useState("");
   const [tieReason, setTieReason] = useState("");
 
@@ -57,12 +51,11 @@ export function ResultView({
   if (res.error && !res.data) return <ErrorBox message={res.error} onRetry={res.reload} />;
   if (!r) return null;
 
-  const meta = RESULT_STATUS[status];
+  const meta = RESULT_STAGE[status];
   const confirmed = status === "confirmed" || status === "announced";
   const announced = status === "announced";
-  const announceAt = r.announce_at ?? null;
-  const scheduled = !!announceAt && !announced;
-  const dueNow = scheduled && new Date(announceAt as string).getTime() <= Date.now();
+  const announceAt = !announced ? r.announce_at ?? null : null;
+  const autoFuture = !!announceAt && new Date(announceAt).getTime() > Date.now();
   const tiePending = status === "tie_pending";
   const winner = winnerId ? tally.find((t) => t.submission_id === winnerId) : undefined;
   const photo = winnerSub.data?.media.find((m) => m.kind === "main_photo") ?? winnerSub.data?.media.find((m) => m.kind !== "video");
@@ -82,7 +75,7 @@ export function ResultView({
   };
   const confirmWinner = async () => {
     setConfirmOpen(false);
-    const out = await run("confirm", () => campaignsApi.post(`${base}/results/confirm`), "Vencedor confirmado.");
+    const out = await run("confirm", () => campaignsApi.post(`${base}/results/confirm`), "Ganhador confirmado.");
     if (out.ok) refresh();
   };
   const announce = async () => {
@@ -90,29 +83,6 @@ export function ResultView({
     const out = await run("announce", () => campaignsApi.post(`${base}/results/announce`), "Resultado divulgado aos colaboradores.");
     if (out.ok) refresh();
   };
-  // Horário sugerido: a próxima hora cheia (ou o horário já programado, ao alterar).
-  const openSchedule = () => {
-    const nextHour = new Date(Math.ceil((Date.now() + 120_000) / 3_600_000) * 3_600_000).toISOString();
-    setSchedValue(toInputValue(announceAt ?? nextHour));
-    setSchedOpen(true);
-  };
-  const schedIso = fromInputValue(schedValue);
-  const schedOk = !!schedIso && new Date(schedIso).getTime() > Date.now() + 60_000;
-  const schedule = async () => {
-    if (!schedIso || !schedOk) return;
-    const out = await run(
-      "schedule",
-      () => campaignsApi.post(`${base}/results/schedule`, { announce_at: schedIso }),
-      `Divulgação programada para ${fmtDayTime(schedIso)}.`,
-    );
-    if (out.ok) { setSchedOpen(false); refresh(); }
-  };
-  const unschedule = async () => {
-    setCancelOpen(false);
-    const out = await run("unschedule", () => campaignsApi.del(`${base}/results/schedule`), "Programação cancelada. O resultado segue sem divulgação.");
-    if (out.ok) refresh();
-  };
-
   return (
     <div className="space-y-4" data-tutorial="camp-result-view">
       <div className="flex flex-wrap items-center gap-2">
@@ -121,7 +91,7 @@ export function ResultView({
       </div>
 
       {noVotes ? (
-        <Notice tone="warn" title="Nenhum voto válido">Sem votos válidos não há vencedor para confirmar.</Notice>
+        <Notice tone="warn" title="Nenhum voto válido">Sem votos válidos não há ganhador para confirmar.</Notice>
       ) : tiePending ? (
         /* Empate: decisão com justificativa */
         <Card className="rounded-3xl border border-orange-200 bg-orange-50/60 hover:shadow-none dark:border-orange-800 dark:bg-orange-950/20">
@@ -129,7 +99,7 @@ export function ResultView({
             <div>
               <p className="text-base font-bold text-foreground">Empate em 1º lugar</p>
               <p className="mt-0.5 text-[13px] text-muted-foreground">
-                {plural(tieCandidates.length, "receita tem", "receitas têm")} o mesmo número de votos. Escolha o vencedor e explique o critério — a decisão fica registrada no histórico. Não há sorteio automático.
+                {plural(tieCandidates.length, "receita tem", "receitas têm")} o mesmo número de votos. Escolha o ganhador e explique o critério — a decisão fica registrada no histórico.
               </p>
             </div>
             {!perms.campaigns_tiebreak ? (
@@ -139,9 +109,9 @@ export function ResultView({
             ) : (
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Receita vencedora</Label>
+                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Receita ganhadora</Label>
                   <Select value={tieChoice} onValueChange={setTieChoice}>
-                    <SelectTrigger className="h-11 rounded-xl bg-background" aria-label="Escolha a receita vencedora"><SelectValue placeholder="Escolha entre as empatadas" /></SelectTrigger>
+                    <SelectTrigger className="h-11 rounded-xl bg-background" aria-label="Escolha a receita ganhadora"><SelectValue placeholder="Escolha entre as empatadas" /></SelectTrigger>
                     <SelectContent>
                       {tieCandidates.map((t) => (
                         <SelectItem key={t.submission_id} value={t.submission_id}>{t.dish_name} — {t.author} ({t.votes} votos)</SelectItem>
@@ -167,7 +137,7 @@ export function ResultView({
           {photo && <img src={photo.url} alt={`Foto de ${winner?.dish_name ?? "receita vencedora"}`} className="aspect-[2/1] w-full object-cover" loading="lazy" />}
           <CardContent className="space-y-1 p-5">
             <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
-              <Trophy size={13} aria-hidden="true" /> {confirmed ? "Vencedor" : "Vencedor (preliminar)"}
+              <Trophy size={13} aria-hidden="true" /> {confirmed ? "Ganhador" : "Ganhador (preliminar)"}
             </p>
             <p className="text-xl font-bold text-foreground">{winner?.dish_name ?? "Receita mais votada"}</p>
             <p className="text-sm text-muted-foreground">
@@ -222,11 +192,19 @@ export function ResultView({
         </CardContent>
       </Card>
 
-      {/* Ações, em ordem: confirmar → divulgar */}
+      {/* Ações, em ordem e independentes: 4 Confirmar ganhador → 5 Divulgar */}
       {!noVotes && !tiePending && (
         <Card className="rounded-3xl border hover:shadow-none" data-tutorial="camp-result-actions">
-          <CardContent className="space-y-3 p-5">
-            <div className="flex flex-wrap items-center gap-2">
+          <CardContent className="space-y-4 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0 flex-1 basis-60">
+                <p className="text-sm font-bold text-foreground"><span className="mr-1.5 text-muted-foreground">4</span>Confirmar ganhador</p>
+                <p className="mt-0.5 text-[12px] text-muted-foreground">
+                  {confirmed
+                    ? `Confirmado${r.confirmed_at ? ` em ${fmtDateTime(r.confirmed_at)}` : ""}${r.confirmed_by_name ? ` por ${r.confirmed_by_name}` : ""}.`
+                    : "Confira o resultado acima. Depois de confirmado, os votos não mudam mais."}
+                </p>
+              </div>
               <Button
                 className="gap-2 rounded-xl"
                 variant={confirmed ? "outline" : "primary"}
@@ -234,62 +212,40 @@ export function ResultView({
                 disabled={confirmed || !perms.campaigns_winner_confirm || isBusy}
               >
                 {busy === "confirm" ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
-                {confirmed ? "Vencedor confirmado" : "Confirmar vencedor"}
+                {confirmed ? "Ganhador confirmado" : "Confirmar ganhador"}
               </Button>
-              {campaign.features.announcement && (
-                <>
-                  <Button
-                    className="gap-2 rounded-xl"
-                    variant={confirmed && !announced && !scheduled ? "primary" : "outline"}
-                    onClick={() => setAnnounceOpen(true)}
-                    disabled={!confirmed || announced || !perms.campaigns_announce || isBusy}
-                  >
-                    {busy === "announce" ? <Loader2 size={14} className="animate-spin" /> : <Megaphone size={14} />}
-                    {announced ? "Resultado divulgado" : "Divulgar agora"}
-                  </Button>
-                  {confirmed && !announced && !scheduled && (
-                    <Button className="gap-2 rounded-xl" variant="outline" onClick={openSchedule} disabled={!perms.campaigns_announce || isBusy}>
-                      <CalendarClock size={14} /> Programar divulgação
-                    </Button>
-                  )}
-                </>
-              )}
             </div>
 
-            {scheduled && campaign.features.announcement && (
-              <div className="space-y-2 rounded-2xl border border-blue-200 bg-blue-50/70 p-3.5 dark:border-blue-800 dark:bg-blue-950/20" data-tutorial="camp-result-schedule">
-                <p className="flex items-start gap-2 text-sm font-semibold text-foreground">
-                  <CalendarClock size={16} className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-300" aria-hidden="true" />
-                  <span>Divulgação programada para {fmtDayTime(announceAt)}{dueNow ? " — em instantes" : ""}</span>
-                </p>
-                <p className="text-[12px] text-muted-foreground">
-                  {r.announce_scheduled_by_name ? `Programada por ${r.announce_scheduled_by_name}. ` : ""}
-                  No horário, o resultado aparece para os colaboradores e quem participou recebe um aviso, uma única vez.
-                </p>
-                {perms.campaigns_announce && (
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" className="rounded-xl" onClick={openSchedule} disabled={isBusy || dueNow}>
-                      Alterar horário
-                    </Button>
-                    <Button size="sm" variant="ghost" className="gap-2 rounded-xl text-destructive hover:text-destructive" onClick={() => setCancelOpen(true)} disabled={isBusy || dueNow}>
-                      {busy === "unschedule" && <Loader2 size={13} className="animate-spin" />} Cancelar programação
-                    </Button>
-                  </div>
-                )}
+            {campaign.features.announcement && (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                <div className="min-w-0 flex-1 basis-60">
+                  <p className="text-sm font-bold text-foreground"><span className="mr-1.5 text-muted-foreground">5</span>Divulgar resultado</p>
+                  <p className="mt-0.5 text-[12px] text-muted-foreground" data-tutorial="camp-result-schedule">
+                    {announced
+                      ? `Divulgado${r.announced_at ? ` em ${fmtDateTime(r.announced_at)}` : ""}.`
+                      : !confirmed
+                      ? announceAt
+                        ? `Data de anúncio: ${fmtDayTime(announceAt)}. Se o ganhador estiver confirmado até lá, o resultado é divulgado sozinho.`
+                        : "Disponível depois de confirmar o ganhador."
+                      : autoFuture
+                      ? `Divulgação automática em ${fmtDayTime(announceAt)}. Se preferir, divulgue agora.`
+                      : announceAt
+                      ? "A data de anúncio já passou. Divulgue quando quiser."
+                      : "Os colaboradores passam a ver o ganhador e quem participou recebe um aviso. Não dá para desfazer."}
+                  </p>
+                </div>
+                <Button
+                  className="gap-2 rounded-xl"
+                  variant={confirmed && !announced ? "primary" : "outline"}
+                  onClick={() => setAnnounceOpen(true)}
+                  disabled={!confirmed || announced || !perms.campaigns_announce || isBusy}
+                >
+                  {busy === "announce" ? <Loader2 size={14} className="animate-spin" /> : <Megaphone size={14} />}
+                  {announced ? "Resultado divulgado" : "Divulgar agora"}
+                </Button>
               </div>
             )}
-            <p className="text-[12px] text-muted-foreground">
-              {!confirmed
-                ? "Confira o resultado acima e confirme o vencedor. Depois de confirmado, os votos não podem mais ser alterados."
-                : campaign.features.announcement && !announced && !scheduled
-                ? "Divulgue agora ou programe data e hora: os colaboradores passam a ver o vencedor e quem participou recebe um aviso. Não dá para desfazer a divulgação."
-                : announced
-                ? `Divulgado${r.announced_at ? ` em ${fmtDateTime(r.announced_at)}` : ""}. A campanha cumpriu o ciclo.`
-                : scheduled
-                ? "Se preferir, divulgue agora: isso substitui a programação."
-                : "O resultado fica só com a gestão."}
-            </p>
-            {!confirmed && !perms.campaigns_winner_confirm && <p className="text-[11px] text-muted-foreground">Você não tem permissão para confirmar o vencedor.</p>}
+            {!confirmed && !perms.campaigns_winner_confirm && <p className="text-[11px] text-muted-foreground">Você não tem permissão para confirmar o ganhador.</p>}
             {confirmed && !announced && campaign.features.announcement && !perms.campaigns_announce && <p className="text-[11px] text-muted-foreground">Você não tem permissão para divulgar o resultado.</p>}
           </CardContent>
         </Card>
@@ -298,61 +254,20 @@ export function ResultView({
       <ConfirmDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
-        title="Confirmar o vencedor?"
-        description={`${winner?.dish_name ?? "A receita mais votada"} será registrada como vencedora. Depois disso, os votos não podem mais ser alterados.`}
-        confirmLabel="Confirmar vencedor"
+        title="Confirmar o ganhador?"
+        description={`${winner?.dish_name ?? "A receita mais votada"} será registrada como ganhadora. Depois disso, os votos não podem mais ser alterados. Isso não divulga o resultado.`}
+        confirmLabel="Confirmar ganhador"
         onConfirm={confirmWinner}
       />
       <ConfirmDialog
         open={announceOpen}
         onOpenChange={setAnnounceOpen}
         title="Divulgar o resultado agora?"
-        description={`Os colaboradores passam a ver o vencedor e quem participou recebe um aviso.${scheduled ? " A divulgação programada deixa de valer." : ""} A divulgação não pode ser desfeita.`}
+        description={`Os colaboradores passam a ver o ganhador e quem participou recebe um aviso.${autoFuture ? " A divulgação automática deixa de ser necessária." : ""} A divulgação não pode ser desfeita.`}
         confirmLabel="Divulgar agora"
         variant="destructive"
         onConfirm={announce}
       />
-      <ConfirmDialog
-        open={cancelOpen}
-        onOpenChange={setCancelOpen}
-        title="Cancelar a divulgação programada?"
-        description="O resultado não será divulgado no horário marcado. Você pode divulgar agora ou programar outro horário quando quiser."
-        confirmLabel="Cancelar programação"
-        variant="destructive"
-        onConfirm={unschedule}
-      />
-      <Dialog open={schedOpen} onOpenChange={(o) => busy !== "schedule" && setSchedOpen(o)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CalendarClock size={18} className="text-primary" /> {scheduled ? "Alterar horário" : "Programar divulgação"}
-            </DialogTitle>
-            <DialogDescription>
-              No horário escolhido o resultado aparece para os colaboradores e quem participou recebe um aviso. Você pode alterar ou cancelar até lá.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-1.5">
-            <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Data e hora (Brasília)</Label>
-            <Input
-              type="datetime-local"
-              value={schedValue}
-              min={toInputValue(new Date(Date.now() + 120_000).toISOString())}
-              onChange={(e) => setSchedValue(e.target.value)}
-              className="h-11 rounded-xl"
-              aria-label="Data e hora da divulgação"
-              disabled={busy === "schedule"}
-            />
-            {schedValue && !schedOk && <p className="text-[11px] text-destructive">Escolha um horário no futuro.</p>}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" className="rounded-xl" onClick={() => setSchedOpen(false)} disabled={busy === "schedule"}>Voltar</Button>
-            <Button className="gap-2 rounded-xl" onClick={schedule} disabled={!schedOk || busy === "schedule"}>
-              {busy === "schedule" && <Loader2 size={14} className="animate-spin" />}
-              {scheduled ? "Salvar horário" : "Programar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

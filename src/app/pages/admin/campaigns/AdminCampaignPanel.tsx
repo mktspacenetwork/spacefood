@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
   ArrowLeft, ChefHat, Compass, Copy, FileDown, LayoutDashboard, Loader2, Megaphone, MoreHorizontal, Pencil, Rocket,
-  Send, Settings, Trophy, Vote,
+  Send, Settings, Trophy,
 } from "lucide-react";
 import { Badge } from "../../../components/ui/Badge";
 import { Button } from "../../../components/ui/Button";
@@ -16,11 +16,11 @@ import { cn } from "../../../lib/utils";
 import { useAuth } from "../../../context/auth-context";
 import { campaignsApi } from "../../../lib/campaigns/api";
 import {
-  DISPLAY_STATE, PHASE_STATE, RESULT_STATUS, campaignDisplayState, fmtDateTime, plural,
+  DISPLAY_STATE, PHASE_STATE, RESULT_STAGE, campaignDisplayState, fmtDateTime, plural,
 } from "../../../lib/campaigns/format";
 import type { DisplayState } from "../../../lib/campaigns/format";
 import type {
-  AdminCampaign, AdminCampaignDetail, AdminDashboard, AdminDraw, AdminResults, AdminStageRow, PublishCheck,
+  AdminCampaign, AdminCampaignDetail, AdminDashboard, AdminResults, AdminStageRow, PublishCheck,
 } from "../../../lib/campaigns/types";
 import { TourButton } from "../../../components/campaigns/CampaignTour";
 import { useCampaignPerms } from "./useCampaignPerms";
@@ -29,8 +29,7 @@ import { DuplicateDialog } from "./DuplicateDialog";
 import { ErrorBox, LoadingBox, Notice, ReasonDialog, RestrictedBox, stageState, useBusy, useLoader } from "./shared";
 import { SummaryTab } from "./tabs/SummaryTab";
 import { RecipesTab, recipesViews } from "./tabs/RecipesTab";
-import { VotingTab } from "./tabs/VotingTab";
-import { DrawTab } from "./tabs/DrawTab";
+import { ResultsTab } from "./tabs/ResultsTab";
 import { ReportsPanel } from "./tabs/ReportsPanel";
 import { SettingsTab } from "./tabs/SettingsTab";
 import type { RiskKind } from "./tabs/SettingsTab";
@@ -45,11 +44,11 @@ const YELLOW = "bg-yellow-100 text-yellow-700 dark:bg-yellow-950/40 dark:text-ye
 // Abas antigas (links e favoritos) continuam funcionando.
 const LEGACY_TABS: Record<string, { tab: string; section?: string }> = {
   overview: { tab: "summary" },
-  results: { tab: "voting" },
+  voting: { tab: "results" }, // "Votação" virou "Resultados"
+  draw: { tab: "summary" }, // o sorteio deixou de existir
   schedule: { tab: "settings", section: "period" },
   participants: { tab: "submissions", section: "people" },
   history: { tab: "reports", section: "history" },
-  reports: { tab: "reports" },
 };
 
 const stageOf = (stages: AdminStageRow[], k: AdminStageRow["stage_key"]) => stages.find((s) => s.stage_key === k);
@@ -63,11 +62,11 @@ function phaseBadge(
   if (display === "draft") return regState === "unset" ? { label: "Sem datas", className: PHASE_STATE.unset.className } : null;
   const rs = results?.status ?? "none";
   if (c.features.voting) {
-    if (rs === "announced") return { label: "Resultado divulgado", className: RESULT_STATUS.announced.className };
-    if (rs === "confirmed" && results?.announce_at) return { label: "Divulgação programada", className: PHASE_STATE.upcoming.className };
-    if (rs === "confirmed") return { label: "Vencedor confirmado", className: RESULT_STATUS.confirmed.className };
-    if (rs === "tie_pending") return { label: "Empate a decidir", className: RESULT_STATUS.tie_pending.className };
-    if (rs === "preliminary") return { label: "Resultado pronto", className: RESULT_STATUS.preliminary.className };
+    // Resultado: Em apuração → Definido (ganhador confirmado) → Divulgado.
+    if (rs === "announced") return { label: "Resultado divulgado", className: RESULT_STAGE.announced.className };
+    if (rs === "confirmed") return { label: "Resultado definido", className: RESULT_STAGE.confirmed.className };
+    if (rs === "tie_pending") return { label: "Empate a decidir", className: RESULT_STAGE.tie_pending.className };
+    if (rs === "preliminary") return { label: "Resultado em apuração", className: RESULT_STAGE.preliminary.className };
     if (votState === "closed") return { label: "Votação encerrada", className: PHASE_STATE.closed.className };
     if (votState === "open") return { label: "Votação aberta", className: PHASE_STATE.open.className };
     if (votState === "paused") return { label: "Votação pausada", className: PHASE_STATE.paused.className };
@@ -98,10 +97,10 @@ const NEXT_TONE = {
  */
 function buildNext(x: {
   c: AdminCampaign; display: DisplayState; stages: AdminStageRow[]; results: AdminResults | null;
-  dash: AdminDashboard | null; check: PublishCheck | null; perms: Record<string, boolean>; draw: AdminDraw | null;
+  dash: AdminDashboard | null; check: PublishCheck | null; perms: Record<string, boolean>;
   goTab: (tab: string, section?: string) => void; openPublish: () => void;
 }): NextStep | null {
-  const { c, display, stages, results, dash, check, perms, draw, goTab, openPublish } = x;
+  const { c, display, stages, results, dash, check, perms, goTab, openPublish } = x;
   const f = c.features;
   const reg = stageOf(stages, "registration");
   const vot = stageOf(stages, "voting");
@@ -125,33 +124,22 @@ function buildNext(x: {
   if (display !== "published" && display !== "scheduled") return null;
 
   if (f.voting) {
-    if (rs === "confirmed" && f.announcement && !results?.announce_at && perms.campaigns_announce) {
+    // Ganhador definido e ainda não divulgado: se a divulgação automática já está marcada para o futuro, não há
+    // nada a fazer; senão, divulgar é uma ação da gestão (confirmar e divulgar são independentes).
+    const autoFuture = !!results?.announce_at && new Date(results.announce_at).getTime() > Date.now();
+    if (rs === "confirmed" && f.announcement && !autoFuture && perms.campaigns_announce) {
       return {
         tone: "warn", title: "Divulgue o resultado",
-        text: "O ganhador está confirmado. Divulgue agora ou programe um horário.",
-        actions: [{ label: "Divulgar resultado", onClick: () => goTab("voting"), primary: true }],
+        text: "O ganhador está definido. Divulgue quando quiser: os colaboradores passam a ver e quem participou recebe um aviso.",
+        actions: [{ label: "Divulgar resultado", onClick: () => goTab("results"), primary: true }],
       };
     }
     if ((rs === "none" || rs === "preliminary" || rs === "tie_pending") && votState === "closed" && perms.campaigns_results) {
       return {
         tone: "warn", title: rs === "tie_pending" ? "Empate: decida o ganhador" : "Votação encerrada",
         text: rs === "tie_pending" ? "Registre a decisão, com justificativa, para continuar." : "Veja o ganhador, confira os números e confirme.",
-        actions: [{ label: "Ver ganhador", onClick: () => goTab("voting"), primary: true }],
+        actions: [{ label: "Ver ganhador", onClick: () => goTab("results"), primary: true }],
       };
-    }
-  }
-
-  // Sorteio: um passo concreto por vez (sortear → confirmar → divulgar).
-  if (f.draw && draw) {
-    const d = draw.draw;
-    if (d && d.confirmed_at && !d.announced_at && !d.announce_at && perms.campaigns_announce) {
-      return { tone: "warn", title: "Divulgue os ganhadores", text: "Os ganhadores estão confirmados. Divulgue agora ou programe um horário.", actions: [{ label: "Divulgar sorteio", onClick: () => goTab("draw"), primary: true }] };
-    }
-    if (d && !d.confirmed_at && perms.campaigns_winner_confirm) {
-      return { tone: "warn", title: "Confirme os ganhadores", text: "Confira o resultado do sorteio e confirme para poder divulgar.", actions: [{ label: "Ver sorteio", onClick: () => goTab("draw"), primary: true }] };
-    }
-    if (!d && draw.can_run && perms.campaigns_results) {
-      return { tone: "ok", title: "Pronto para sortear", text: `${plural(draw.eligible_count, "pessoa concorre", "pessoas concorrem")} ao sorteio.`, actions: [{ label: "Ir para o sorteio", onClick: () => goTab("draw"), primary: true }] };
     }
   }
 
@@ -220,22 +208,14 @@ export function AdminCampaignPanel() {
     [id, checkEnabled, stagesKey, c?.version],
   );
 
-  // Estado do sorteio: só alimenta o "Próximo passo" (a aba Sorteio carrega o próprio). Falha = sem sugestão.
-  const drawEnabled = !!c && !!c.features.draw && c.status === "authorized" && !!perms.campaigns_results && isAdmin;
-  const drawState = useLoader<AdminDraw | null>(
-    () => (drawEnabled ? campaignsApi.get<AdminDraw>(`/admin/campaigns/${id}/draw`).catch(() => null) : Promise.resolve(null)),
-    [id, drawEnabled, c?.version, detail.data?.results?.status],
-  );
-
-  // `short` só aparece em telas estreitas (até 6 abas lado a lado, sem rolagem lateral); o nome acessível é sempre o completo.
+  // `short` só aparece em telas estreitas (até 5 abas lado a lado, sem rolagem lateral); o nome acessível é sempre o completo.
   const tabs = useMemo(() => {
     if (!c) return [] as { value: string; label: string; short: string; icon: React.ReactNode }[];
     const f = c.features;
     const list: { value: string; label: string; short: string; icon: React.ReactNode; show: boolean }[] = [
       { value: "summary", label: "Visão geral", short: "Geral", icon: <LayoutDashboard size={18} />, show: true },
       { value: "submissions", label: "Receitas", short: "Receitas", icon: <ChefHat size={18} />, show: recipesViews(c, perms).length > 0 },
-      { value: "voting", label: "Votação", short: "Votação", icon: <Vote size={18} />, show: f.voting },
-      { value: "draw", label: "Sorteio", short: "Sorteio", icon: <Trophy size={18} />, show: !!f.draw && (!!perms.campaigns_results || !!perms.campaigns_winner_confirm || !!perms.campaigns_announce) },
+      { value: "results", label: "Resultados", short: "Resultados", icon: <Trophy size={18} />, show: f.voting },
       { value: "reports", label: "Relatórios", short: "Relatórios", icon: <FileDown size={18} />, show: true },
       { value: "settings", label: "Configurações", short: "Ajustes", icon: <Settings size={18} />, show: true },
     ];
@@ -267,7 +247,7 @@ export function AdminCampaignPanel() {
   const votState = stageState(stageOf(stages, "voting"));
   const phase = phaseBadge(c, display, results, regState, votState);
   const base = `/admin/campaigns/${c.id}`;
-  const refreshAll = () => { detail.reload(); dashboard.reload(); drawState.reload(); };
+  const refreshAll = () => { detail.reload(); dashboard.reload(); };
   const live = regState === "open" || regState === "paused" || votState === "open" || votState === "paused";
 
   const doAction = async (key: string, fn: () => Promise<unknown>, ok: string, after?: () => void) => {
@@ -322,7 +302,7 @@ export function AdminCampaignPanel() {
   };
 
   const next = buildNext({
-    c, display, stages, results, dash: dashboard.data, check: check.data, perms, draw: drawState.data, goTab,
+    c, display, stages, results, dash: dashboard.data, check: check.data, perms, goTab,
     openPublish: () => setPublishOpen(true),
   });
 
@@ -456,8 +436,7 @@ export function AdminCampaignPanel() {
           />
         </TabsContent>
         {tabs.some((t) => t.value === "submissions") && <TabsContent value="submissions"><RecipesTab {...tabProps} section={section} /></TabsContent>}
-        {tabs.some((t) => t.value === "voting") && <TabsContent value="voting"><VotingTab {...tabProps} /></TabsContent>}
-        {tabs.some((t) => t.value === "draw") && <TabsContent value="draw"><DrawTab {...tabProps} /></TabsContent>}
+        {tabs.some((t) => t.value === "results") && <TabsContent value="results"><ResultsTab {...tabProps} /></TabsContent>}
         <TabsContent value="reports"><ReportsPanel {...tabProps} section={section} /></TabsContent>
         <TabsContent value="settings">
           <SettingsTab {...tabProps} section={section} onAction={onRisk} display={display} dashboard={dashboard.data} />

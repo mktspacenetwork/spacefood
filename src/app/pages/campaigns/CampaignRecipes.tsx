@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import { Button } from "../../components/ui/Button";
 import { Skeleton } from "../../components/ui/skeleton";
 import { RecipeCard } from "../../components/campaigns/RecipeCard";
+import { RecipeViewToggle, useRecipeView } from "../../components/campaigns/RecipeView";
 import { EmptyState } from "../../components/campaigns/EmptyState";
 import { ErrorState } from "../../components/campaigns/ErrorState";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
@@ -25,6 +26,7 @@ export function CampaignRecipes() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [locked, setLocked] = useState(false);
+  const [view, setView] = useRecipeView();
   const inflight = useRef(false);
   const itemsRef = useRef<RecipeListItem[]>([]);
   itemsRef.current = items;
@@ -113,10 +115,13 @@ export function CampaignRecipes() {
 
   return withTour(
     <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4" aria-label="Galeria de receitas">
-      <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{plural(total, "receita", "receitas")}</p>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3" data-tutorial="camp-gallery">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{plural(total, "receita", "receitas")}</p>
+        <RecipeViewToggle view={view} onChange={setView} />
+      </div>
+      <div className={view === "cards" ? "grid grid-cols-2 gap-3 sm:grid-cols-3" : "space-y-2"} data-tutorial="camp-gallery">
         {items.map((r, i) => (
-          <RecipeCard key={r.id} recipe={r} to={`/campanhas/${slug}/receitas/${r.id}`} first={i === 0} />
+          <RecipeCard key={r.id} recipe={r} layout={view} to={`/campanhas/${slug}/receitas/${r.id}`} first={i === 0} />
         ))}
       </div>
       {error && <p role="alert" className="text-center text-xs font-medium text-destructive">{error}</p>}

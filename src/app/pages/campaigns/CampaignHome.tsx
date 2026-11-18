@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { BookOpen, CheckCircle2, ChevronRight, Info } from "lucide-react";
+import { CheckCircle2, ChevronRight, Info } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "../../components/ui/Button";
-import { Card } from "../../components/ui/Card";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { CampaignCover } from "../../components/campaigns/CampaignCover";
 import { StatusChip } from "../../components/campaigns/StatusChip";
@@ -27,9 +26,8 @@ export function CampaignHome() {
   const [detailsOpen, setDetailsOpen] = useState(false);
 
   const hasVoting = campaignHasVoting(campaign);
-  const hasDraw = !!campaign.features.draw;
   const photosOn = campaign.features.photos !== false;
-  const steps = useMemo(() => homeTour(hasVoting, !!state.book_published), [hasVoting, state.book_published]);
+  const steps = useMemo(() => homeTour(hasVoting), [hasVoting]);
   const tour = useTour({
     storageKey: tourKey("collab", user?.id, "home", campaign.id, state.tour?.version),
     enabled: !!state.tour?.enabled && !!user,
@@ -47,19 +45,19 @@ export function CampaignHome() {
   let secondary: Cta | null = null;
   const votingNow = hasVoting && !!state.can_vote;
   if (state.released) {
-    if ((hasVoting && state.results_visible) || (hasDraw && state.draw_visible)) primary = { label: "Ver resultado", to: `${base}/resultado` };
+    if (hasVoting && state.results_visible) primary = { label: "Ver resultado", to: `${base}/resultado` };
     else if (count === 0 && state.can_submit) {
-      primary = { label: "Enviar minha receita", to: `${base}/enviar` };
+      primary = { label: "Cadastrar receita", to: `${base}/enviar` };
       if (votingNow) secondary = { label: "Votar nas receitas", to: `${base}/votacao` };
       else if (state.gallery_visible) secondary = { label: "Ver receitas", to: `${base}/receitas` };
     } else if (votingNow) {
       primary = { label: "Votar", to: `${base}/votacao` };
       if (count > 0) secondary = state.can_submit
-        ? { label: "Enviar outra receita", to: `${base}/enviar` }
+        ? { label: "Cadastrar outra receita", to: `${base}/enviar` }
         : { label: "Minhas receitas", to: `${base}/participacao` };
     } else if (count > 0) {
       if (state.can_submit) {
-        primary = { label: "Enviar outra receita", to: `${base}/enviar` };
+        primary = { label: "Cadastrar outra receita", to: `${base}/enviar` };
         secondary = { label: "Minhas receitas", to: `${base}/participacao` };
       } else {
         primary = { label: "Minhas receitas", to: `${base}/participacao` };
@@ -103,17 +101,6 @@ export function CampaignHome() {
         </div>
       )}
 
-      {state.book_published && (
-        <Card data-tutorial="camp-book" className="flex items-center gap-3 rounded-3xl border-primary/30 bg-primary/5 p-4 hover:shadow-sm">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary"><BookOpen size={22} aria-hidden="true" /></span>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-bold leading-tight text-foreground">Livro de Receitas</p>
-            <p className="text-xs text-muted-foreground">As receitas da campanha, para guardar.</p>
-          </div>
-          <Button size="sm" onClick={() => navigate(`${base}/livro`)} className="h-11 shrink-0 rounded-xl px-4 text-sm font-bold">Abrir</Button>
-        </Card>
-      )}
-
       <div className="flex items-center justify-between gap-3">
         <button
           type="button"
@@ -155,7 +142,7 @@ export function CampaignHome() {
             <section className="space-y-1.5">
               <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Como funciona</h3>
               <ul className="space-y-1.5 text-foreground">
-                <li className="flex gap-2.5"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />Dê um título à receita, escreva os ingredientes e o modo de preparo{photosOn ? ", envie até 3 fotos" : ""} e, se quiser, conte a história e a memória afetiva dela.</li>
+                <li className="flex gap-2.5"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />Informe o título, os ingredientes e o modo de preparo{photosOn ? ", com até 3 fotos" : ""}. Se quiser, conte a história e a memória afetiva da receita.</li>
                 {multi && (
                   <li className="flex gap-2.5"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />Você pode enviar até {max} receitas.</li>
                 )}
@@ -164,9 +151,6 @@ export function CampaignHome() {
                 )}
                 {hasVoting && (
                   <li className="flex gap-2.5"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />Vote na sua favorita: 1 voto por pessoa, definitivo, e não vale nas suas próprias receitas.</li>
-                )}
-                {hasDraw && (
-                  <li className="flex gap-2.5"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />Entre quem tiver receita aprovada haverá um sorteio. O resultado aparece aqui quando for divulgado.</li>
                 )}
               </ul>
             </section>

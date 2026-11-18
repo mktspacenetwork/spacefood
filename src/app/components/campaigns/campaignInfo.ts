@@ -123,7 +123,7 @@ function combine(reg: Phase, vot: Phase, votingOn: boolean): CampaignStatusInfo 
 /** Status curto para o cartão da lista (calculado pelas datas). */
 export function statusOfListItem(c: CollabCampaignListItem): CampaignStatusInfo {
   if (!c.state.released) return { text: "Em breve", tone: "soon" };
-  if (c.state.results_visible || c.state.draw_visible || c.state.stage === "results") return { text: "Resultado disponível", tone: "done" };
+  if (c.state.results_visible || c.state.stage === "results") return { text: "Resultado disponível", tone: "done" };
   if (c.state.stage === "closed") return { text: "Encerrada", tone: "closed" };
   const reg = phaseOf(stageOf(c, "registration"));
   const vot = hasVoting(c) ? phaseOf(stageOf(c, "voting")) : "unset";
@@ -133,7 +133,7 @@ export function statusOfListItem(c: CollabCampaignListItem): CampaignStatusInfo 
 /** Status curto para a tela da campanha (o servidor já calculou registration/voting). */
 export function statusOfDetail(c: PublicCampaign, s: CollabState): CampaignStatusInfo {
   if (!s.released) return { text: "Em breve", tone: "soon" };
-  if (s.results_visible || s.draw_visible) return { text: "Resultado disponível", tone: "done" };
+  if (s.results_visible) return { text: "Resultado disponível", tone: "done" };
   if (s.stage === "closed") return { text: "Encerrada", tone: "closed" };
   return combine(s.registration ?? "unset", hasVoting(c) ? (s.voting ?? "unset") : "unset", hasVoting(c));
 }
@@ -169,6 +169,15 @@ export function recipesSummary(count: number, status?: string | null): string | 
   return `${count} receitas enviadas`;
 }
 
+/** A campanha aceita uma nova receita desta pessoa agora? (usa o campo do servidor; sem ele, deduz pelas datas e pelo limite) */
+export function acceptsSubmission(c: CollabCampaignListItem): boolean {
+  const s = c.state;
+  if (!s.released) return false;
+  if (typeof s.can_submit === "boolean") return s.can_submit;
+  const reg = phaseOf(stageOf(c, "registration"));
+  return reg === "open" && submissionsCount(s) < submissionsMax(c, s) && s.stage !== "closed";
+}
+
 export type CardAction = { label: string; to: "" | "/enviar" | "/participacao" | "/votacao" | "/resultado"; emphasis: "primary" | "outline" };
 
 /**
@@ -183,7 +192,7 @@ export function cardAction(c: CollabCampaignListItem): CardAction {
   const canSubmit = s.can_submit ?? (reg === "open" && count < submissionsMax(c, s) && s.stage !== "closed");
   const canVote = hasVoting(c) && (s.can_vote ?? (vot === "open" && !s.has_voted));
   if (!s.released) return { label: "Ver detalhes", to: "", emphasis: "outline" };
-  if (s.results_visible || s.draw_visible || s.stage === "results") return { label: "Ver resultado", to: "/resultado", emphasis: "primary" };
+  if (s.results_visible || s.stage === "results") return { label: "Ver resultado", to: "/resultado", emphasis: "primary" };
   if (count === 0 && canSubmit) return { label: "Participar", to: "/enviar", emphasis: "primary" };
   if (canVote) return { label: "Votar", to: "/votacao", emphasis: "primary" };
   if (count > 0) return { label: "Minhas receitas", to: "/participacao", emphasis: "outline" };

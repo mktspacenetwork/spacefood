@@ -14,7 +14,7 @@ import { cn } from "../../../lib/utils";
 import { campaignsApi, errMsg } from "../../../lib/campaigns/api";
 import { fmtRange, plural } from "../../../lib/campaigns/format";
 import type { AdminCampaignDetail, PublishCheck } from "../../../lib/campaigns/types";
-import { ErrorBox, LoadingBox, Notice, useBusy } from "./shared";
+import { ErrorBox, LoadingBox, Notice, useBusy, visibleCheckItems } from "./shared";
 
 type PublishResult = { visible_from: string; module_enabled_now: boolean; eligible_count: number };
 
@@ -85,7 +85,6 @@ export function PublishDialog({
 
   const eligible = check?.eligible_count ?? 0;
   const reg = detail?.stages.find((s) => s.stage_key === "registration");
-  const vot = detail?.stages.find((s) => s.stage_key === "voting");
 
   return (
     <Dialog open={open} onOpenChange={(v) => busy !== "publish" && onOpenChange(v)}>
@@ -109,8 +108,7 @@ export function PublishDialog({
               <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] text-muted-foreground">
                 <span className="inline-flex items-center gap-1.5">
                   <CalendarDays size={13} aria-hidden="true" />
-                  {detail?.campaign.features.voting ? "Participação " : ""}{fmtRange(reg?.starts_at, reg?.ends_at)}
-                  {detail?.campaign.features.voting && <> · Votação {fmtRange(vot?.starts_at, vot?.ends_at)}</>}
+                  {detail?.campaign.features.voting ? "Participação e votação " : ""}{fmtRange(reg?.starts_at, reg?.ends_at)}
                 </span>
                 <span>{plural(eligible, "pessoa elegível", "pessoas elegíveis")}</span>
               </p>
@@ -118,7 +116,7 @@ export function PublishDialog({
 
             {/* Checklist */}
             <ul className="divide-y divide-border rounded-2xl border" data-tutorial="camp-publish-checklist">
-              {check.items.map((it) => (
+              {visibleCheckItems(check.items).map((it) => (
                 <li key={it.key} className="flex items-start gap-2.5 px-3 py-2.5 text-sm">
                   {it.ok ? (
                     <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-green-600 dark:text-green-400" aria-label="Ok" />

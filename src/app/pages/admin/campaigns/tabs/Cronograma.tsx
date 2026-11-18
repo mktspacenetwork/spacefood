@@ -4,7 +4,7 @@ import { Card } from "../../../../components/ui/Card";
 import { cn } from "../../../../lib/utils";
 import { PHASE_STATE, fmtDayTime, fmtRange } from "../../../../lib/campaigns/format";
 import type { DisplayState } from "../../../../lib/campaigns/format";
-import type { AdminCampaign, AdminDraw, AdminResults, AdminStageRow } from "../../../../lib/campaigns/types";
+import type { AdminCampaign, AdminResults, AdminStageRow } from "../../../../lib/campaigns/types";
 import { stageState } from "../shared";
 
 type Item = { key: string; label: string; when: string; chip?: { text: string; className: string } };
@@ -23,63 +23,42 @@ const GREEN = "border-green-200 bg-green-100 text-green-700 dark:border-green-80
 const PURPLE = "border-purple-200 bg-purple-100 text-purple-700 dark:border-purple-800 dark:bg-purple-950/40 dark:text-purple-300";
 
 /**
- * Cronograma simples da campanha: só as etapas que se aplicam (participação; votação; divulgação do resultado;
- * sorteio). Lê as datas que já existem no cadastro — não há segunda configuração de datas aqui; para mudar,
- * Configurações → Período.
+ * Cronograma simples: só o que se aplica. O período é UM só (a votação usa a mesma janela da participação) e,
+ * com votação, a data de anúncio do resultado. Lê as datas que já existem no cadastro — não há segunda configuração
+ * de datas aqui; para mudar, Configurações → Período.
  */
 export function Cronograma({
-  campaign, stages, results, display, draw,
+  campaign, stages, results, display,
 }: {
   campaign: AdminCampaign;
   stages: AdminStageRow[];
   results: AdminResults | null;
   display: DisplayState;
-  draw?: AdminDraw | null;
 }) {
   const f = campaign.features;
   const reg = stages.find((s) => s.stage_key === "registration");
-  const vot = stages.find((s) => s.stage_key === "voting");
   const live = display === "published" || display === "scheduled";
   const regState = stageState(reg);
-  const votState = stageState(vot);
   const items: Item[] = [];
 
   const left = live && (regState === "open" || regState === "paused") ? daysLeft(reg?.ends_at) : null;
   items.push({
     key: "registration",
-    label: "Participação",
+    label: f.voting ? "Participação e votação" : "Participação",
     when: fmtRange(reg?.starts_at, reg?.ends_at) + (left ? ` · ${left}` : ""),
     chip: regState === "unset" ? undefined : { text: PHASE_STATE[regState].label, className: PHASE_STATE[regState].className },
   });
 
-  if (f.voting) {
-    items.push({
-      key: "voting",
-      label: "Votação",
-      when: fmtRange(vot?.starts_at, vot?.ends_at),
-      chip: votState === "unset" ? undefined : { text: PHASE_STATE[votState].label, className: PHASE_STATE[votState].className },
-    });
-    if (f.announcement) {
-      const rs = results?.status ?? "none";
-      let when = "Depois da votação";
-      let chip: Item["chip"];
-      if (rs === "announced") { when = `Divulgado em ${fmtDayTime(results?.announced_at)}`; chip = { text: "Divulgado", className: PURPLE }; }
-      else if (rs === "confirmed" && results?.announce_at) { when = `Programada para ${fmtDayTime(results.announce_at)}`; chip = { text: "Programada", className: BLUE }; }
-      else if (rs === "confirmed") { when = "Vencedor confirmado — falta divulgar"; chip = { text: "A divulgar", className: GREEN }; }
-      items.push({ key: "results", label: "Resultado", when, chip });
-    }
-  }
-
-  if (f.draw) {
-    let when = "Depois da participação";
+  if (f.voting && f.announcement) {
+    const rs = results?.status ?? "none";
+    const at = results?.announce_at ?? null;
+    let when = "Sem data definida";
     let chip: Item["chip"];
-    const d = draw?.draw;
-    if (d?.announced_at) { when = `Divulgado em ${fmtDayTime(d.announced_at)}`; chip = { text: "Divulgado", className: PURPLE }; }
-    else if (d?.announce_at) { when = `Programado para ${fmtDayTime(d.announce_at)}`; chip = { text: "Programado", className: BLUE }; }
-    else if (d?.confirmed_at) { when = "Ganhadores confirmados — falta divulgar"; chip = { text: "A divulgar", className: GREEN }; }
-    else if (d) { when = "Sorteado — falta confirmar"; chip = { text: "A confirmar", className: GREEN }; }
-    else if (draw?.can_run) { when = "Pronto para sortear"; chip = { text: "Pronto", className: GREEN }; }
-    items.push({ key: "draw", label: "Sorteio", when, chip });
+    if (rs === "announced") { when = `Divulgado em ${fmtDayTime(results?.announced_at)}`; chip = { text: "Divulgado", className: PURPLE }; }
+    else if (rs === "confirmed" && at) { when = `Em ${fmtDayTime(at)}`; chip = { text: "Definido", className: GREEN }; }
+    else if (rs === "confirmed") { when = "Ganhador definido — falta divulgar"; chip = { text: "Definido", className: GREEN }; }
+    else if (at) { when = `Em ${fmtDayTime(at)}`; chip = { text: "Programado", className: BLUE }; }
+    items.push({ key: "results", label: "Anúncio do resultado", when, chip });
   }
 
   return (
