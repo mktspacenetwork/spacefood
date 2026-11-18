@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import {
-  ChevronDown, ChevronUp, LayoutGrid, List as ListIcon, Loader2, Megaphone, Plus, Power, Search,
+  ChevronDown, ChevronUp, LayoutGrid, List as ListIcon, Loader2, Megaphone, MoreHorizontal, Plus, Power, Search,
 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card, CardContent } from "../../../components/ui/Card";
 import { Input } from "../../../components/ui/input";
-import { Switch } from "../../../components/ui/switch";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../../components/ui/dropdown-menu";
 import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { cn } from "../../../lib/utils";
 import { useAuth } from "../../../context/auth-context";
@@ -154,7 +154,7 @@ export function AdminCampaigns() {
     setModuleTarget(null);
     if (next === null) return;
     const r = await run("module", () => campaignsApi.put<{ enabled: boolean }>("/admin/module", { enabled: next }),
-      next ? "Módulo ligado." : "Módulo desligado.");
+      next ? "Campanhas ligadas para todos." : "Campanhas desligadas para todos.");
     if (r.ok) overview.setData((o) => (o ? { ...o, enabled: r.value.enabled } : o));
   };
 
@@ -180,6 +180,10 @@ export function AdminCampaigns() {
 
   const moduleEnabled = overview.data ? overview.data.enabled : null;
   const total = (list.data ?? []).length;
+  const hasPublished = (list.data ?? []).some((c) => {
+    const st = campaignDisplayState(c);
+    return st === "published" || st === "scheduled";
+  });
   const unpublishOpenStages =
     unpublishTarget &&
     ["registration", "voting"].some((k) => stageState(unpublishTarget.stages.find((s) => s.stage_key === k)) === "open");
@@ -194,6 +198,24 @@ export function AdminCampaigns() {
         </h1>
         <div className="flex items-center gap-2">
           <TourButton onClick={tour.start} />
+          {perms.campaigns_publish && moduleEnabled !== null && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button data-tutorial="camp-module-menu" variant="outline" size="icon" className="rounded-xl" aria-label="Mais opções" disabled={busy !== null}>
+                  {busy === "module" ? <Loader2 size={16} className="animate-spin" /> : <MoreHorizontal size={16} />}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-72">
+                <DropdownMenuItem onSelect={() => setModuleTarget(!moduleEnabled)} className="cursor-pointer items-start gap-2">
+                  <Power size={14} className="mt-0.5 shrink-0" />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium">{moduleEnabled ? "Desligar campanhas para todos" : "Ligar campanhas para todos"}</span>
+                    <span className="block text-[11px] text-muted-foreground">Chave geral de emergência. Para uma campanha só, use “Visível para colaboradores”.</span>
+                  </span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           {perms.campaigns_create && (
             <Button data-tutorial="camp-new" className="gap-2 rounded-xl" onClick={() => navigate("/admin/campaigns/new")}>
               <Plus size={16} /> Nova campanha
@@ -203,48 +225,18 @@ export function AdminCampaigns() {
       </div>
 
       <div className="space-y-5">
-        {/* Chave do módulo — uma linha */}
-        {overview.data ? (
-          <div
-            data-tutorial="camp-module-switch"
-            className={cn(
-              "flex items-center gap-3 rounded-2xl border px-4 py-3",
-              moduleEnabled
-                ? "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/30"
-                : "border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30",
-            )}
-          >
-            <Power
-              size={18}
-              className={cn("shrink-0", moduleEnabled ? "text-green-700 dark:text-green-300" : "text-amber-700 dark:text-amber-300")}
-              aria-hidden="true"
-            />
-            <p className={cn("min-w-0 flex-1 text-[13px] leading-snug", moduleEnabled ? "text-green-800 dark:text-green-200" : "text-amber-800 dark:text-amber-200")}>
-              {moduleEnabled ? (
-                <b>Módulo ligado</b>
-              ) : (
-                <><b>Módulo desligado</b> — nenhum colaborador vê o menu nem as campanhas, mesmo as publicadas.</>
-              )}
+        {/* Aviso só quando faz falta: com a chave geral desligada, as campanhas publicadas ficam invisíveis. */}
+        {moduleEnabled === false && hasPublished && (
+          <div data-tutorial="camp-module-alert" className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950/30">
+            <Power size={18} className="shrink-0 text-amber-700 dark:text-amber-300" aria-hidden="true" />
+            <p className="min-w-0 flex-1 basis-56 text-[13px] leading-snug text-amber-800 dark:text-amber-200">
+              <b>Campanhas desligadas para todos.</b> Nenhum colaborador vê as campanhas publicadas.
             </p>
-            {busy === "module" ? (
-              <Loader2 size={18} className="animate-spin text-muted-foreground" />
-            ) : (
-              <Switch
-                checked={!!moduleEnabled}
-                disabled={!perms.campaigns_publish || busy !== null}
-                onCheckedChange={(v) => setModuleTarget(v)}
-                aria-label="Ligar ou desligar o módulo de campanhas"
-              />
+            {perms.campaigns_publish && (
+              <Button size="sm" variant="outline" className="rounded-xl" disabled={busy !== null} onClick={() => setModuleTarget(true)}>
+                {busy === "module" ? <Loader2 size={14} className="animate-spin" /> : null} Ligar
+              </Button>
             )}
-          </div>
-        ) : overview.error ? (
-          <div data-tutorial="camp-module-switch" className="flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm text-muted-foreground">
-            <span>Não foi possível verificar se o módulo está ligado.</span>
-            <Button size="sm" variant="outline" className="rounded-xl" onClick={overview.reload}>Tentar de novo</Button>
-          </div>
-        ) : (
-          <div data-tutorial="camp-module-switch" className="flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm text-muted-foreground">
-            <Loader2 size={14} className="animate-spin" /> Verificando o módulo…
           </div>
         )}
 
@@ -373,7 +365,7 @@ export function AdminCampaigns() {
                   busy={busy !== null}
                   onOpen={() => navigate(`/admin/campaigns/${c.id}`)}
                   onEdit={() => navigate(`/admin/campaigns/${c.id}/edit`)}
-                  onHistory={() => navigate(`/admin/campaigns/${c.id}?tab=settings&section=history`)}
+                  onHistory={() => navigate(`/admin/campaigns/${c.id}?tab=reports&section=history`)}
                   onPublish={() => setPublishTarget(c)}
                   onUnpublish={() => setUnpublishTarget(c)}
                   onRepublish={() => setRepublishTarget(c)}
@@ -437,13 +429,13 @@ export function AdminCampaigns() {
       <ConfirmDialog
         open={moduleTarget !== null}
         onOpenChange={(o) => !o && setModuleTarget(null)}
-        title={moduleTarget ? "Ligar o módulo de campanhas?" : "Desligar o módulo de campanhas?"}
+        title={moduleTarget ? "Ligar as campanhas para todos?" : "Desligar as campanhas para todos?"}
         description={
           moduleTarget
             ? "Colaboradores elegíveis passarão a ver o menu Campanhas se houver campanha publicada para eles."
             : "Nenhum colaborador verá o menu, as campanhas ou a tour. Os dados e as campanhas não são apagados e você pode religar quando quiser."
         }
-        confirmLabel={moduleTarget ? "Ligar módulo" : "Desligar módulo"}
+        confirmLabel={moduleTarget ? "Ligar" : "Desligar"}
         variant={moduleTarget ? "default" : "destructive"}
         onConfirm={toggleModule}
       />

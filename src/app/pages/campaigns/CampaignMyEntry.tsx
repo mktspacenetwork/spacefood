@@ -1,27 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { CheckCircle2, ClipboardList, Pencil, Plus } from "lucide-react";
+import { CheckCircle2, ChevronDown, ClipboardList, Pencil, Plus } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { Skeleton } from "../../components/ui/skeleton";
 import { SubmissionStatus } from "../../components/campaigns/SubmissionStatus";
 import { EmptyState } from "../../components/campaigns/EmptyState";
+import { RecipePhotos, RecipeText } from "../../components/campaigns/RecipeBody";
 import { ErrorState } from "../../components/campaigns/ErrorState";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
 import { useCampaignCtx } from "./CampaignLayout";
 import { useAuth } from "../../context/Store";
 import { campaignsApi, CampaignApiError, errMsg } from "../../lib/campaigns/api";
+import { cn } from "../../lib/utils";
 import { fmtDateTime, plural } from "../../lib/campaigns/format";
 import { MYENTRY_TOUR } from "../../lib/campaigns/tours-collab";
 import type { CollabState, MySubmission, MySubmissions } from "../../lib/campaigns/types";
 
 type Payload = MySubmissions;
-
-const pickPhoto = (s: MySubmission) => {
-  const list = (s.media ?? []).filter((m) => m.kind !== "video" && m.url);
-  return list.find((m) => m.kind === "main_photo") ?? list[0];
-};
 
 /**
  * Minhas receitas: tudo o que a pessoa enviou nesta campanha (uma, ou várias se a campanha permitir),
@@ -35,6 +32,8 @@ export function CampaignMyEntry() {
   const api = `/campaigns/${encodeURIComponent(slug)}`;
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Receitas com o texto completo aberto (ingredientes e modo de preparo).
+  const [openIds, setOpenIds] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     setError(null);
@@ -107,7 +106,7 @@ export function CampaignMyEntry() {
         <EmptyState
           icon={<ClipboardList size={22} aria-hidden="true" />}
           title="Você ainda não enviou receitas"
-          description={canSendMore ? "Dê um título, conte a história e envie uma foto." : "As inscrições não estão abertas para você agora."}
+          description={canSendMore ? (campaign.features.photos !== false ? "Escreva os ingredientes e o modo de preparo e envie uma foto." : "Escreva os ingredientes e o modo de preparo.") : "A participação não está aberta para você agora."}
           action={
             canSendMore ? (
               <Button data-tutorial="camp-new-recipe" onClick={() => navigate(`${base}/enviar`)} className="h-12 gap-2 rounded-xl px-6">
@@ -134,17 +133,26 @@ export function CampaignMyEntry() {
       </div>
 
       {items.map((s, i) => {
-        const photo = pickPhoto(s);
         const editable = canEdit(s);
+        const isOpen = !!openIds[s.id];
         return (
           <section key={s.id} className="space-y-3" aria-label={`Receita ${s.dish_name}`}>
-            <Card className="overflow-hidden rounded-3xl hover:shadow-sm">
-              {photo && <img src={photo.url} alt={`Foto de ${s.dish_name}`} className="aspect-[4/3] w-full object-cover" />}
-              <div className="space-y-1 p-4">
-                <h3 className="text-xl font-bold leading-tight text-foreground">{s.dish_name}</h3>
-                {s.description && <p className="whitespace-pre-line text-sm leading-relaxed text-muted-foreground">{s.description}</p>}
-              </div>
-            </Card>
+            <RecipePhotos media={s.media} alt={s.dish_name} />
+            <div className="space-y-1">
+              <h3 className="text-xl font-bold leading-tight text-foreground">{s.dish_name}</h3>
+              <p className="text-xs text-muted-foreground">Enviada por você</p>
+            </div>
+
+            {isOpen && <RecipeText story={s.description} ingredients={s.ingredients} preparation={s.preparation} />}
+            <button
+              type="button"
+              aria-expanded={isOpen}
+              onClick={() => setOpenIds((o) => ({ ...o, [s.id]: !o[s.id] }))}
+              className="flex h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-border bg-background text-sm font-semibold text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              {isOpen ? "Esconder a receita" : "Ver receita completa"}
+              <ChevronDown size={16} className={cn("transition-transform", isOpen && "rotate-180")} aria-hidden="true" />
+            </button>
 
             <SubmissionStatus status={s.status} submittedAt={s.submitted_at} reviewedAt={s.reviewed_at} reason={s.rejection_reason} canEdit={editable} />
 

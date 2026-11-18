@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { User, Vote } from "lucide-react";
 import { motion } from "motion/react";
@@ -7,6 +7,7 @@ import { Button } from "../../components/ui/Button";
 import { Skeleton } from "../../components/ui/skeleton";
 import { ErrorState } from "../../components/campaigns/ErrorState";
 import { VoteConfirmDialog } from "../../components/campaigns/VoteConfirmDialog";
+import { RecipePhotos, RecipeText } from "../../components/campaigns/RecipeBody";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
 import { useCampaignCtx } from "./CampaignLayout";
 import { useAuth } from "../../context/Store";
@@ -36,11 +37,6 @@ export function CampaignRecipeDetail() {
   }, [api, id]);
 
   useEffect(() => { void load(); }, [load]);
-
-  const photo = useMemo(() => {
-    const list = (recipe?.media ?? []).filter((m) => m.kind !== "video" && m.url);
-    return list.find((m) => m.kind === "main_photo") ?? list[0];
-  }, [recipe]);
 
   // Chave por tela (não por receita): vista em uma receita, não abre sozinha nas outras.
   const tour = useTour({
@@ -90,18 +86,11 @@ export function CampaignRecipeDetail() {
     );
   }
 
-  const ingredients = (recipe.ingredients ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const preparation = (recipe.preparation ?? "").trim();
-
   return (
     <motion.article initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
       <div className="flex justify-end"><TourButton onClick={tour.start} /></div>
 
-      {photo && (
-        <div className="overflow-hidden rounded-3xl bg-muted" data-tutorial="camp-recipe-media">
-          <img src={photo.url} alt={`Foto de ${recipe.dish_name}`} className="aspect-[4/3] w-full object-cover" />
-        </div>
-      )}
+      <RecipePhotos media={recipe.media} alt={recipe.dish_name} />
 
       <header className="space-y-1">
         <h2 className="text-2xl font-bold leading-tight text-foreground">{recipe.dish_name}</h2>
@@ -111,33 +100,7 @@ export function CampaignRecipeDetail() {
         </p>
       </header>
 
-      {recipe.description?.trim() && (
-        <section className="space-y-2">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">História e memória afetiva</h3>
-          <p className="whitespace-pre-line text-sm leading-relaxed text-foreground">{recipe.description}</p>
-        </section>
-      )}
-
-      {/* Receitas antigas podem ter ingredientes e preparo; as novas não pedem esses campos (nada aparece vazio). */}
-      {ingredients.length > 0 && (
-        <section className="space-y-2">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Ingredientes</h3>
-          <ul className="space-y-1.5">
-            {ingredients.map((line, i) => (
-              <li key={i} className="flex gap-2.5 text-sm text-foreground">
-                <span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-                <span>{line}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {preparation && (
-        <section className="space-y-2">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Modo de preparo</h3>
-          <p className="whitespace-pre-line text-sm leading-relaxed text-foreground">{preparation}</p>
-        </section>
-      )}
+      <RecipeText story={recipe.description} ingredients={recipe.ingredients} preparation={recipe.preparation} />
 
       {recipe.can_vote && (
         <div className="sticky bottom-[4.75rem] z-10 -mx-4 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-2 pt-4 md:bottom-4 md:mx-0 md:px-0">

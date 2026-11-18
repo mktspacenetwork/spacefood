@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Camera, Check, FileWarning, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { Progress } from "../ui/progress";
 import { cn } from "../../lib/utils";
 import { IMAGE_ACCEPT, checkImage, detectMime, prepareImage } from "../../lib/campaigns/media";
 
 /**
- * A foto da receita no formulário (uma só).
+ * Uma foto da receita no formulário (o formulário usa até 3, uma por posição).
  *  - nova:      `file` presente e sem `serverId`;
  *  - existente: `serverId` + `serverStatus: "ready"`, `previewUrl` = URL assinada;
  *  - pendente:  `serverId` + `serverStatus: "pending"` — a linha existe no servidor, mas o arquivo não chegou.
@@ -23,6 +23,10 @@ export type PhotoDraft = {
   error?: string;
   /** o servidor descartou o arquivo (conteúdo diferente do tipo declarado): só resta trocar */
   invalid?: boolean;
+  /** identificador estável na tela (chave do item numa lista de fotos) */
+  uid?: string;
+  /** tipo da mídia no servidor (para saber qual é a principal ao editar) */
+  kind?: "main_photo" | "photo";
 };
 
 const MINI_BTN =
@@ -34,6 +38,9 @@ export function PhotoPicker({
   maxMb,
   disabled,
   showError,
+  compact,
+  emptyLabel,
+  hideRemove,
 }: {
   draft: PhotoDraft | null;
   setDraft: React.Dispatch<React.SetStateAction<PhotoDraft | null>>;
@@ -41,13 +48,20 @@ export function PhotoPicker({
   disabled?: boolean;
   /** mostra "adicione a foto" quando falta */
   showError?: boolean;
+  /** versão menor (fotos extras): quadrada e com rótulos curtos */
+  compact?: boolean;
+  /** texto do botão vazio (padrão: "Tirar foto ou escolher da galeria") */
+  emptyLabel?: string;
+  /** esconde "Remover" (ex.: foto principal quando há outras fotos: só dá para trocar) */
+  hideRemove?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const blob = useRef<string | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  useEffect(() => () => { if (blob.current) URL.revokeObjectURL(blob.current); }, []);
+  // A miniatura pode mudar de posição/instância quando outra foto é removida: quem cria a lista (formulário) libera
+  // os blobs ao sair da tela; aqui só se libera o blob que ESTA instância trocou ou removeu.
 
   const dropBlob = () => {
     if (blob.current) { URL.revokeObjectURL(blob.current); blob.current = null; }
@@ -108,15 +122,17 @@ export function PhotoPicker({
 
       {hasPreview ? (
         <div className="relative overflow-hidden rounded-3xl bg-muted">
-          <img src={draft!.previewUrl} alt="Foto da receita" className="aspect-[4/3] w-full object-cover" />
+          <img src={draft!.previewUrl} alt="Foto da receita" className={cn("w-full object-cover", compact ? "aspect-square" : "aspect-[4/3]")} />
           {!disabled && (
-            <div className="absolute inset-x-3 bottom-3 flex items-center justify-between gap-2">
-              <button type="button" className={MINI_BTN} onClick={() => inputRef.current?.click()} disabled={preparing}>
-                <RefreshCw size={15} aria-hidden="true" /> Trocar
+            <div className={cn("absolute flex items-center justify-between gap-2", compact ? "inset-x-2 bottom-2" : "inset-x-3 bottom-3")}>
+              <button type="button" className={cn(MINI_BTN, compact && "h-10 px-3")} onClick={() => inputRef.current?.click()} disabled={preparing} aria-label="Trocar a foto">
+                <RefreshCw size={15} aria-hidden="true" /> {compact ? null : "Trocar"}
               </button>
-              <button type="button" className={cn(MINI_BTN, "text-destructive")} onClick={remove} disabled={preparing} aria-label="Remover a foto">
-                <Trash2 size={15} aria-hidden="true" /> Remover
-              </button>
+              {!hideRemove && (
+                <button type="button" className={cn(MINI_BTN, "text-destructive", compact && "h-10 px-3")} onClick={remove} disabled={preparing} aria-label="Remover a foto">
+                  <Trash2 size={15} aria-hidden="true" /> {compact ? null : "Remover"}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -132,15 +148,16 @@ export function PhotoPicker({
             type="button"
             onClick={() => inputRef.current?.click()}
             disabled={disabled || preparing}
-            aria-label="Tirar foto ou escolher da galeria"
+            aria-label={emptyLabel ?? "Tirar foto ou escolher da galeria"}
             className={cn(
-              "flex aspect-[4/3] w-full flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed bg-muted/30 px-6 text-center text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:pointer-events-none disabled:opacity-50",
+              "flex w-full flex-col items-center justify-center gap-2 rounded-3xl border-2 border-dashed bg-muted/30 text-center text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:pointer-events-none disabled:opacity-50",
+              compact ? "aspect-square px-3" : "aspect-[4/3] px-6",
               showError ? "border-destructive/60" : "border-border",
             )}
           >
-            {preparing ? <Loader2 size={34} className="animate-spin" aria-hidden="true" /> : <Camera size={36} strokeWidth={1.75} aria-hidden="true" />}
-            <span className="text-base font-bold text-foreground">{preparing ? "Preparando a foto…" : "Tirar foto ou escolher da galeria"}</span>
-            {!preparing && <span className="text-xs">A foto da receita pronta</span>}
+            {preparing ? <Loader2 size={compact ? 24 : 34} className="animate-spin" aria-hidden="true" /> : <Camera size={compact ? 26 : 36} strokeWidth={1.75} aria-hidden="true" />}
+            <span className={cn("font-bold text-foreground", compact ? "text-sm" : "text-base")}>{preparing ? "Preparando a foto…" : (emptyLabel ?? "Tirar foto ou escolher da galeria")}</span>
+            {!preparing && !compact && <span className="text-xs">A foto da receita pronta</span>}
           </button>
         </>
       )}

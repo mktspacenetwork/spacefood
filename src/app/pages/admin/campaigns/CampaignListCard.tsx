@@ -66,7 +66,7 @@ function CardHint({ hint, moduleOff, clamp }: { hint: Hint | null; moduleOff: bo
       )}
       {moduleOff && (
         <p className="text-[11px] text-amber-700 dark:text-amber-300">
-          Módulo desligado: ninguém vê esta campanha até você ligá-lo.
+          Campanhas desligadas para todos: ninguém vê esta campanha até você religar.
         </p>
       )}
     </div>

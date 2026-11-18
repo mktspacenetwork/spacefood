@@ -24,7 +24,17 @@ export type Features = {
   tour: TourConfig;
   /** Permite mais de uma receita por colaborador (até MAX_SUBMISSIONS_PER_USER). Ausente = false (uma só). */
   multiple_submissions?: boolean;
+  /** Esta campanha tem sorteio entre quem tem receita aprovada? Ausente = false. */
+  draw?: boolean;
+  /** Quantidade de ganhadores do sorteio (1 a 10). Só vale com `draw`. */
+  draw_winners?: number;
 };
+
+/** Máximo de fotos por receita (aplicado no banco). `features.photos` desligado = nenhuma foto. */
+export const MAX_PHOTOS_PER_RECIPE = 3;
+/** Teto técnico de texto (ingredientes e modo de preparo): sem limite prático para uma receita, só proteção. */
+export const MAX_RECIPE_TEXT = 20000;
+export const MAX_STORY_TEXT = 5000;
 
 /** Teto técnico de receitas por colaborador quando `features.multiple_submissions` está ligado (aplicado no banco). */
 export const MAX_SUBMISSIONS_PER_USER = 10;
@@ -95,6 +105,11 @@ export type CollabState = {
   /** Quantas receitas o colaborador já enviou nesta campanha e o máximo permitido (1, ou até 10 com várias). */
   my_submissions_count?: number;
   max_submissions?: number;
+  /** Livro de Receitas publicado para esta campanha (aparece o item "Livro de Receitas"). */
+  book_published?: boolean;
+  /** Sorteio divulgado (só depois da divulgação oficial) e se esta pessoa foi sorteada. */
+  draw_visible?: boolean;
+  i_won?: boolean;
   my_submission_id?: string | null;
   my_submission_status?: SubmissionStatus | null;
   has_voted?: boolean;
@@ -112,6 +127,8 @@ export type CollabCampaignListItem = PublicCampaign & {
     /** Opcionais: se o servidor enviar, o botão do cartão usa; senão a lista deduz pelas datas. */
     can_submit?: boolean; can_vote?: boolean; has_voted?: boolean; results_visible?: boolean;
     my_submissions_count?: number; max_submissions?: number;
+    /** Sorteio divulgado / livro publicado (opcionais: o cartão só os usa se o servidor enviar). */
+    draw_visible?: boolean; i_won?: boolean; book_published?: boolean;
   };
   /** true quando o período da campanha já acabou (último fim entre inscrições e votação): o slide some da Home. */
   ended: boolean;
@@ -235,8 +252,10 @@ export type AdminDashboard = {
   votes_registered: number; votes_valid: number; votes_invalidated: number; voters: number;
   participation_pct: number; voting_pct: number;
   results: Partial<AdminResults> | null; stages: AdminStageRow[]; locked: boolean; tally?: TallyRow[];
-  /** true enquanto a votação não encerrou: o servidor não envia contagem por receita. */
+  /** Legado: a contagem por receita agora vem sempre em `tally` (acompanhamento ao vivo da gestão). */
   results_locked?: boolean; voting_ends_at?: string | null;
+  /** true enquanto a votação está aberta: o ranking em `tally` é PARCIAL (só a gestão vê). */
+  voting_live?: boolean;
 };
 
 export type AdminSubmissionRow = {
@@ -278,3 +297,110 @@ export type ExportPayload = { kind: string; columns: string[]; rows: unknown[][]
 export type AdminVotesPayload = { locked: boolean; items: AdminVote[] };
 /** Resultado/apuração: `tally_locked` enquanto a votação não encerrou (nesse caso `tally` vem vazio). */
 export type AdminResultsPayload = { results: AdminResults | null; tally: TallyRow[]; tally_locked?: boolean };
+
+// ───────────────────────── Livro de Receitas ─────────────────────────
+
+export type BookStatus = "draft" | "published" | "superseded" | "withdrawn";
+
+/** Resumo de uma versão do livro (rascunho ou publicada). */
+export type BookMeta = {
+  version: number;
+  status: BookStatus;
+  recipes_count: number;
+  generated_at: string;
+  generated_by_name: string | null;
+  published_at: string | null;
+  published_by_name: string | null;
+  /** Já existe o PDF desta versão guardado (necessário para publicar). */
+  has_pdf: boolean;
+  /** Receitas aprovadas que o administrador tirou desta versão do livro. */
+  excluded: string[];
+};
+
+/** `GET /admin/campaigns/:id/book` */
+export type AdminBookState = {
+  approved_count: number;
+  can_generate: boolean;
+  reason?: string | null;
+  draft: BookMeta | null;
+  published: BookMeta | null;
+};
+
+export type BookPhoto = { url: string; kind: "main_photo" | "photo" };
+
+export type BookRecipe = {
+  id: string;
+  position: number;
+  dish_name: string;
+  author: string;
+  /** "História e memória afetiva" (pode vir vazia). */
+  story: string;
+  /** Texto original com quebras de linha; a tela separa em lista. */
+  ingredients: string;
+  /** Texto original com quebras de linha; a tela separa em etapas. */
+  preparation: string;
+  photos: BookPhoto[];
+};
+
+/** Conteúdo completo de uma versão do livro (o que o leitor e o gerador de PDF consomem). */
+export type BookView = {
+  campaign: { name: string; slug: string; cover_url: string | null };
+  version: number;
+  status?: BookStatus;
+  generated_at: string;
+  recipes: BookRecipe[];
+};
+
+// ───────────────────────────── Sorteio ─────────────────────────────
+
+export type DrawStatus = "none" | "drawn" | "confirmed" | "announced";
+
+export type DrawWinner = {
+  position: number;
+  user_id?: string;
+  name: string;
+  department?: string;
+  unit?: string;
+  submission_id: string;
+  dish_name: string;
+};
+
+export type DrawEligible = {
+  user_id: string;
+  name: string;
+  department: string;
+  unit: string;
+  recipes: { id: string; dish_name: string }[];
+};
+
+/** `GET /admin/campaigns/:id/draw` */
+export type AdminDraw = {
+  enabled: boolean;
+  status: DrawStatus;
+  winners_count: number;
+  eligible_count: number;
+  eligible: DrawEligible[];
+  /** Receitas ainda sem análise (o sorteio só roda sem pendências e com a participação encerrada). */
+  pending_review: number;
+  registration_open: boolean;
+  can_run: boolean;
+  reason?: string | null;
+  draw: null | {
+    drawn_at: string;
+    drawn_by_name: string | null;
+    winners: DrawWinner[];
+    confirmed_at: string | null;
+    confirmed_by_name: string | null;
+    announced_at: string | null;
+    announce_at: string | null;
+    announce_scheduled_by_name: string | null;
+    announce_scheduled_at: string | null;
+  };
+};
+
+/** `GET /campaigns/:slug/draw` — só depois da divulgação oficial. */
+export type CollabDraw = {
+  announced_at: string;
+  winners: { position: number; name: string; dish_name: string; photo_url: string | null }[];
+  i_won: boolean;
+};

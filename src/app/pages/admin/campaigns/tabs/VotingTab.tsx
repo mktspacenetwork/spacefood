@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { CalendarDays, Loader2, Lock, Square, Trophy } from "lucide-react";
+import { useEffect, useState } from "react";
+import { CalendarDays, Loader2, Lock, RefreshCw, Square, Trophy } from "lucide-react";
 import { Badge } from "../../../../components/ui/Badge";
 import { Button } from "../../../../components/ui/Button";
 import { Card, CardContent } from "../../../../components/ui/Card";
@@ -13,16 +13,17 @@ import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
 import { ErrorBox, LoadingBox, Notice, SectionLabel, stageState, useBusy, useLoader } from "../shared";
 import { ResultView } from "./VoteFlow";
+import { RankingCard, VotesList } from "./LiveRanking";
 import type { TabProps } from "./types";
-import { TabIntro } from "./ui";
 import { useTabTour } from "./useTabTour";
 
 /**
- * VOTAÇÃO — situação da votação e o caminho até o resultado.
- *  - Durante a votação: só a participação (quantas pessoas já votaram). Nada de contagem por receita.
- *  - Depois do encerramento: botão "Ver resultado" → vencedor, conferência, confirmar e divulgar.
+ * VOTAÇÃO — acompanhamento da gestão e o caminho até o resultado.
+ *  - Durante a votação: total de votos, participação e RANKING AO VIVO (parcial; só a gestão vê — o colaborador
+ *    nunca vê ranking nem contagem). A tela se atualiza sozinha enquanto a votação está aberta.
+ *  - Votos registrados (quem votou em qual receita): só com a permissão "Ver votos individuais".
+ *  - Depois do encerramento oficial: "Ver ganhador" → conferir, confirmar e divulgar (agora ou programado).
  *  - O período (início e encerramento) é editado em Configurações; aqui só há "Encerrar votação agora".
- *  - Quem votou em quem fica em Participantes.
  */
 export function VotingTab(props: TabProps) {
   const { campaignId, results, perms, onChanged, tourUserId, tourSignal } = props;
@@ -32,6 +33,20 @@ export function VotingTab(props: TabProps) {
   // null = automático (mostra o resultado quando já existe apuração); depois que a pessoa pede, vale a escolha dela.
   const [shown, setShown] = useState<boolean | null>(null);
   const [endNowOpen, setEndNowOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+
+  // Atualização automática enquanto a votação está aberta (e a aba visível): a gestão vê o ranking mudar.
+  const votingNow = dash.data ? ["open", "paused"].includes(stageState(dash.data.stages.find((s) => s.stage_key === "voting"))) : false;
+  const { reload: reloadDash } = dash;
+  useEffect(() => {
+    if (!votingNow) return;
+    const t = setInterval(() => {
+      if (document.visibilityState === "visible") { reloadDash(); setRefreshKey((k) => k + 1); }
+    }, 20_000);
+    return () => clearInterval(t);
+  }, [votingNow, reloadDash]);
+  useEffect(() => { if (dash.data) setUpdatedAt(new Date()); }, [dash.data]);
 
   if (dash.loading && !dash.data) return <LoadingBox />;
   if (dash.error && !dash.data) return <ErrorBox message={dash.error} onRetry={dash.reload} />;
@@ -53,7 +68,7 @@ export function VotingTab(props: TabProps) {
   const endsAt = vs?.ends_at ?? d.voting_ends_at ?? null;
   const resultShown = shown ?? resultsStatus !== "none";
   const announceAt = resultsStatus === "confirmed" ? (res.announce_at ?? null) : null;
-  const refresh = () => { dash.reload(); onChanged(); };
+  const refresh = () => { dash.reload(); setRefreshKey((k) => k + 1); onChanged(); };
 
   const endNow = async () => {
     setEndNowOpen(false);
@@ -73,7 +88,11 @@ export function VotingTab(props: TabProps) {
 
   return (
     <div className="space-y-4">
-      <TabIntro>Acompanhe quem já votou. O ganhador fica disponível depois do encerramento da votação.</TabIntro>
+      <div className="flex justify-end">
+        <Button variant="ghost" size="sm" className="gap-2 rounded-xl text-muted-foreground" onClick={() => { dash.reload(); setRefreshKey((k) => k + 1); }} disabled={dash.loading}>
+          <RefreshCw size={13} className={cn(dash.loading && "animate-spin")} /> Atualizar
+        </Button>
+      </div>
 
       {/* Situação */}
       <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-vote-status">
@@ -111,6 +130,17 @@ export function VotingTab(props: TabProps) {
         </CardContent>
       </Card>
 
+      {/* Ranking ao vivo (parcial durante a votação) */}
+      {Array.isArray(d.tally) ? (
+        <RankingCard tally={d.tally} live={votingNow} official={finalized} winnerId={res.winner_submission_id} updatedAt={updatedAt} />
+      ) : d.results_locked ? (
+        <Notice tone="info">A contagem por receita aparece depois do encerramento da votação{endsAt ? ` (${fmtDate(endsAt)})` : ""}.</Notice>
+      ) : null}
+
+      {perms.campaigns_votes_view && (
+        <VotesList campaignId={campaignId} canInvalidate={!!perms.campaigns_votes_invalidate && !finalized} refreshKey={refreshKey} onChanged={refresh} />
+      )}
+
       {/* Resultado */}
       <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-vote-result">
         <CardContent className="space-y-4 p-5">
@@ -122,7 +152,7 @@ export function VotingTab(props: TabProps) {
                 <Lock size={16} /> Ver ganhador
               </Button>
               <p className="text-sm text-muted-foreground">
-                Disponível depois do encerramento oficial da votação{endsAt ? ` (${fmtDate(endsAt)})` : ""}. Até lá, ninguém vê a contagem por receita — nem a gestão —, para o resultado não influenciar os votos.
+                Disponível depois do encerramento oficial da votação{endsAt ? ` (${fmtDate(endsAt)})` : ""}. Até lá, o ranking acima é parcial e só a gestão vê — os colaboradores não.
               </p>
               {canSchedule && state === "open" && (
                 <div className="space-y-1 border-t pt-3">

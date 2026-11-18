@@ -215,7 +215,7 @@ export function ResultView({
           )}
 
           {goTab && perms.campaigns_participants && (
-            <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => goTab("participants")}>
+            <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => goTab("submissions", "people")}>
               <Users size={13} /> Ver quem votou em cada receita
             </Button>
           )}

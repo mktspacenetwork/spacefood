@@ -16,9 +16,8 @@ import { SUBMISSION_STATUS, fmtDate, fmtDateTime, plural } from "../../../../lib
 import type { AdminParticipant, AdminResults, AdminSubmissionRow, AdminVote, AdminVotesPayload, TallyRow } from "../../../../lib/campaigns/types";
 import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
-import { EmptyBox, ErrorBox, LoadingBox, Notice, ReasonDialog, SectionLabel, stageState, useBusy, useLoader } from "../shared";
+import { EmptyBox, ErrorBox, LoadingBox, Notice, ReasonDialog, useBusy, useLoader } from "../shared";
 import type { TabProps } from "./types";
-import { TabIntro } from "./ui";
 import { useTabTour } from "./useTabTour";
 
 /**
@@ -75,9 +74,9 @@ export function ParticipantsTab({ campaignId, campaign, results, stages, perms, 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [invalidateTarget, setInvalidateTarget] = useState<AdminVote | null>(null);
 
-  // Enquanto a votação não encerra, não há contagem por receita nem "quem votou em quem" (o servidor também não envia).
+  // A gestão acompanha votos ao vivo; só vale o bloqueio se o servidor ainda o aplicar (versão antiga da API).
   const votingStage = stages.find((s) => s.stage_key === "voting");
-  const locked = hasVoting && (stageState(votingStage) !== "closed" || !!res.data?.tally_locked || !!votes.data?.locked);
+  const locked = hasVoting && (!!res.data?.tally_locked || !!votes.data?.locked);
   const votingEnds = votingStage?.ends_at ?? null;
   const showVotesCols = canResults && !locked;
   const items = people.data?.items ?? [];
@@ -205,10 +204,7 @@ export function ParticipantsTab({ campaignId, campaign, results, stages, perms, 
 
   return (
     <div className="space-y-4">
-      <TabIntro>
-        Veja quem participa{hasVoting && !locked ? ", quantos votos cada pessoa recebeu e de quem vieram" : ""}. Clique em uma pessoa para abrir o detalhe.
-      </TabIntro>
-      <p className="-mt-2 text-xs text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         <b className="text-foreground">{sent}</b> de {total} enviaram receita ({pct(sent)}%)
         {showVoted && <> · <b className="text-foreground">{counts.voted}</b> já votaram ({pct(counts.voted)}%)</>}
       </p>
@@ -268,7 +264,50 @@ export function ParticipantsTab({ campaignId, campaign, results, stages, perms, 
             {seg === "sent" && counts.all > counts.sent ? ` · para ver quem ainda não enviou, escolha “Todos os elegíveis”` : ""}
           </p>
           <Card className="overflow-hidden rounded-3xl border hover:shadow-sm" data-tutorial="camp-part-table">
-            <div className="overflow-x-auto">
+            {/* Celular: uma linha por pessoa, sem tabela larga */}
+            <ul className="divide-y divide-border md:hidden">
+              {rows.map((r, idx) => (
+                <li key={r.p.user_id}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(r.p.user_id)}
+                    data-tutorial={idx === 0 ? "camp-part-row" : undefined}
+                    aria-label={`Ver detalhes de ${r.p.user_name}`}
+                    className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/40 focus:outline-none focus-visible:bg-accent/40"
+                  >
+                    <span className="min-w-0 flex-1 space-y-1.5">
+                      <span className="block truncate text-sm font-semibold text-foreground">{r.p.user_name}</span>
+                      <span className="block truncate text-[11px] text-muted-foreground">{[r.p.department, r.p.unit].filter(Boolean).join(" · ") || "—"}</span>
+                      {r.recipes.length > 0 ? (
+                        <span className="block space-y-1">
+                          {r.recipes.slice(0, 2).map((rc) => {
+                            const st = rc.status ? SUBMISSION_STATUS[rc.status] : null;
+                            return (
+                              <span key={rc.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                <span className="min-w-0 truncate text-sm">{rc.dish ?? "Receita enviada"}</span>
+                                {st && <Badge className={cn("border text-[10px]", st.className)}>{st.label}</Badge>}
+                              </span>
+                            );
+                          })}
+                          {r.recipes.length > 2 && <span className="block text-[11px] text-muted-foreground">+ {plural(r.recipes.length - 2, "receita", "receitas")}</span>}
+                        </span>
+                      ) : (
+                        <span className="block text-xs text-muted-foreground">Não enviou receita</span>
+                      )}
+                      {(showVotesCols && r.votes !== null) || showVoted ? (
+                        <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                          {showVotesCols && r.votes !== null && <span><b className="text-foreground">{r.votes}</b> {r.votes === 1 ? "voto" : "votos"}{r.rank ? ` · ${r.rank}º` : ""}</span>}
+                          {showVoted && <span>{r.p.voted ? "Já votou" : "Ainda não votou"}</span>}
+                        </span>
+                      ) : null}
+                    </span>
+                    <ChevronRight size={16} className="mt-1 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {/* Tablet e computador: tabela */}
+            <div className="hidden overflow-x-auto md:block">
               <Table className="min-w-[40rem]">
                 <TableHeader>
                   <TableRow>

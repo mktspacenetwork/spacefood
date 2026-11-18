@@ -15,6 +15,8 @@
 import { Hono } from "npm:hono@4";
 import { cors } from "npm:hono@4/cors";
 import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
+import { registerBookRoutes, bookPublishedIds } from "./book.ts";
+import { registerDrawRoutes } from "./draw.ts";
 
 const BUCKET = "make-c3078087-campaigns";
 const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
@@ -81,6 +83,16 @@ const ERR: Record<string, [number, string]> = {
   ANNOUNCE_IN_PAST: [422, "Escolha uma data e hora futuras para divulgar o resultado."],
   RESULTS_NOT_CONFIRMED: [409, "Confirme o vencedor antes de divulgar ou agendar a divulgação."],
   TOUR_LIMIT: [422, "Limite de histórico de tours atingido."],
+  DRAW_DISABLED: [409, "Esta campanha não tem sorteio."],
+  DRAW_ALREADY_RUN: [409, "O sorteio já foi realizado."],
+  DRAW_NO_ELIGIBLE: [409, "Não há ninguém com receita aprovada para sortear."],
+  DRAW_REGISTRATION_OPEN: [409, "O sorteio só pode ser feito depois do encerramento da participação."],
+  DRAW_PENDING_REVIEW: [409, "Ainda há receitas aguardando análise. Analise todas antes de sortear."],
+  DRAW_NOT_DRAWN: [409, "O sorteio ainda não foi realizado."],
+  DRAW_NOT_CONFIRMED: [409, "Confirme o sorteio antes de divulgar ou agendar a divulgação."],
+  DRAW_ALREADY_CONFIRMED: [409, "O sorteio já foi confirmado."],
+  DRAW_LOCKED: [409, "O sorteio já foi realizado: esta alteração não é mais permitida."],
+  DRAW_HIDDEN: [403, "O resultado do sorteio ainda não foi divulgado."],
 };
 // Mensagens específicas do INVALID_DATES (o banco manda o motivo em `detail`).
 const DATES_MSG: Record<string, string> = {
@@ -91,6 +103,11 @@ const DATES_MSG: Record<string, string> = {
   voting_before_registration: "A votação não pode começar antes do início da participação.",
   voting_ends_before_registration: "A votação não pode terminar antes do fim da participação.",
 };
+// Nomes dos campos da receita nas mensagens de erro (o banco devolve a chave técnica em `details`).
+const FIELD_LABELS: Record<string, string> = {
+  dish_name: "Título da receita", description: "História e memória afetiva", ingredients: "Ingredientes",
+  preparation: "Modo de preparo", name: "Nome da campanha", key: "Chave",
+};
 // deno-lint-ignore no-explicit-any
 function fromPg(error: any): AppError {
   const code = String(error?.message ?? "");
@@ -99,6 +116,13 @@ function fromPg(error: any): AppError {
     let details: unknown = error?.details;
     if (code === "PUBLISH_CHECK_FAILED") { try { details = JSON.parse(String(error.details)); } catch { /* ignore */ } }
     if (code === "INVALID_DATES" && typeof details === "string" && DATES_MSG[details]) return new AppError(info[0], code, DATES_MSG[details], details);
+    // Campos da receita: diz QUAIS estão inválidos (vazios ou longos demais), em português.
+    if (code === "INVALID_FIELDS" && typeof details === "string" && details && details.split(",").every((k) => FIELD_LABELS[k])) {
+      const labels = details.split(",").map((k) => FIELD_LABELS[k]).join(", ");
+      return new AppError(info[0], code, `Revise os campos: ${labels}.`, details);
+    }
+    if (code === "MEDIA_LIMIT" && details === "photos_max_3") return new AppError(info[0], code, "Cada receita aceita no máximo 3 fotos.", details);
+    if (code === "MEDIA_NOT_ALLOWED" && details === "photos") return new AppError(info[0], code, "Esta campanha não aceita fotos.", details);
     if (info) return new AppError(info[0], code, info[1], details);
     return new AppError(422, code, "Operação não permitida (" + code + ").", details);
   }
@@ -426,14 +450,17 @@ app.get("/campaigns", async (c) => {
     rows.push({ camp, st, stages: await getStages(camp.id) });
   }
   const urls = await signPaths(rows.map((r) => r.camp.cover_path).filter(Boolean));
+  const bookPub = await bookPublishedIds(sb, rows.map((r) => r.camp.id)); // Livro de Receitas publicado?
   return c.json(rows.map((r) => ({
     ...publicCampaign(r.camp, r.stages, urls[r.camp.cover_path]),
     description: String(r.camp.description).slice(0, 240),
     state: {
       stage: r.st.stage, released: r.st.released, my_submission_status: r.st.my_submission_status ?? null,
       my_submissions_count: r.st.my_submissions_count ?? 0, max_submissions: r.st.max_submissions ?? 1,
+      book_published: bookPub.has(r.camp.id),
       can_submit: r.st.can_submit === true, can_vote: r.st.can_vote === true,
       has_voted: r.st.has_voted === true, results_visible: r.st.results_visible === true,
+      draw_visible: r.st.draw_visible === true, i_won: r.st.i_won === true,
     },
     ended: campaignEnded(r.camp, r.stages),
   })));
@@ -442,7 +469,9 @@ app.get("/campaigns", async (c) => {
 app.get("/campaigns/:slug", async (c) => {
   const { camp, state } = await collab(c, c.req.param("slug"));
   const urls = await signPaths([camp.cover_path]);
-  return c.json({ campaign: publicCampaign(camp, await getStages(camp.id), urls[camp.cover_path]), state });
+  // `book_published`: aparece o item "Livro de Receitas" (o banco só libera a leitura se o livro estiver publicado)
+  const book_published = (await bookPublishedIds(sb, [camp.id])).has(camp.id);
+  return c.json({ campaign: publicCampaign(camp, await getStages(camp.id), urls[camp.cover_path]), state: { ...state, book_published } });
 });
 
 app.get("/campaigns/:slug/recipes", async (c) => {
@@ -854,11 +883,14 @@ app.get("/admin/campaigns/:id/dashboard", async (c) => {
     voting_pct: eligible ? Math.round((new Set(vRows.filter((v) => !v.invalidated_at).map((v) => v.voter_id)).size / eligible) * 100) : 0,
     results: results.data, stages, locked: !!camp.edit_locked_at,
   };
-  // Resultado oculto até a votação encerrar: sem ranking nem contagem por receita antes da data limite.
+  // Acompanhamento AO VIVO (só a gestão): ranking e contagem por receita já durante a votação. O colaborador nunca
+  // recebe isso (nenhuma rota de colaborador devolve contagem). `results_locked` fica só por compatibilidade com a
+  // tela antiga; o que vale é `voting_live` (votação aberta = ranking PARCIAL).
   const gate = await resultsGate(camp, stages);
   out.results_locked = gate.locked;
   out.voting_ends_at = gate.endsAt;
-  if (a.perms.campaigns_results && !gate.locked) out.tally = (await rpc<Row[]>("campaign_tally", { p_campaign: id })).map((t) => ({ submission_id: t.submission_id, dish_name: t.dish_name, author: t.user_name, votes: Number(t.votes) }));
+  out.voting_live = gate.hasVoting && gate.locked;
+  if (gate.hasVoting) out.tally = (await rpc<Row[]>("campaign_tally", { p_campaign: id })).map((t) => ({ submission_id: t.submission_id, dish_name: t.dish_name, author: t.user_name, votes: Number(t.votes) }));
   return c.json(out);
 });
 
@@ -919,9 +951,9 @@ app.get("/admin/campaigns/:id/participants", async (c) => {
 app.get("/admin/campaigns/:id/votes", async (c) => {
   await requireAdmin(c, "campaigns_votes_view");
   const id = c.req.param("id");
-  // Quem votou em qual receita é resultado parcial: só depois que a votação encerra.
+  // Acompanhamento ao vivo da gestão: quem votou em qual receita (exige `campaigns_votes_view`) já durante a votação.
+  // O colaborador nunca recebe isto. `locked` fica sempre false (compatível com a tela antiga).
   const gate = await resultsGate(await getCampaignById(id));
-  if (gate.locked) return c.json({ locked: true, items: [], voting_ends_at: gate.endsAt });
   const { data: votes } = await sb.from("campaign_votes").select("id,voter_name,submission_id,created_at,invalidated_at,invalidated_by_name,invalidation_reason").eq("campaign_id", id).order("created_at", { ascending: false });
   const { data: subs } = await sb.from("campaign_submissions").select("id,dish_name").eq("campaign_id", id);
   const names = Object.fromEntries((subs ?? []).map((s) => [s.id, s.dish_name]));
@@ -944,10 +976,11 @@ app.get("/admin/campaigns/:id/results", async (c) => {
   const id = c.req.param("id");
   const gate = await resultsGate(await getCampaignById(id));
   const { data: res } = await sb.from("campaign_results").select("*").eq("campaign_id", id).maybeSingle();
-  // Antes do encerramento oficial da votação não há resultado a mostrar (nem parcial).
-  if (gate.locked) return c.json({ results: res, tally: [], tally_locked: true, voting_ends_at: gate.endsAt });
+  // A contagem por receita vem SEMPRE (acompanhamento ao vivo da gestão). `tally_locked` agora só significa
+  // "ainda não é o resultado OFICIAL" (votação aberta): apurar/desempatar/confirmar/divulgar seguem só após o
+  // encerramento, no banco. `voting_live` = o ranking em `tally` é parcial.
   const tally = await rpc<Row[]>("campaign_tally", { p_campaign: id });
-  return c.json({ results: res, tally: tally.map((t) => ({ submission_id: t.submission_id, dish_name: t.dish_name, author: t.user_name, votes: Number(t.votes) })), tally_locked: false, voting_ends_at: gate.endsAt });
+  return c.json({ results: res, tally: tally.map((t) => ({ submission_id: t.submission_id, dish_name: t.dish_name, author: t.user_name, votes: Number(t.votes) })), tally_locked: gate.locked, voting_live: gate.hasVoting && gate.locked, voting_ends_at: gate.endsAt });
 });
 app.post("/admin/campaigns/:id/results/tiebreak", async (c) => {
   const a = await requireAdmin(c, "campaigns_tiebreak");
@@ -996,9 +1029,8 @@ app.get("/admin/campaigns/:id/audit", async (c) => {
   const a = await requireAdmin(c, "campaigns");
   const { data } = await sb.from("campaign_audit_log").select("id,occurred_at,actor_name,actor_role,action,entity_type,entity_id,before,after,reason")
     .eq("campaign_id", c.req.param("id")).order("occurred_at", { ascending: false }).limit(500);
-  // Linhas de voto (CAST_VOTE) revelam o resultado parcial: só aparecem depois do encerramento da votação.
-  const gate = await resultsGate(await getCampaignById(c.req.param("id")));
-  const seeVotes = a.perms.campaigns_votes_view === true && !gate.locked;
+  // Linhas de voto (CAST_VOTE) só para quem tem `campaigns_votes_view` (acompanhamento ao vivo da gestão).
+  const seeVotes = a.perms.campaigns_votes_view === true;
   return c.json((data ?? []).filter((r) => seeVotes || r.entity_type !== "vote"));
 });
 
@@ -1028,7 +1060,7 @@ app.get("/admin/campaigns/:id/export/:kind", async (c) => {
     rows = s.map((x) => [x.user_name, x.user_department, x.dish_name, x.description, x.ingredients, x.preparation, stOf[x.status], x.rejection_reason ?? "", x.submitted_at, x.reviewed_by_name ?? "", x.reviewed_at ?? ""]);
   } else if (kind === "voting" || kind === "ranking") {
     if (!a.perms.campaigns_results) throw new AppError(403, "FORBIDDEN", "Você não tem permissão para esta ação.");
-    assertResultsOpen();
+    // ranking/votação por receita: liberados a qualquer momento para a gestão (acompanhamento ao vivo; parcial durante a votação)
     const t = await rpc<Row[]>("campaign_tally", { p_campaign: id });
     columns = ["Posição", "Prato", "Autor", "Votos válidos"];
     rows = t.map((x, i) => [i + 1, x.dish_name, x.user_name, Number(x.votes)]);
@@ -1040,17 +1072,22 @@ app.get("/admin/campaigns/:id/export/:kind", async (c) => {
     rows = [[camp.name, r?.status ?? "", r?.total_valid_votes ?? 0, r?.winner_submission_id ?? "", r?.winner_votes ?? "", r?.confirmed_by_name ?? "", r?.confirmed_at ?? "", r?.announced_at ?? ""]];
   } else if (kind === "history") {
     const { data } = await sb.from("campaign_audit_log").select("occurred_at,actor_name,action,entity_type,reason").eq("campaign_id", id).order("occurred_at");
-    const seeVotes = a.perms.campaigns_votes_view === true && !gate.locked;
+    const seeVotes = a.perms.campaigns_votes_view === true;
     columns = ["Quando", "Quem", "Ação", "Tipo", "Justificativa"];
     rows = (data ?? []).filter((r) => seeVotes || r.entity_type !== "vote").map((r) => [r.occurred_at, r.actor_name, r.action, r.entity_type, r.reason ?? ""]);
   } else if (kind === "votes") {
     if (!a.perms.campaigns_export_votes || !a.perms.campaigns_votes_view) throw new AppError(403, "FORBIDDEN", "Você não tem permissão para exportar votos individuais.");
-    assertResultsOpen();
     const { data: votes } = await sb.from("campaign_votes").select("voter_name,submission_id,created_at,invalidated_at,invalidation_reason").eq("campaign_id", id).order("created_at");
     const { data: subs } = await sb.from("campaign_submissions").select("id,dish_name").eq("campaign_id", id);
     const names = Object.fromEntries((subs ?? []).map((s) => [s.id, s.dish_name]));
     columns = ["Votante", "Receita votada", "Votou em", "Invalidado em", "Justificativa da invalidação"];
     rows = (votes ?? []).map((v) => [v.voter_name, names[v.submission_id], v.created_at, v.invalidated_at ?? "", v.invalidation_reason ?? ""]);
+  } else if (kind === "draw") {
+    if (!a.perms.campaigns_results) throw new AppError(403, "FORBIDDEN", "Você não tem permissão para esta ação.");
+    const { data: d } = await sb.from("campaign_draws").select("*").eq("campaign_id", id).maybeSingle();
+    const dst: Record<string, string> = { drawn: "Sorteado (falta confirmar)", confirmed: "Confirmado", announced: "Divulgado" };
+    columns = ["Posição", "Nome", "Departamento", "Unidade", "Receita", "Situação do sorteio", "Sorteado em", "Confirmado por", "Confirmado em", "Divulgado em"];
+    rows = ((d?.winners ?? []) as Row[]).map((w) => [w.position, w.name, w.department ?? "", w.unit ?? "", w.dish_name, dst[d?.status] ?? "", d?.drawn_at ?? "", d?.confirmed_by_name ?? "", d?.confirmed_at ?? "", d?.announced_at ?? ""]);
   } else throw new AppError(400, "INVALID_FIELDS", "Relatório inválido.");
   await rpc("campaign_audit", { p_campaign: id, p_actor: a.actor, p_action: "EXPORT_REPORT", p_entity_type: "report", p_entity_id: kind, p_before: null, p_after: { rows: rows.length }, p_reason: null });
   return c.json({ kind, columns, rows });
@@ -1087,5 +1124,11 @@ app.delete("/admin/access/:userId", async (c) => {
   await rpc("campaign_admin_remove", { p_actor: a.actor, p_user: c.req.param("userId") });
   return c.json({ ok: true });
 });
+
+// Livro de Receitas da campanha (rotas em book.ts; as regras vivem nas funções campaign_book_* do banco)
+registerBookRoutes(app, { sb, BUCKET, AppError, rpc, requireUser, requireAdmin, body, signPaths, getCampaignBySlug, getCampaignById });
+
+// Sorteio (rotas em draw.ts; regras no banco)
+registerDrawRoutes(app, { sb, AppError, rpc, requireAdmin, body, collab, mediaFor, isoOrNull, strOrUndef });
 
 Deno.serve(app.fetch);

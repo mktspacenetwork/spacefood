@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import {
   Megaphone, CalendarDays, MousePointerClick, Camera, Send, Activity, Pencil, Vote, ShieldCheck, ListOrdered,
-  Trophy, Images, ClipboardList, Info, UtensilsCrossed, ListChecks,
+  Trophy, Images, ClipboardList, Info, UtensilsCrossed, ListChecks, BookOpen, Sparkles,
 } from "lucide-react";
 import type { TourStep } from "../../components/campaigns/CampaignTour";
 
@@ -39,7 +39,7 @@ export const LIST_TOUR: TourStep[] = [
 /**
  * Início da campanha. Os textos se adaptam: campanha sem votação nunca fala de voto, ranking ou resultado.
  */
-export function homeTour(hasVoting: boolean): TourStep[] {
+export function homeTour(hasVoting: boolean, hasBook = false): TourStep[] {
   return [
     {
       selector: "camp-cta",
@@ -57,6 +57,14 @@ export function homeTour(hasVoting: boolean): TourStep[] {
         ? "Aqui estão as datas para participar e para votar."
         : "Aqui estão as datas para participar.",
     },
+    ...(hasBook
+      ? [{
+          selector: "camp-book",
+          icon: icon(BookOpen),
+          title: "Livro de Receitas",
+          description: "As receitas da campanha reunidas em um livro. Dá para ler aqui e baixar em PDF.",
+        } satisfies TourStep]
+      : []),
     {
       selector: "camp-details",
       icon: icon(Info),
@@ -87,7 +95,7 @@ export const RECIPE_DETAIL_TOUR: TourStep[] = [
     selector: "camp-recipe-media",
     icon: icon(Images),
     title: "A receita",
-    description: "A foto e o nome de quem enviou.",
+    description: "A foto, o nome de quem enviou, os ingredientes e o modo de preparo.",
   },
   {
     selector: "camp-recipe-vote",
@@ -102,14 +110,14 @@ export const SUBMIT_TOUR: TourStep[] = [
   {
     selector: "camp-fields",
     icon: icon(ListChecks),
-    title: "Título e história",
-    description: "Dê um título à receita e, se quiser, conte a história e a memória afetiva por trás dela.",
+    title: "Sua receita",
+    description: "Dê um título e escreva os ingredientes e o modo de preparo. A história e a memória afetiva são opcionais.",
   },
   {
     selector: "camp-photo",
     icon: icon(Camera),
-    title: "Foto da receita",
-    description: "Tire uma foto ou escolha da galeria. É uma foto da receita pronta.",
+    title: "Fotos da receita",
+    description: "Tire uma foto ou escolha da galeria. Dá para enviar de 1 a 3 fotos da receita pronta.",
   },
   {
     selector: "camp-send",
@@ -125,6 +133,11 @@ export const MYENTRY_TOUR: TourStep[] = [
     icon: icon(ClipboardList),
     title: "Minhas receitas",
     description: "Aqui você vê as receitas que enviou: em análise, aprovadas ou que precisam de ajuste.",
+  },
+  {
+    icon: icon(UtensilsCrossed),
+    title: "Ver a receita completa",
+    description: "Em cada receita, toque em “Ver receita completa” para conferir ingredientes e modo de preparo.",
   },
   {
     selector: "camp-status",
@@ -154,10 +167,15 @@ export const VOTE_TOUR: TourStep[] = [
     description: "Escolha a sua receita favorita. É 1 voto por pessoa e não vale na sua própria receita.",
   },
   {
-    selector: "camp-vote-button",
+    selector: "camp-vote-card",
+    icon: icon(Vote),
+    title: "Escolha uma receita",
+    description: "Toque na receita que você quer escolher. Ela fica destacada.",
+  },
+  {
     icon: icon(Vote),
     title: "Votar",
-    description: "Toque em Votar e confirme. Depois de confirmado, não dá para mudar.",
+    description: "Depois de escolher, toque em “Votar em…” e confirme. Depois de confirmado, não dá para mudar.",
   },
 ];
 
@@ -166,13 +184,13 @@ export const RANKING_TOUR: TourStep[] = [
   {
     icon: icon(ListOrdered),
     title: "Ranking",
-    description: "Mostra a classificação das receitas por votos. Antes de ser liberado, você vê um aviso.",
+    description: "Mostra a classificação final das receitas por votos, depois que o resultado for divulgado.",
   },
   {
     selector: "camp-ranking",
     icon: icon(ListOrdered),
-    title: "Parcial ou oficial",
-    description: "“Parcial” pode mudar. “Resultado oficial” é o final.",
+    title: "Resultado oficial",
+    description: "Esta é a classificação final da votação.",
   },
 ];
 
@@ -181,12 +199,18 @@ export const RESULTS_TOUR: TourStep[] = [
   {
     icon: icon(Trophy),
     title: "Resultado",
-    description: "Aqui aparece a receita vencedora, depois que o resultado for divulgado.",
+    description: "Aqui aparece o resultado da campanha (vencedora e/ou sorteio), depois que for divulgado.",
   },
   {
     selector: "camp-winner",
     icon: icon(Trophy),
     title: "Receita vencedora",
     description: "Parabéns a todas as pessoas que participaram!",
+  },
+  {
+    selector: "camp-draw",
+    icon: icon(Sparkles),
+    title: "Sorteio",
+    description: "Aqui estão as pessoas sorteadas, divulgadas pela equipe.",
   },
 ];

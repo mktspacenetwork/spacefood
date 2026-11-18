@@ -145,8 +145,8 @@ export function PublishDialog({
             </label>
 
             {moduleEnabled === false && (
-              <Notice tone="info" title="O módulo de campanhas está desligado">
-                Ao publicar, ele é ligado automaticamente. O menu Campanhas aparece só para os colaboradores elegíveis.
+              <Notice tone="info" title="As campanhas estão desligadas para todos">
+                Ao publicar, elas são ligadas automaticamente. O menu Campanhas aparece só para os colaboradores elegíveis.
               </Notice>
             )}
           </div>

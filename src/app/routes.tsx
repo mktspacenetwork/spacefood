@@ -51,6 +51,7 @@ const CampaignMyEntry = lazy(() => import("./pages/campaigns/CampaignMyEntry").t
 const CampaignVote = lazy(() => import("./pages/campaigns/CampaignVote").then(m => ({ default: m.CampaignVote })));
 const CampaignRanking = lazy(() => import("./pages/campaigns/CampaignRanking").then(m => ({ default: m.CampaignRanking })));
 const CampaignResults = lazy(() => import("./pages/campaigns/CampaignResults").then(m => ({ default: m.CampaignResults })));
+const CampaignBook = lazy(() => import("./pages/campaigns/CampaignBook").then(m => ({ default: m.CampaignBook })));
 
 // Shown briefly while an admin page chunk downloads (fast on repeat visits — cached by the browser).
 function AdminPageFallback() {
@@ -140,6 +141,7 @@ export const router = createBrowserRouter([
               { path: "votacao", element: <LazyAdminPage><CampaignVote /></LazyAdminPage> },
               { path: "ranking", element: <LazyAdminPage><CampaignRanking /></LazyAdminPage> },
               { path: "resultado", element: <LazyAdminPage><CampaignResults /></LazyAdminPage> },
+              { path: "livro", element: <LazyAdminPage><CampaignBook /></LazyAdminPage> },
             ],
           },
         ],

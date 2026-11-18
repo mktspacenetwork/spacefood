@@ -15,7 +15,7 @@ import { cn } from "../../../lib/utils";
 import { useAuth } from "../../../context/auth-context";
 import { CampaignApiError, campaignsApi, errMsg, uploadToSignedUrl } from "../../../lib/campaigns/api";
 import { BANNER_MIN_SOURCE_WIDTH, BANNER_OBJECT_POSITION, prepareCover } from "../../../lib/campaigns/banner";
-import { MAX_SUBMISSIONS_PER_USER } from "../../../lib/campaigns/types";
+import { MAX_PHOTOS_PER_RECIPE, MAX_SUBMISSIONS_PER_USER } from "../../../lib/campaigns/types";
 import type { AdminCampaign, AdminCampaignDetail, Audience, Features, MediaLimits, Visibility } from "../../../lib/campaigns/types";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_WIZARD } from "../../../lib/campaigns/tours-admin";
@@ -30,14 +30,18 @@ import type { PeriodValues } from "./PeriodFields";
 // O formulário só pergunta o essencial. O resto vai com valores fixos (o colaborador envia 1 foto, sem vídeo;
 // toda receita passa por aprovação; ranking/resultado/divulgação só existem quando há votação).
 
-const SIMPLE_MEDIA_LIMITS: MediaLimits = { max_photos: 0, max_photo_mb: 5, allow_video: false, max_video_mb: 1, require_main_photo: true };
+/** Fotos: de 1 a 3 por receita (a 1ª é a principal, as outras são "extras"). Sem fotos, nada é exigido nem pedido. */
+const mediaLimits = (hasPhotos: boolean): MediaLimits =>
+  ({ max_photos: hasPhotos ? MAX_PHOTOS_PER_RECIPE - 1 : 0, max_photo_mb: 5, allow_video: false, max_video_mb: 1, require_main_photo: hasPhotos });
 const SIMPLE_VISIBILITY: Visibility = { ranking_mode: "hidden_until_confirmed", gallery_visibility: "on_approval", show_podium: false, allow_preview: false };
 
 /** `tour` entra só com `enabled`: o servidor mescla e preserva a versão da tour. */
-const simpleFeatures = (hasVoting: boolean, multiple: boolean) => ({
-  submission: true, photos: true, video: false, approval: true, gallery: true,
-  voting: hasVoting, ranking: hasVoting, results: hasVoting, announcement: hasVoting,
-  multiple_submissions: multiple,
+type Options = { hasVoting: boolean; multiple: boolean; hasPhotos: boolean; hasDraw: boolean; drawWinners: number };
+const simpleFeatures = (o: Options) => ({
+  submission: true, photos: o.hasPhotos, video: false, approval: true, gallery: true,
+  voting: o.hasVoting, ranking: o.hasVoting, results: o.hasVoting, announcement: o.hasVoting,
+  multiple_submissions: o.multiple,
+  draw: o.hasDraw, draw_winners: o.hasDraw ? o.drawWinners : 1,
   tour: { enabled: true },
 }) as unknown as Features;
 
@@ -50,6 +54,11 @@ type Form = {
   hasVoting: boolean;
   /** Permite mais de uma receita por colaborador (até 10). */
   multiple: boolean;
+  /** Receita com fotos (de 1 a 3). Desligado: sem campo de foto. */
+  hasPhotos: boolean;
+  /** Sorteio entre quem tem receita aprovada, com `drawWinners` ganhadores (1 a 10). */
+  hasDraw: boolean;
+  drawWinners: number;
   period: PeriodValues;
   audienceMode: "all" | "users";
   users: string[];
@@ -72,7 +81,8 @@ type SiteUser = { id: string; name: string; department: string; unit: string };
 
 const initialForm = (): Form => ({
   name: "", description: "", instructions: "", coverPath: null, coverUrl: null,
-  hasVoting: false, multiple: false, period: EMPTY_PERIOD, audienceMode: "all", users: [],
+  hasVoting: false, multiple: false, hasPhotos: true, hasDraw: false, drawWinners: 1,
+  period: EMPTY_PERIOD, audienceMode: "all", users: [],
 });
 
 // ─────────────────────────────── Componentes ──────────────────────────────
@@ -88,15 +98,28 @@ function Field({ label, hint, children, tutorial }: { label: string; hint?: stri
 }
 
 /**
- * Prévia da capa como o carrossel da Home a mostra: mesma caixa responsiva (celular 2:1, tablet 3:1, computador 3,5:1),
- * mesmo `object-cover` e mesma posição dos banners comuns. É UMA imagem para todos os aparelhos; abaixo, as duas
- * proporções extremas lado a lado para conferir o enquadramento.
+ * Prévia da capa como o carrossel da Home a mostra (mesmo `object-cover` e mesma posição dos banners comuns).
+ * É UMA imagem para todos os aparelhos: o seletor só muda o tamanho da caixa para conferir o enquadramento.
  */
 function BannerPreview({ url, title }: { url: string | null; title: string }) {
-  const box = (cls: string, label?: string) => (
-    <div className="space-y-1.5">
-      {label && <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</p>}
-      <div className={cn("relative w-full overflow-hidden rounded-3xl bg-[#FF5A1F] shadow-sm", cls)}>
+  const [size, setSize] = useState<"mobile" | "desktop">(() => (typeof window !== "undefined" && window.innerWidth < 768 ? "mobile" : "desktop"));
+  return (
+    <div className="space-y-2" aria-label="Como a capa aparece no banner da Home">
+      <div className="inline-flex h-8 items-center rounded-lg border bg-card p-0.5" role="group" aria-label="Tamanho da prévia">
+        {([["mobile", "Celular"], ["desktop", "Computador"]] as const).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            aria-pressed={size === k}
+            onClick={() => setSize(k)}
+            className={cn("h-7 rounded-md px-2.5 text-[11px] font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              size === k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent")}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className={cn("relative w-full overflow-hidden rounded-3xl bg-[#FF5A1F] shadow-sm", size === "mobile" ? "aspect-[2/1] max-w-sm" : "aspect-[3.5/1]")}>
         {url ? (
           <img src={url} alt="" className="absolute inset-0 h-full w-full select-none object-cover" style={{ objectPosition: BANNER_OBJECT_POSITION }} draggable={false} />
         ) : (
@@ -105,13 +128,32 @@ function BannerPreview({ url, title }: { url: string | null; title: string }) {
       </div>
     </div>
   );
+}
+
+/** Uma funcionalidade da campanha: título, explicação curta e o interruptor Sim/Não. */
+function Option({
+  title, hint, note, checked, onChange, disabled, tutorial, children,
+}: {
+  title: string;
+  hint: string;
+  note?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  tutorial?: string;
+  children?: React.ReactNode;
+}) {
   return (
-    <div className="space-y-3" aria-label="Como a capa aparece no banner da Home">
-      {box("aspect-[2/1] md:aspect-[3/1] lg:aspect-[3.5/1]")}
-      <div className="hidden gap-4 sm:grid sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] sm:items-end">
-        {box("aspect-[2/1]", "No celular")}
-        {box("aspect-[3.5/1]", "No computador")}
-      </div>
+    <div className="space-y-2.5 py-3.5 first:pt-0 last:pb-0" data-tutorial={tutorial}>
+      <label className={cn("flex items-center justify-between gap-4", disabled ? "opacity-70" : "cursor-pointer")}>
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold">{title}</span>
+          <span className="mt-0.5 block text-[12px] text-muted-foreground">{hint}</span>
+          {note && <span className="mt-1 block text-[11px] text-muted-foreground">{note}</span>}
+        </span>
+        <Switch checked={checked} onCheckedChange={onChange} disabled={disabled} aria-label={title} />
+      </label>
+      {children}
     </div>
   );
 }
@@ -172,6 +214,9 @@ export function AdminCampaignWizard() {
       coverPath: c.cover_path, coverUrl: c.cover_url,
       hasVoting: !!c.features?.voting,
       multiple: !!c.features?.multiple_submissions,
+      hasPhotos: c.features?.photos !== false,
+      hasDraw: !!c.features?.draw,
+      drawWinners: Math.min(10, Math.max(1, Number(c.features?.draw_winners ?? 1) || 1)),
       period, audienceMode: mode, users,
     });
     setSnap({
@@ -243,6 +288,7 @@ export function AdminCampaignWizard() {
     if (name.length < 3 || name.length > 120) return "Informe um nome com 3 a 120 caracteres.";
     const periodProblem = validatePeriod(form.period, form.hasVoting);
     if (periodProblem) return periodProblem;
+    if (form.hasDraw && (!Number.isInteger(form.drawWinners) || form.drawWinners < 1 || form.drawWinners > 10)) return "O sorteio precisa de 1 a 10 ganhadores.";
     if (form.audienceMode === "users" && form.users.length === 0) return "Escolha pelo menos uma pessoa ou volte para \"Todos\".";
     return null;
   };
@@ -266,7 +312,7 @@ export function AdminCampaignWizard() {
           const created = await campaignsApi.post<{ id: string; slug: string }>("/admin/campaigns", {
             name: form.name.trim(), description: form.description.trim(), instructions: form.instructions.trim(),
             cover_path: form.coverPath,
-            features: simpleFeatures(form.hasVoting, form.multiple), media_limits: SIMPLE_MEDIA_LIMITS, visibility: SIMPLE_VISIBILITY,
+            features: simpleFeatures(form), media_limits: mediaLimits(form.hasPhotos), visibility: SIMPLE_VISIBILITY,
             audience: { mode: form.audienceMode },
           });
           cid = created.id;
@@ -278,8 +324,8 @@ export function AdminCampaignWizard() {
           };
           // Rascunho: normaliza para o modelo simples (inclui o rascunho antigo). Publicada: o servidor trava funcionalidades.
           if (!snap || snap.status === "draft" || snap.status === "in_review") {
-            body.features = simpleFeatures(form.hasVoting, form.multiple);
-            body.media_limits = SIMPLE_MEDIA_LIMITS;
+            body.features = simpleFeatures(form);
+            body.media_limits = mediaLimits(form.hasPhotos);
             body.visibility = SIMPLE_VISIBILITY;
           } else if (snap.multiple !== form.multiple) {
             // Publicada: só esta chave pode mudar (as receitas já enviadas continuam como estão).
@@ -422,7 +468,7 @@ export function AdminCampaignWizard() {
         <CardContent className="space-y-4 p-5">
           <div>
             <SectionLabel>Imagem do banner</SectionLabel>
-            <p className="mt-1 text-[12px] text-muted-foreground">É a capa da campanha e também o banner da Home — não precisa cadastrar outra.</p>
+            <p className="mt-1 text-[12px] text-muted-foreground">É a capa da campanha e o banner da Home — uma imagem só.</p>
           </div>
           <BannerPreview url={form.coverUrl} title={form.name} />
           <input ref={fileRef} id="campaign-cover-upload" type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={coverBusy || closed} onChange={(e) => pickCover(e.target.files?.[0])} />
@@ -445,31 +491,75 @@ export function AdminCampaignWizard() {
             {coverBusy && <Progress value={coverProgress * 100} className="w-32" />}
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Uma imagem só vale para celular, tablet e computador (JPG, PNG ou WebP), como nos Banners; as bordas podem ser cortadas conforme a tela. Sem imagem, o banner usa o fundo laranja com o nome da campanha.
+            JPG, PNG ou WebP, como nos Banners; as bordas podem ser cortadas conforme a tela. Sem imagem, o banner usa o fundo laranja com o nome.
           </p>
         </CardContent>
       </Card>
 
-      {/* Votação */}
-      <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-wiz-voting">
-        <CardContent className="p-5">
-          <label className={cn("flex items-center justify-between gap-4", published || closed ? "opacity-70" : "cursor-pointer")}>
-            <span className="min-w-0">
-              <span className="block text-sm font-semibold">Esta campanha tem votação?</span>
-              <span className="mt-0.5 block text-[12px] text-muted-foreground">
-                {form.hasVoting
-                  ? "Os colaboradores votam nas receitas aprovadas. Cada pessoa tem um voto."
-                  : "Sem votação: a campanha só recebe participações."}
-              </span>
-              {published && <span className="mt-1 block text-[11px] text-muted-foreground">Não dá para mudar depois de publicada.</span>}
-            </span>
-            <Switch
-              checked={form.hasVoting}
-              onCheckedChange={(v) => set("hasVoting", v)}
-              disabled={published || closed}
-              aria-label="Esta campanha tem votação"
-            />
-          </label>
+      {/* Funcionalidades */}
+      <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-wiz-features">
+        <CardContent className="divide-y divide-border p-5">
+          <Option
+            tutorial="camp-wiz-voting"
+            title="Esta campanha terá votação?"
+            hint={form.hasVoting ? "Cada pessoa tem um voto. O ranking é só da gestão." : "Sem votação: nada sobre votos aparece."}
+            note={published ? "Não dá para mudar depois de publicada." : undefined}
+            checked={form.hasVoting}
+            onChange={(v) => set("hasVoting", v)}
+            disabled={published || closed}
+          />
+          <Option
+            tutorial="camp-wiz-draw"
+            title="Esta campanha terá sorteio?"
+            hint={form.hasDraw ? "Sorteia entre quem tem receita aprovada, uma chance por pessoa." : "Sem sorteio."}
+            note={published ? "Não dá para mudar depois de publicada." : undefined}
+            checked={form.hasDraw}
+            onChange={(v) => set("hasDraw", v)}
+            disabled={published || closed}
+          >
+            {form.hasDraw && (
+              <div className="flex items-center gap-3">
+                <Label htmlFor="draw-winners" className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Ganhadores</Label>
+                <Input
+                  id="draw-winners"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={10}
+                  value={Number.isNaN(form.drawWinners) ? "" : form.drawWinners}
+                  onChange={(e) => set("drawWinners", e.target.value === "" ? Number.NaN : Math.trunc(Number(e.target.value)))}
+                  className="h-10 w-20 rounded-xl text-center"
+                  disabled={published || closed}
+                  aria-label="Quantidade de ganhadores do sorteio"
+                />
+                <span className="text-[11px] text-muted-foreground">de 1 a 10</span>
+              </div>
+            )}
+          </Option>
+          <Option
+            tutorial="camp-wiz-photos"
+            title="Permitir envio de fotos?"
+            hint={form.hasPhotos ? `A receita leva de 1 a ${MAX_PHOTOS_PER_RECIPE} fotos.` : "Sem fotos: o envio não tem campo de foto."}
+            note={published ? "Não dá para mudar depois de publicada." : undefined}
+            checked={form.hasPhotos}
+            onChange={(v) => set("hasPhotos", v)}
+            disabled={published || closed}
+          />
+          <Option
+            tutorial="camp-wiz-multiple"
+            title="Permitir mais de uma receita por colaborador?"
+            hint={form.multiple ? `Cada pessoa pode enviar até ${MAX_SUBMISSIONS_PER_USER} receitas.` : "Cada pessoa envia uma receita só."}
+            note={published ? "Vale também com a campanha publicada. As receitas já enviadas continuam como estão." : undefined}
+            checked={form.multiple}
+            onChange={(v) => set("multiple", v)}
+            disabled={closed}
+          >
+            {snap?.hasMultipleSent && !form.multiple && (
+              <p className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                Algumas pessoas já enviaram mais de uma receita. Todas continuam salvas; só não dá para enviar outra.
+              </p>
+            )}
+          </Option>
         </CardContent>
       </Card>
 
@@ -551,32 +641,6 @@ export function AdminCampaignWizard() {
             <p className="text-[12px] text-muted-foreground"><b className="text-foreground">{eligibleCount}</b> {eligibleCount === 1 ? "colaborador elegível" : "colaboradores elegíveis"} hoje.</p>
           )}
 
-          {/* Mais de uma receita por pessoa */}
-          <div className="space-y-1.5 border-t pt-3" data-tutorial="camp-wiz-multiple">
-            <label className={cn("flex items-start gap-3", closed ? "opacity-70" : "cursor-pointer")}>
-              <Checkbox
-                checked={form.multiple}
-                onCheckedChange={(v) => set("multiple", v === true)}
-                disabled={closed}
-                aria-label="Permitir mais de uma receita por colaborador"
-                className="mt-0.5"
-              />
-              <span className="min-w-0">
-                <span className="block text-sm font-semibold">Permitir mais de uma receita por colaborador?</span>
-                <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                  {form.multiple ? `Cada pessoa pode enviar até ${MAX_SUBMISSIONS_PER_USER} receitas.` : "Desmarcado: cada pessoa envia uma receita só."}
-                </span>
-              </span>
-            </label>
-            {published && (
-              <p className="pl-7 text-[11px] text-muted-foreground">Vale também com a campanha publicada. As receitas já enviadas continuam como estão.</p>
-            )}
-            {snap?.hasMultipleSent && !form.multiple && (
-              <p className="pl-7 text-[11px] font-medium text-amber-700 dark:text-amber-300">
-                Algumas pessoas já enviaram mais de uma receita. Todas continuam salvas; só não dá para enviar outra.
-              </p>
-            )}
-          </div>
         </CardContent>
       </Card>
 

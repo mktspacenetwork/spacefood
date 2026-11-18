@@ -97,12 +97,10 @@ const BannerItem = ({ banner }: { banner: Banner }) => {
 };
 
 /**
- * `campaignsOnly`: mostra APENAS os banners de campanhas publicadas (sem os banners comuns nem o padrão).
- * Usado na Home quando já existe o banner do pedido do dia — que antes escondia o carrossel inteiro —,
- * para uma campanha com prazo não ficar invisível justamente para quem já pediu o almoço.
- * Sem campanhas, não renderiza nada.
+ * Carrossel da Home: banners de campanhas publicadas (na frente) + banners comuns.
+ * Com o pedido do dia já feito a Home nem renderiza o carrossel (regra original do site; ver Menu.tsx).
  */
-export function BannerCarousel({ userUnit, campaignsOnly = false }: { userUnit?: string; campaignsOnly?: boolean }) {
+export function BannerCarousel({ userUnit }: { userUnit?: string }) {
   const { user } = useAuth();
   const [banners, setBanners] = useState<Banner[]>([]);
   const [campaignBanners, setCampaignBanners] = useState<Banner[]>([]);
@@ -116,7 +114,7 @@ export function BannerCarousel({ userUnit, campaignsOnly = false }: { userUnit?:
     const campaigns = fetchHomeCampaignBanners(user?.id ?? "anon")
       .then((list) => { if (!stale) setCampaignBanners(list as Banner[]); })
       .catch(() => { if (!stale) setCampaignBanners([]); });
-    const regular = (campaignsOnly ? Promise.resolve() : api.get(`/banners${unitParam}`))
+    const regular = api.get(`/banners${unitParam}`)
       .then((data) => {
         if (stale) return;
         if (Array.isArray(data)) {
@@ -134,7 +132,7 @@ export function BannerCarousel({ userUnit, campaignsOnly = false }: { userUnit?:
       });
     Promise.all([regular, campaigns]).finally(() => { if (!stale) setLoading(false); });
     return () => { stale = true; };
-  }, [userUnit, user?.id, campaignsOnly]);
+  }, [userUnit, user?.id]);
 
   const defaultBanner: Banner = {
     id: "default",
@@ -145,11 +143,8 @@ export function BannerCarousel({ userUnit, campaignsOnly = false }: { userUnit?:
   };
 
   // Campanhas publicadas entram na frente; o banner padrão só aparece se não houver nenhum slide.
-  const allBanners = campaignsOnly ? campaignBanners : [...campaignBanners, ...banners];
+  const allBanners = [...campaignBanners, ...banners];
   const displayBanners = allBanners.length > 0 ? allBanners : [defaultBanner];
-
-  // Modo "só campanhas": nada a mostrar enquanto carrega ou quando não há campanha visível.
-  if (campaignsOnly && (loading || campaignBanners.length === 0)) return null;
 
   if (loading) {
     return (

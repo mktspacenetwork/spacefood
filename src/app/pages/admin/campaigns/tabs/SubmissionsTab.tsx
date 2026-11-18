@@ -14,20 +14,20 @@ import {
 import { cn } from "../../../../lib/utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
 import { AUDIT_ACTION, SUBMISSION_STATUS, fmtDateTime, fromInputValue } from "../../../../lib/campaigns/format";
+import { MAX_RECIPE_TEXT, MAX_STORY_TEXT } from "../../../../lib/campaigns/types";
 import type { AdminSubmissionDetail, AdminSubmissionRow } from "../../../../lib/campaigns/types";
 import { EmptyBox, ErrorBox, LoadingBox, Notice, ReasonDialog, SectionLabel, useBusy, useLoader } from "../shared";
 import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
 import type { TabProps } from "./types";
-import { TabIntro } from "./ui";
 import { useTabTour } from "./useTabTour";
 
 const FIELD_LIMITS = {
-  dish_name: [3, 120], description: [0, 600], ingredients: [0, 3000], preparation: [0, 6000],
+  dish_name: [3, 120], description: [0, MAX_STORY_TEXT], ingredients: [0, MAX_RECIPE_TEXT], preparation: [0, MAX_RECIPE_TEXT],
 } as const;
 type FieldKey = keyof typeof FIELD_LIMITS;
 const FIELD_LABEL: Record<FieldKey, string> = {
-  dish_name: "Nome do prato", description: "Descrição", ingredients: "Ingredientes", preparation: "Modo de preparo",
+  dish_name: "Nome do prato", description: "História e memória afetiva", ingredients: "Ingredientes", preparation: "Modo de preparo",
 };
 
 function StatusBadge({ status }: { status: AdminSubmissionRow["status"] }) {
@@ -89,8 +89,6 @@ export function SubmissionsTab({ campaignId, perms, onChanged, tourUserId, tourS
 
   return (
     <div className="space-y-4">
-      <TabIntro>Analise as receitas enviadas: aprove ou reprove (reprovar exige uma justificativa de pelo menos 10 caracteres).</TabIntro>
-
       <div className="space-y-3" data-tutorial="camp-sub-filters">
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[14rem] flex-1">
@@ -134,7 +132,34 @@ export function SubmissionsTab({ campaignId, perms, onChanged, tourUserId, tourS
         </Card>
       ) : (
         <Card className="rounded-3xl border overflow-hidden" data-tutorial="camp-sub-list">
-          <div className="overflow-x-auto">
+          {/* Celular: lista de linhas (nada de tabela larga) */}
+          <ul className="divide-y divide-border md:hidden">
+            {rows.map((r, idx) => (
+              <li key={r.id}>
+                <button
+                  type="button"
+                  onClick={() => setOpenId(r.id)}
+                  data-tutorial={idx === 0 ? "camp-sub-open" : undefined}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/40 focus:outline-none focus-visible:bg-accent/40"
+                  aria-label={`${isPending(r.status) ? "Analisar" : "Abrir"} a receita ${r.dish_name} de ${r.user_name}`}
+                >
+                  <span className="min-w-0 flex-1 space-y-1">
+                    <span className="block truncate text-sm font-semibold">{r.dish_name}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{r.user_name}{r.user_department ? ` · ${r.user_department}` : ""}</span>
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <StatusBadge status={r.status} />
+                      <span className="text-[11px] text-muted-foreground">{fmtDateTime(r.submitted_at)}</span>
+                    </span>
+                  </span>
+                  <span className={cn("shrink-0 text-xs font-semibold", isPending(r.status) ? "text-primary" : "text-muted-foreground")}>
+                    {isPending(r.status) ? "Analisar" : "Abrir"}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {/* Tablet e computador: tabela */}
+          <div className="hidden overflow-x-auto md:block">
             <Table className="min-w-[36rem]">
               <TableHeader>
                 <TableRow>
@@ -257,7 +282,7 @@ function SubmissionDetail({
 
           {d.data.media.length > 0 && (
             <div className="space-y-2">
-              <SectionLabel>{d.data.media.some((m) => m.kind === "video") ? "Mídias" : "Foto"}</SectionLabel>
+              <SectionLabel>{d.data.media.some((m) => m.kind === "video") ? "Mídias" : d.data.media.length > 1 ? "Fotos" : "Foto"}</SectionLabel>
               <div className="grid grid-cols-2 gap-2">
                 {d.data.media.map((m) =>
                   m.kind === "video" ? (
@@ -280,7 +305,7 @@ function SubmissionDetail({
               </div>
             ))}
             {!sub.description?.trim() && !sub.ingredients?.trim() && !sub.preparation?.trim() && (
-              <p className="text-sm text-muted-foreground">O colaborador não escreveu descrição.</p>
+              <p className="text-sm text-muted-foreground">A receita não tem texto.</p>
             )}
           </div>
 
@@ -367,11 +392,8 @@ function EditDialog({
   const [reason, setReason] = useState("");
   const { busy, run } = useBusy();
 
-  // Descrição sempre; ingredientes e preparo só se a receita (antiga) tiver esse conteúdo.
-  const keys = useMemo<FieldKey[]>(
-    () => ["dish_name", "description", ...(sub.ingredients?.trim() ? (["ingredients"] as const) : []), ...(sub.preparation?.trim() ? (["preparation"] as const) : [])],
-    [sub],
-  );
+  // Nome, história, ingredientes e modo de preparo: todos corrigíveis (receitas antigas podem estar sem os dois últimos).
+  const keys = useMemo<FieldKey[]>(() => ["dish_name", "description", "ingredients", "preparation"], []);
   const changed = useMemo(
     () => keys.filter((k) => vals[k].trim() !== sub[k]),
     [vals, sub, keys],
@@ -407,7 +429,7 @@ function EditDialog({
                 {k === "dish_name" ? (
                   <Input value={vals[k]} onChange={(e) => setVals((v) => ({ ...v, [k]: e.target.value }))} maxLength={max} className="rounded-xl h-10" disabled={!!busy} />
                 ) : (
-                  <Textarea value={vals[k]} onChange={(e) => setVals((v) => ({ ...v, [k]: e.target.value }))} maxLength={max} rows={k === "description" ? 3 : 5} className="rounded-xl" disabled={!!busy} />
+                  <Textarea value={vals[k]} onChange={(e) => setVals((v) => ({ ...v, [k]: e.target.value }))} maxLength={max} rows={k === "description" ? 3 : 8} className="rounded-xl" disabled={!!busy} />
                 )}
                 <p className={cn("text-[11px]", n < min ? "text-destructive" : "text-muted-foreground")}>{n}/{max}{min > 0 ? ` (mínimo ${min})` : ""}</p>
               </div>

@@ -18,6 +18,7 @@ const REPORTS: Report[] = [
   { kind: "voting", title: "Votação por receita", hint: "Votos válidos por receita.", show: (p, c) => c.features.voting && !!p.campaigns_results },
   { kind: "ranking", title: "Ranking", hint: "Classificação por votos válidos.", show: (p, c) => c.features.voting && !!p.campaigns_results },
   { kind: "result", title: "Resultado", hint: "Vencedor, confirmação e divulgação.", show: (p, c) => c.features.results && !!p.campaigns_results },
+  { kind: "draw", title: "Sorteio", hint: "Ganhadores e quem concorreu ao sorteio.", show: (p, c) => !!c.features.draw && !!p.campaigns_results },
   { kind: "history", title: "Histórico completo", hint: "Todas as ações da campanha: quem, quando e por quê.", show: () => true },
   { kind: "votes", title: "Votos individuais", hint: "Quem votou em qual receita. Dado sensível.", show: (p, c) => c.features.voting && !!p.campaigns_export_votes && !!p.campaigns_votes_view },
 ];
@@ -44,10 +45,7 @@ export function ReportsTab({ campaignId, campaign, perms }: TabProps) {
 
   return (
     <div className="space-y-4">
-      <Notice tone="info" title="Arquivos CSV para Excel">
-        Os relatórios são baixados em CSV (separador ponto e vírgula, acentos preservados) e abrem direto no Excel ou no Google Planilhas.
-        Cada download fica registrado no histórico da campanha.
-      </Notice>
+      <p className="text-xs text-muted-foreground">Planilhas CSV que abrem no Excel (separador ponto e vírgula). Cada download fica no histórico.</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {visible.map((r) => (
           <Card key={r.kind} className="rounded-3xl border">

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ListOrdered, Lock, ShieldCheck, Hourglass } from "lucide-react";
+import { ListOrdered, Lock, ShieldCheck } from "lucide-react";
 import { motion } from "motion/react";
 import { Badge } from "../../components/ui/Badge";
 import { Skeleton } from "../../components/ui/skeleton";
@@ -11,7 +11,6 @@ import { useCampaignCtx } from "./CampaignLayout";
 import { useAuth } from "../../context/Store";
 import { campaignsApi, CampaignApiError, errMsg } from "../../lib/campaigns/api";
 import { RANKING_TOUR } from "../../lib/campaigns/tours-collab";
-import { cn } from "../../lib/utils";
 import type { RankingItem } from "../../lib/campaigns/types";
 
 type Payload = { official: boolean; items: RankingItem[] };
@@ -28,7 +27,10 @@ export function CampaignRanking() {
     setHidden(false);
     setData(null);
     try {
-      setData(await campaignsApi.get<Payload>(`/campaigns/${encodeURIComponent(slug)}/ranking`));
+      const r = await campaignsApi.get<Payload>(`/campaigns/${encodeURIComponent(slug)}/ranking`);
+      // O colaborador só vê o ranking OFICIAL (depois da divulgação). Qualquer coisa parcial é tratada como oculta.
+      if (!r.official) setHidden(true);
+      else setData(r);
     } catch (e) {
       if (e instanceof CampaignApiError && e.code === "RANKING_HIDDEN") setHidden(true);
       else setError(errMsg(e, "Não foi possível carregar o ranking."));
@@ -79,21 +81,11 @@ export function CampaignRanking() {
         <TourButton onClick={tour.start} />
       </div>
 
-      <div data-tutorial="camp-ranking" className="space-y-2">
-        <Badge
-          className={cn(
-            "gap-1.5 border text-[11px] font-semibold",
-            data.official
-              ? "border-green-200 bg-green-100 text-green-700 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300"
-              : "border-yellow-200 bg-yellow-100 text-yellow-700 dark:border-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300",
-          )}
-        >
-          {data.official ? <ShieldCheck size={12} aria-hidden="true" /> : <Hourglass size={12} aria-hidden="true" />}
-          {data.official ? "Resultado oficial" : "Parcial"}
+      <div data-tutorial="camp-ranking">
+        <Badge className="gap-1.5 border border-green-200 bg-green-100 text-[11px] font-semibold text-green-700 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300">
+          <ShieldCheck size={12} aria-hidden="true" />
+          Resultado oficial
         </Badge>
-        {!data.official && (
-          <p className="text-xs text-muted-foreground">Contagem parcial: pode mudar.</p>
-        )}
       </div>
 
       {data.items.length === 0 ? (

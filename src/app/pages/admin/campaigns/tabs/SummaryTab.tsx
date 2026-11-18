@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { formatInTimeZone } from "date-fns-tz";
-import { BarChart3, Check, RefreshCw, Trophy, X } from "lucide-react";
+import { BarChart3, Check, ChevronRight, RefreshCw, X } from "lucide-react";
 import { Badge } from "../../../../components/ui/Badge";
 import { Button } from "../../../../components/ui/Button";
 import { Card, CardContent } from "../../../../components/ui/Card";
@@ -9,16 +9,17 @@ import { Progress } from "../../../../components/ui/progress";
 import { cn } from "../../../../lib/utils";
 import { TIMEZONE } from "../../../../lib/date-utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
-import { RESULT_STATUS, fmtDate, fmtDateTime, fmtDayTime, plural } from "../../../../lib/campaigns/format";
+import { AUDIT_ACTION, RESULT_STATUS, fmtDateTime, fmtDayTime, plural } from "../../../../lib/campaigns/format";
 import type { DisplayState } from "../../../../lib/campaigns/format";
 import type {
-  AdminDashboard, AdminParticipant, AdminSubmissionRow, PublishCheck,
+  AdminAuditRow, AdminDashboard, AdminDraw, AdminParticipant, AdminSubmissionRow, PublishCheck,
 } from "../../../../lib/campaigns/types";
 import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
-import { EmptyBox, ErrorBox, LoadingBox, Notice, SectionLabel, useLoader } from "../shared";
+import { EmptyBox, ErrorBox, LoadingBox, Notice, SectionLabel, stageState, useLoader } from "../shared";
 import type { TabProps } from "./types";
-import { Fold, TabIntro } from "./ui";
+import { Cronograma } from "./Cronograma";
+import { Fold } from "./ui";
 import { useTabTour } from "./useTabTour";
 
 export type SummaryTabProps = TabProps & {
@@ -48,17 +49,45 @@ export function SummaryTab(props: SummaryTabProps) {
   const isDraft = display === "draft";
   const [moreOpen, setMoreOpen] = useState(false);
 
-  // Gráficos secundários só carregam quando a pessoa abre "Mais indicadores".
+  // As receitas alimentam "Últimas atividades" e os gráficos; a lista de pessoas só carrega em "Mais indicadores".
   const canSubs = !isDraft && !!perms.campaigns_review && f.submission && (d?.submissions ?? 0) > 0;
   const canParts = !isDraft && !!perms.campaigns_participants && f.submission;
+  const canDraw = !isDraft && !!f.draw && !!perms.campaigns_results;
   const subs = useLoader<AdminSubmissionRow[]>(
-    () => (canSubs && moreOpen ? campaignsApi.get(`/admin/campaigns/${campaignId}/submissions`) : Promise.resolve([])),
-    [campaignId, canSubs, moreOpen, d?.submissions],
+    () => (canSubs ? campaignsApi.get(`/admin/campaigns/${campaignId}/submissions`) : Promise.resolve([])),
+    [campaignId, canSubs, d?.submissions],
   );
   const parts = useLoader<{ items: AdminParticipant[] }>(
     () => (canParts && moreOpen ? campaignsApi.get(`/admin/campaigns/${campaignId}/participants`) : Promise.resolve({ items: [] })),
     [campaignId, canParts, moreOpen, d?.participants],
   );
+  // Estado do sorteio (só campanhas com sorteio). Falha = sem informação extra, nunca quebra a tela.
+  const draw = useLoader<AdminDraw | null>(
+    () => (canDraw ? campaignsApi.get<AdminDraw>(`/admin/campaigns/${campaignId}/draw`).catch(() => null) : Promise.resolve(null)),
+    [campaignId, canDraw, d?.results?.status],
+  );
+  const audit = useLoader<AdminAuditRow[]>(
+    () => (isDraft ? Promise.resolve([]) : campaignsApi.get<AdminAuditRow[]>(`/admin/campaigns/${campaignId}/audit`).catch(() => [])),
+    [campaignId, isDraft, d?.submissions, d?.votes_valid, d?.results?.status],
+  );
+
+  // Últimas atividades: poucas linhas, as mais recentes entre receitas enviadas e movimentações relevantes.
+  const recent = useMemo(() => {
+    const out: { key: string; at: string; text: string; sub?: string }[] = [];
+    for (const r of (subs.data ?? []).slice(0, 4)) {
+      if (r.submitted_at) out.push({ key: `s-${r.id}`, at: r.submitted_at, text: `${r.user_name} enviou “${r.dish_name}”` });
+    }
+    let n = 0;
+    const seen = new Set<string>(); // cada tipo de movimentação uma vez (a mais recente), para não repetir "Campanha editada"
+    for (const a of audit.data ?? []) {
+      if (n >= 4) break;
+      if (!RECENT_ACTIONS.has(a.action) || seen.has(a.action)) continue;
+      seen.add(a.action);
+      out.push({ key: `a-${a.id}`, at: a.occurred_at, text: AUDIT_ACTION[a.action] ?? a.action, sub: a.actor_name || undefined });
+      n++;
+    }
+    return out.sort((x, y) => new Date(y.at).getTime() - new Date(x.at).getTime()).slice(0, 5);
+  }, [subs.data, audit.data]);
 
   // A tour desta aba só abre sozinha quando o conteúdo (e os alvos) já existe.
   const tour = useTabTour("summary", {
@@ -77,8 +106,8 @@ export function SummaryTab(props: SummaryTabProps) {
         : () => navigate(`/admin/campaigns/${campaignId}/edit`);
     return (
       <div className="space-y-4">
-        <TabIntro>Veja o que falta para publicar a campanha.</TabIntro>
         {top}
+        <Cronograma campaign={campaign} stages={props.stages} results={results} display={display} />
         {publishCheck ? (
           <Card className="rounded-3xl border" data-tutorial="camp-summary-checklist">
             <CardContent className="space-y-4 p-5">
@@ -115,9 +144,6 @@ export function SummaryTab(props: SummaryTabProps) {
         ) : (
           <Notice tone="info" title="Rascunho">Complete as informações e as datas; depois a pessoa com permissão clica em Publicar.</Notice>
         )}
-        <p className="px-1 text-center text-xs text-muted-foreground">
-          {f.voting ? "Participação, receitas, votos e ranking aparecem aqui quando a campanha for publicada." : "Participação e receitas aparecem aqui quando a campanha for publicada."}
-        </p>
         {tourEl}
       </div>
     );
@@ -129,193 +155,169 @@ export function SummaryTab(props: SummaryTabProps) {
   if (!d) return null;
 
   const hasVoting = f.voting;
-  // Enquanto a votação não encerra, o servidor não manda a contagem por receita: aqui nada de placar parcial.
-  const resultsLocked = hasVoting && !!d.results_locked;
-  const votingEnds = d.voting_ends_at ?? d.stages.find((x) => x.stage_key === "voting")?.ends_at ?? null;
+  const hasDraw = !!f.draw;
+  const votingStage = d.stages.find((x) => x.stage_key === "voting");
+  // Ranking parcial: enquanto a votação está aberta, os números são só da gestão e ainda podem mudar.
+  const votingOpen = hasVoting && (d.voting_live ?? ["open", "paused"].includes(stageState(votingStage)));
   const rs = d.results?.status ?? "none";
   const rsMeta = RESULT_STATUS[rs];
-  // Divulgação programada (vem do registro da campanha; o painel do resumo traz só o essencial).
   const announceAt = rs === "confirmed" ? (results?.announce_at ?? d.results?.announce_at ?? null) : null;
-  const tally = resultsLocked ? [] : d.tally ?? [];
-  const official = rs === "confirmed" || rs === "announced";
-  const canGoVoting = !!goTab && (!!perms.campaigns_schedule || !!perms.campaigns_results || !!perms.campaigns_votes_view);
   const share = (n: number) => (d.submissions > 0 ? (n / d.submissions) * 100 : 0);
-  const showVotes = hasVoting;
-  const showResult = hasVoting;
-  const showRanking = hasVoting && !resultsLocked && !!perms.campaigns_results && tally.length > 0;
-  const maxVotes = Math.max(0, ...tally.map((t) => t.votes));
+
+  // Cada indicador leva à tela detalhada (quando a pessoa tem acesso a ela).
+  const go = (tab: string, section?: string) => (goTab ? () => goTab(tab, section) : undefined);
+  const toRecipes = perms.campaigns_review ? go("submissions") : perms.campaigns_participants ? go("submissions", "people") : undefined;
+  const toPeople = perms.campaigns_participants ? go("submissions", "people") : perms.campaigns_review ? go("submissions") : undefined;
+  const toVoting = hasVoting ? go("voting") : undefined;
+  const drawView = draw.data;
+  const toDraw = hasDraw && (perms.campaigns_results || perms.campaigns_winner_confirm || perms.campaigns_announce) ? go("draw") : undefined;
 
   const refresh = () => {
     onReloadDashboard();
-    if (moreOpen) {
-      subs.reload();
-      parts.reload();
-    }
+    subs.reload();
+    audit.reload();
+    draw.reload();
+    if (moreOpen) parts.reload();
   };
 
   const hasMore = d.submissions > 0 && (canSubs || canParts);
 
+  const drawStatus = (() => {
+    const x = drawView?.draw;
+    if (x?.announced_at) return { label: "Divulgado", hint: `Divulgado em ${fmtDateTime(x.announced_at)}.`, className: "border-purple-200 bg-purple-100 text-purple-700 dark:border-purple-800 dark:bg-purple-950/40 dark:text-purple-300" };
+    if (x?.announce_at) return { label: "Divulgação programada", hint: `Será divulgado em ${fmtDayTime(x.announce_at)}.`, className: "border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300" };
+    if (x?.confirmed_at) return { label: "Confirmado", hint: "Falta divulgar os ganhadores.", className: "border-green-200 bg-green-100 text-green-700 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300" };
+    if (x) return { label: "Sorteado", hint: "Confira e confirme os ganhadores.", className: "border-yellow-200 bg-yellow-100 text-yellow-700 dark:border-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300" };
+    if (drawView?.can_run) return { label: "Pronto para sortear", hint: `${plural(drawView.eligible_count, "pessoa concorre", "pessoas concorrem")}.`, className: "border-green-200 bg-green-100 text-green-700 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300" };
+    return { label: "Aguardando", hint: drawView?.reason ?? "Disponível depois do fim da participação.", className: "border-border bg-muted text-muted-foreground" };
+  })();
+
   return (
     <div className="space-y-5">
-      <TabIntro
-        action={(
-          <Button variant="ghost" size="sm" className="gap-2 rounded-xl text-muted-foreground" onClick={refresh} disabled={dashboardLoading}>
-            <RefreshCw size={13} className={cn(dashboardLoading && "animate-spin")} /> Atualizar
-          </Button>
-        )}
-      >
-        Veja o que fazer agora e os números que importam.
-      </TabIntro>
+      <div className="flex justify-end">
+        <Button variant="ghost" size="sm" className="gap-2 rounded-xl text-muted-foreground" onClick={refresh} disabled={dashboardLoading}>
+          <RefreshCw size={13} className={cn(dashboardLoading && "animate-spin")} /> Atualizar
+        </Button>
+      </div>
 
       {top}
 
       <div data-tutorial="camp-summary-cards" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Participação */}
-        <Card className="rounded-3xl border">
-          <CardContent className="space-y-3 p-5">
-            <SectionLabel>Participação</SectionLabel>
-            <div className="flex items-end justify-between gap-3">
-              <p className="text-foreground">
-                <span className="text-3xl font-bold tabular-nums">{d.participants}</span>
-                <span className="ml-1.5 text-sm text-muted-foreground">de {d.eligible}</span>
-              </p>
-              <span className="text-lg font-bold tabular-nums text-primary">{d.participation_pct}%</span>
-            </div>
-            <Progress value={d.participation_pct} aria-label="Participação" />
-            <p className="text-[11px] text-muted-foreground">colaboradores elegíveis que enviaram uma receita</p>
-          </CardContent>
-        </Card>
-
         {/* Receitas */}
         {f.submission && (
-          <Card className="rounded-3xl border">
-            <CardContent className="space-y-3 p-5">
-              <SectionLabel>Receitas</SectionLabel>
-              <p className="text-foreground">
-                <span className="text-3xl font-bold tabular-nums">{d.submissions}</span>
-                <span className="ml-1.5 text-sm text-muted-foreground">enviadas</span>
-              </p>
-              <div
-                className="flex h-2 w-full overflow-hidden rounded-full bg-muted"
-                role="img"
-                aria-label={`${d.approved} aprovadas, ${d.pending} em análise, ${d.rejected} reprovadas`}
-              >
-                <span className="bg-green-500" style={{ width: `${share(d.approved)}%` }} />
-                <span className="bg-yellow-400" style={{ width: `${share(d.pending)}%` }} />
-                <span className="bg-red-400" style={{ width: `${share(d.rejected)}%` }} />
-              </div>
-              <ul className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                <li className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-green-500" />{d.approved} aprovadas</li>
-                <li className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-yellow-400" />{d.pending} em análise</li>
-                {d.rejected > 0 && <li className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-400" />{d.rejected} reprovadas</li>}
-              </ul>
-              {d.pending > 0 && perms.campaigns_review && goTab && (
-                <button type="button" onClick={() => goTab("submissions")} className="text-xs font-semibold text-primary hover:underline">
-                  {plural(d.pending, "receita aguarda análise", "receitas aguardam análise")} →
-                </button>
-              )}
-            </CardContent>
-          </Card>
+          <Kpi label="Receitas" onClick={toRecipes}>
+            <p className="text-foreground">
+              <span className="text-3xl font-bold tabular-nums">{d.submissions}</span>
+              <span className="ml-1.5 text-sm text-muted-foreground">cadastradas</span>
+            </p>
+            <div
+              className="flex h-2 w-full overflow-hidden rounded-full bg-muted"
+              role="img"
+              aria-label={`${d.approved} aprovadas, ${d.pending} em análise, ${d.rejected} reprovadas`}
+            >
+              <span className="bg-green-500" style={{ width: `${share(d.approved)}%` }} />
+              <span className="bg-yellow-400" style={{ width: `${share(d.pending)}%` }} />
+              <span className="bg-red-400" style={{ width: `${share(d.rejected)}%` }} />
+            </div>
+            <ul className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              <li className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-green-500" />{d.approved} aprovadas</li>
+              <li className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-yellow-400" />{d.pending} em análise</li>
+              {d.rejected > 0 && <li className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-400" />{d.rejected} reprovadas</li>}
+            </ul>
+          </Kpi>
         )}
 
-        {/* Votos (só depois que a votação começou) */}
-        {showVotes && (
-          <Card className="rounded-3xl border">
-            <CardContent className="space-y-3 p-5">
-              <SectionLabel>Votos</SectionLabel>
+        {/* Participantes */}
+        <Kpi label="Participantes" onClick={toPeople}>
+          <div className="flex items-end justify-between gap-3">
+            <p className="text-foreground">
+              <span className="text-3xl font-bold tabular-nums">{d.participants}</span>
+              <span className="ml-1.5 text-sm text-muted-foreground">de {d.eligible}</span>
+            </p>
+            <span className="text-lg font-bold tabular-nums text-primary">{d.participation_pct}%</span>
+          </div>
+          <Progress value={d.participation_pct} aria-label="Participação" />
+          <p className="text-[11px] text-muted-foreground">elegíveis que enviaram receita</p>
+        </Kpi>
+
+        {/* Votos */}
+        {hasVoting && (
+          <Kpi label="Votos" onClick={toVoting}>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <p className="text-foreground">
                 <span className="text-3xl font-bold tabular-nums">{d.votes_valid}</span>
                 <span className="ml-1.5 text-sm text-muted-foreground">{d.votes_valid === 1 ? "voto válido" : "votos válidos"}</span>
               </p>
-              <Progress value={d.voting_pct} aria-label="Quem já votou" />
-              <p className="text-[11px] text-muted-foreground">
-                {d.voting_pct}% dos elegíveis já votaram ({d.voters} de {d.eligible})
-              </p>
-              {d.votes_invalidated > 0 && (
-                <p className="text-[11px] text-orange-600 dark:text-orange-300">
-                  {plural(d.votes_invalidated, "voto invalidado", "votos invalidados")}
-                  {goTab && perms.campaigns_participants && (
-                    <> · <button type="button" className="font-semibold underline" onClick={() => goTab("participants")}>ver em Participantes</button></>
-                  )}
-                </p>
+              {votingOpen && (
+                <Badge className="border border-yellow-200 bg-yellow-100 text-[10px] text-yellow-700 dark:border-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300">Parcial</Badge>
               )}
-            </CardContent>
-          </Card>
+            </div>
+            <Progress value={d.voting_pct} aria-label="Quem já votou" />
+            <p className="text-[11px] text-muted-foreground">{d.voting_pct}% dos elegíveis votaram ({d.voters} de {d.eligible})</p>
+          </Kpi>
         )}
 
-        {/* Resultado */}
-        {showResult && (
-          <Card className="rounded-3xl border">
-            <CardContent className="space-y-3 p-5">
-              <SectionLabel>Resultado</SectionLabel>
-              {resultsLocked ? (
-                <>
-                  <Badge className="border border-blue-200 bg-blue-100 text-[11px] text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300">Votação em andamento</Badge>
-                  <p className="text-[12px] leading-relaxed text-muted-foreground">
-                    O resultado só aparece depois do encerramento{votingEnds ? ` (${fmtDate(votingEnds)})` : ""}.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <Badge className={cn("border text-[11px]", announceAt ? "border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300" : rsMeta.className)}>
-                    {announceAt ? "Divulgação programada" : rsMeta.label}
-                  </Badge>
-                  <p className="text-[12px] leading-relaxed text-muted-foreground">
-                    {rs === "none" && "A votação encerrou. Veja o ganhador."}
-                    {rs === "preliminary" && "Confira o resultado e confirme o ganhador."}
-                    {rs === "tie_pending" && "Há empate: registre a decisão para continuar."}
-                    {rs === "confirmed" && !announceAt && `Ganhador confirmado em ${fmtDateTime(d.results?.confirmed_at)}.`}
-                    {rs === "confirmed" && announceAt && `Será divulgado em ${fmtDayTime(announceAt)}.`}
-                    {rs === "announced" && `Divulgado em ${fmtDateTime(d.results?.announced_at)}.`}
-                  </p>
-                  {canGoVoting && (
-                    <button type="button" onClick={() => goTab?.("voting")} className="text-xs font-semibold text-primary hover:underline">
-                      {rs === "confirmed" && !announceAt ? "Divulgar resultado →" : rs === "announced" ? "Ver resultado →" : "Ver ganhador →"}
-                    </button>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
+        {/* Resultado da votação */}
+        {hasVoting && f.announcement && (
+          <Kpi label="Resultado" onClick={toVoting}>
+            <Badge className={cn("border text-[11px]",
+              announceAt || (rs === "none" && votingOpen)
+                ? "border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300"
+                : rsMeta.className)}>
+              {announceAt ? "Divulgação programada" : rs === "none" && votingOpen ? "Votação em andamento" : rsMeta.label}
+            </Badge>
+            <p className="text-[12px] leading-relaxed text-muted-foreground">
+              {rs === "none" && votingOpen && "O ranking parcial está na aba Votação."}
+              {rs === "none" && !votingOpen && "A votação encerrou. Veja o ganhador."}
+              {rs === "preliminary" && "Confira o resultado e confirme o ganhador."}
+              {rs === "tie_pending" && "Há empate: registre a decisão."}
+              {rs === "confirmed" && !announceAt && "Ganhador confirmado. Falta divulgar."}
+              {rs === "confirmed" && announceAt && `Será divulgado em ${fmtDayTime(announceAt)}.`}
+              {rs === "announced" && `Divulgado em ${fmtDateTime(d.results?.announced_at)}.`}
+            </p>
+          </Kpi>
+        )}
+
+        {/* Sorteio */}
+        {hasDraw && (
+          <Kpi label="Sorteio" onClick={toDraw}>
+            <Badge className={cn("border text-[11px]", drawStatus.className)}>{drawStatus.label}</Badge>
+            <p className="text-[12px] leading-relaxed text-muted-foreground">
+              {drawStatus.hint} {f.draw_winners ? `${plural(f.draw_winners, "ganhador", "ganhadores")}.` : ""}
+            </p>
+          </Kpi>
         )}
       </div>
 
-      {/* Ranking: as 5 mais votadas */}
-      {showRanking && (
-        <Card className="rounded-3xl border" data-tutorial="camp-summary-ranking">
-          <CardContent className="space-y-4 p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <SectionLabel>Ranking · 5 mais votadas</SectionLabel>
-              <Badge className={cn("border text-[10px]", official
-                ? "border-green-200 bg-green-100 text-green-700 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300"
-                : "border-yellow-200 bg-yellow-100 text-yellow-700 dark:border-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300")}>
-                {official ? "Oficial" : "Preliminar"}
-              </Badge>
-            </div>
-            <ol className="space-y-3">
-              {tally.slice(0, 5).map((t, i) => (
-                <li key={t.submission_id} className="space-y-1">
-                  <div className="flex items-center justify-between gap-3 text-sm">
-                    <span className="min-w-0 truncate">
-                      <b className="mr-2 text-muted-foreground">{i + 1}º</b>
-                      {t.dish_name} <span className="text-muted-foreground">— {t.author}</span>
-                      {official && d.results?.winner_submission_id === t.submission_id && <Trophy size={13} className="ml-2 inline text-amber-500" aria-label="Vencedora" />}
-                    </span>
-                    <b className="shrink-0 tabular-nums">{t.votes}</b>
-                  </div>
-                  <Progress value={maxVotes > 0 ? (t.votes / maxVotes) * 100 : 0} aria-label={`${t.dish_name}: ${t.votes} votos`} />
+      <Cronograma campaign={campaign} stages={props.stages} results={results} display={display} draw={drawView} />
+
+      {/* Últimas atividades: só o necessário para um olhar rápido */}
+      <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-summary-recent">
+        <CardContent className="space-y-2 p-5">
+          <SectionLabel>Últimas atividades</SectionLabel>
+          {recent.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{subs.loading || audit.loading ? "Carregando…" : "Nada por aqui ainda."}</p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {recent.map((r) => (
+                <li key={r.key} className="flex items-baseline justify-between gap-3 py-2 text-sm">
+                  <span className="min-w-0 flex-1 truncate">
+                    {r.text}
+                    {r.sub && <span className="text-muted-foreground"> · {r.sub}</span>}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">{fmtDayTime(r.at)}</span>
                 </li>
               ))}
-            </ol>
-          </CardContent>
-        </Card>
-      )}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Ritmo e alcance: recolhido para não encher a tela; só carrega ao abrir */}
       {hasMore && (
         <Fold
           title="Mais indicadores"
-          hint="Receitas enviadas por dia e participação por unidade."
+          hint="Receitas por dia e participação por unidade."
           icon={<BarChart3 size={18} />}
           open={moreOpen}
           onOpenChange={setMoreOpen}
@@ -339,11 +341,42 @@ export function SummaryTab(props: SummaryTabProps) {
         <EmptyBox
           icon={<BarChart3 size={34} />}
           title="Nenhuma receita enviada ainda"
-          hint="Quando as receitas chegarem, o ritmo de envios por dia e a participação por unidade aparecem aqui."
+          hint="Quando as receitas chegarem, os números e as atividades aparecem aqui."
         />
       )}
       {tourEl}
     </div>
+  );
+}
+
+/** Ações do histórico que valem como "movimentação relevante" na visão geral (sem votos nem exportações). */
+const RECENT_ACTIONS = new Set([
+  "PUBLISH_CAMPAIGN", "SUSPEND_CAMPAIGN", "RESUME_CAMPAIGN", "CLOSE_CAMPAIGN", "UPDATE_CAMPAIGN", "SET_PERIOD",
+  "APPROVE_SUBMISSION", "REJECT_SUBMISSION", "END_VOTING_NOW", "CLOSE_VOTING", "DECIDE_TIE", "CONFIRM_WINNER",
+  "ANNOUNCE_RESULTS", "SCHEDULE_ANNOUNCEMENT", "RUN_DRAW", "DISCARD_DRAW", "CONFIRM_DRAW", "ANNOUNCE_DRAW",
+  "GENERATE_BOOK", "PUBLISH_BOOK", "WITHDRAW_BOOK",
+]);
+
+/** Indicador do painel. Com `onClick` vira um botão (abre a tela detalhada); sem acesso a ela, fica só informativo. */
+function Kpi({ label, onClick, children }: { label: string; onClick?: () => void; children: React.ReactNode }) {
+  const head = (
+    <div className="flex items-center justify-between gap-2">
+      <SectionLabel>{label}</SectionLabel>
+      {onClick && <ChevronRight size={16} className="shrink-0 text-muted-foreground" aria-hidden="true" />}
+    </div>
+  );
+  const base = "block w-full space-y-2.5 rounded-3xl border border-border bg-card p-4 text-left text-card-foreground shadow-sm sm:p-5";
+  if (!onClick) return <div className={base}>{head}{children}</div>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${label}: abrir detalhes`}
+      className={cn(base, "transition-colors hover:bg-accent/40 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+    >
+      {head}
+      {children}
+    </button>
   );
 }
 

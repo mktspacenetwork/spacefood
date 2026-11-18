@@ -1,24 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { Archive, CalendarClock, FileDown, History as HistoryIcon, IdCard, Pencil, ShieldAlert, Trash2, Undo2, XCircle } from "lucide-react";
+import { Archive, CalendarClock, IdCard, Pencil, ShieldAlert, Trash2, Undo2, XCircle } from "lucide-react";
 import { Button } from "../../../../components/ui/Button";
-import { DISPLAY_STATE, plural } from "../../../../lib/campaigns/format";
+import { DISPLAY_STATE, fmtDateTime, plural } from "../../../../lib/campaigns/format";
 import type { DisplayState } from "../../../../lib/campaigns/format";
-import { MAX_SUBMISSIONS_PER_USER } from "../../../../lib/campaigns/types";
+import { MAX_PHOTOS_PER_RECIPE, MAX_SUBMISSIONS_PER_USER } from "../../../../lib/campaigns/types";
 import type { AdminCampaign, AdminDashboard } from "../../../../lib/campaigns/types";
 import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
 import { PeriodSection } from "./PeriodSection";
-import { ReportsTab } from "./ReportsTab";
-import { HistoryTab } from "./HistoryTab";
 import type { TabProps } from "./types";
-import { Fold, TabIntro } from "./ui";
+import { Fold } from "./ui";
 import { useTabTour } from "./useTabTour";
 
 export type RiskKind = "draft" | "close" | "archive" | "delete";
 
 export type SettingsTabProps = TabProps & {
-  /** Seção a abrir (e rolar até ela) — info | period | reports | history | danger ("schedule" também vale, como atalho antigo). */
+  /** Seção a abrir (e rolar até ela) — info | period | danger ("schedule" também vale, como atalho antigo). */
   section?: string | null;
   /** Abre o diálogo de confirmação correspondente no painel. */
   onAction: (kind: RiskKind) => void;
@@ -88,12 +86,11 @@ export function SettingsTab(props: SettingsTabProps) {
   }, [c.status, perms.campaigns_edit, perms.campaigns_publish, hasSubmissions]);
 
   const available = useMemo(() => {
-    const ids = ["info", "history"];
+    const ids = ["info"];
     if (perms.campaigns_schedule) ids.push("period");
-    if (perms.campaigns_export) ids.push("reports");
     if (risk.length > 0) ids.push("danger");
     return ids;
-  }, [perms.campaigns_schedule, perms.campaigns_export, risk.length]);
+  }, [perms.campaigns_schedule, risk.length]);
 
   const alias = section === "schedule" ? "period" : section;
   const wanted = alias && available.includes(alias) ? alias : "info";
@@ -110,6 +107,7 @@ export function SettingsTab(props: SettingsTabProps) {
   const tour = useTabTour("settings", { tourUserId, tourSignal, ready: true });
 
   const lines = c.instructions.split("\n").filter((l) => l.trim()).length;
+  const visibleText = display === "published" ? "Sim" : display === "scheduled" ? `Sim, a partir de ${fmtDateTime(c.visible_from)}` : display === "unpublished" ? "Não (despublicada)" : display === "draft" ? "Não (rascunho)" : "Não (encerrada)";
   const foldProps = (id: string) => ({
     anchorId: `camp-sec-${id}`,
     tutorial: `camp-sec-${id}`,
@@ -119,8 +117,6 @@ export function SettingsTab(props: SettingsTabProps) {
 
   return (
     <div className="space-y-4">
-      <TabIntro>Ajuste as informações e as datas, baixe relatórios e consulte o histórico. O que muda o destino da campanha fica na zona de risco.</TabIntro>
-
       <Fold {...foldProps("info")} icon={<IdCard size={18} />} title="Informações" hint="O que os colaboradores leem sobre a campanha.">
         {perms.campaigns_edit && !finished && (
           <div className="mb-1 flex justify-end">
@@ -134,7 +130,10 @@ export function SettingsTab(props: SettingsTabProps) {
           <Row label="Situação">{DISPLAY_STATE[display].label}</Row>
           <Row label="Descrição"><span className="line-clamp-4 whitespace-pre-line">{c.description || "—"}</span></Row>
           <Row label="Detalhes">{lines > 0 ? `${plural(lines, "linha", "linhas")} de regras e orientações` : "—"}</Row>
-          {c.features.voting && <Row label="Votação">Com votação</Row>}
+          <Row label="Visível para colaboradores">{visibleText}</Row>
+          <Row label="Votação">{c.features.voting ? "Sim" : "Não"}</Row>
+          <Row label="Sorteio">{c.features.draw ? `Sim · ${plural(c.features.draw_winners ?? 1, "ganhador", "ganhadores")}` : "Não"}</Row>
+          <Row label="Fotos">{c.features.photos === false ? "Não" : `Sim · de 1 a ${MAX_PHOTOS_PER_RECIPE}`}</Row>
           <Row label="Receitas por pessoa">{c.features.multiple_submissions ? `Até ${MAX_SUBMISSIONS_PER_USER}` : "Uma"}</Row>
           <Row label="Capa e banner">{c.cover_url ? "Imagem cadastrada (a mesma do banner da Home)" : "Sem imagem — o banner usa o fundo laranja com o nome"}</Row>
           <Row label="Público">{audienceText(c, dashboard?.eligible)}</Row>
@@ -146,16 +145,6 @@ export function SettingsTab(props: SettingsTabProps) {
           <PeriodSection {...tabProps} />
         </Fold>
       )}
-
-      {perms.campaigns_export && (
-        <Fold {...foldProps("reports")} icon={<FileDown size={18} />} title="Relatórios" hint="Baixe os dados da campanha em planilha.">
-          <ReportsTab {...tabProps} />
-        </Fold>
-      )}
-
-      <Fold {...foldProps("history")} icon={<HistoryIcon size={18} />} title="Histórico" hint="Tudo o que foi feito na campanha: quem, quando e por quê.">
-        <HistoryTab {...tabProps} />
-      </Fold>
 
       {risk.length > 0 && (
         <Fold

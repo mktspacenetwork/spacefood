@@ -32,7 +32,7 @@ export function VoteConfirmDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Votar em “{dishName}”?</AlertDialogTitle>
-          <AlertDialogDescription>Seu voto é definitivo.</AlertDialogDescription>
+          <AlertDialogDescription>Seu voto é definitivo e não poderá ser alterado depois.</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="gap-2 sm:gap-2">
           <AlertDialogCancel disabled={loading} className="h-11 rounded-xl">

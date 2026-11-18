@@ -106,18 +106,23 @@ export function CampaignLayout() {
 
   // Seções: só as que existem para esta campanha e esta pessoa agora.
   // "Minhas receitas" aparece para quem já enviou ou ainda pode enviar (é a porta de entrada para cadastrar).
-  // "Votação" só existe em campanha COM votação; sem votação nem o resultado/ranking aparecem.
+  // "Votação" só existe em campanha COM votação; "Resultado" quando a votação e/ou o sorteio foram divulgados;
+  // "Livro de Receitas" só depois que o administrador publica o livro.
   const hasVoting = !!campaign.features.voting;
-  const sections: { to: string; label: string; end?: boolean }[] = [{ to: base, label: "Início", end: true }];
+  const hasDraw = !!campaign.features.draw;
+  const sections: { to: string; label: string; short?: string; end?: boolean }[] = [{ to: base, label: "Início", end: true }];
   if (state.gallery_visible) sections.push({ to: `${base}/receitas`, label: "Receitas" });
   if (state.released && (submissionsCount(state) > 0 || state.can_submit)) {
     sections.push({ to: `${base}/participacao`, label: "Minhas receitas" });
   }
-  if (hasVoting) {
-    if (state.results_visible) sections.push({ to: `${base}/resultado`, label: "Resultado" });
-    else if (state.released && (state.voting === "open" || state.has_voted || state.voting === "closed")) {
-      sections.push({ to: `${base}/votacao`, label: state.can_vote ? "Votar" : "Votação" });
-    }
+  if (hasVoting && !state.results_visible && state.released && (state.voting === "open" || state.has_voted || state.voting === "closed")) {
+    sections.push({ to: `${base}/votacao`, label: state.can_vote ? "Votar" : "Votação" });
+  }
+  if ((hasVoting && state.results_visible) || (hasDraw && state.draw_visible)) {
+    sections.push({ to: `${base}/resultado`, label: "Resultado" });
+  }
+  if (state.book_published) {
+    sections.push({ to: `${base}/livro`, label: "Livro de Receitas", short: "Livro" });
   }
 
   return (
@@ -148,12 +153,14 @@ export function CampaignLayout() {
               end={s.end}
               className={({ isActive }) =>
                 cn(
-                  "flex h-10 flex-1 shrink-0 items-center justify-center whitespace-nowrap rounded-xl px-3 text-[13px] font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                  "flex h-10 flex-1 shrink-0 items-center justify-center whitespace-nowrap rounded-xl font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                  // com 5 ou mais seções o menu fica mais compacto para caber no celular sem rolagem
+                  sections.length >= 5 ? "px-1.5 text-[12px]" : "px-3 text-[13px]",
                   isActive ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground",
                 )
               }
             >
-              {s.label}
+              {s.short ? (<><span className="sm:hidden" aria-hidden="true">{s.short}</span><span className="sr-only sm:not-sr-only">{s.label}</span></>) : s.label}
             </NavLink>
           ))}
         </nav>

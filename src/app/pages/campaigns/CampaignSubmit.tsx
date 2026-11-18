@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { AlertTriangle, CheckCircle2, Loader2, Lock, Plus, RefreshCw, Send } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, Lock, Plus, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { Button } from "../../components/ui/Button";
@@ -8,7 +8,8 @@ import { Card } from "../../components/ui/Card";
 import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import { Skeleton } from "../../components/ui/skeleton";
-import { PhotoPicker, type PhotoDraft } from "../../components/campaigns/PhotoPicker";
+import type { PhotoDraft } from "../../components/campaigns/PhotoPicker";
+import { PhotoSet, newPhotoUid } from "../../components/campaigns/PhotoSet";
 import { ErrorState } from "../../components/campaigns/ErrorState";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
 import { submissionsCount, submissionsMax } from "../../components/campaigns/campaignInfo";
@@ -18,30 +19,53 @@ import { campaignsApi, CampaignApiError, errMsg, uploadToSignedUrl } from "../..
 import { DEFAULT_PHOTO_MB } from "../../lib/campaigns/media";
 import { SUBMIT_TOUR } from "../../lib/campaigns/tours-collab";
 import { cn } from "../../lib/utils";
+import { MAX_PHOTOS_PER_RECIPE, MAX_RECIPE_TEXT, MAX_STORY_TEXT } from "../../lib/campaigns/types";
 import type { MySubmission, MySubmissions, SubmissionStatus, UploadTicket } from "../../lib/campaigns/types";
 
 type Phase = "idle" | "saving" | "uploading" | "finalizing" | "partial" | "done";
 type CreateResp = { submission_id: string; status: string; uploads: UploadTicket[] };
 type UpdateResp = { changed: boolean; status: string; uploads: UploadTicket[] };
+type MediaKind = "main_photo" | "photo";
 
 const BLOCKING_CODES = ["EDIT_LOCKED", "REGISTRATION_CLOSED", "REGISTRATION_PAUSED", "CAMPAIGN_UNAVAILABLE", "NOT_ELIGIBLE", "SUBMISSION_LIMIT"];
 const TITLE_MIN = 3;
 const TITLE_MAX = 120;
-const STORY_MAX = 2000; // "História e memória afetiva" (um único campo de texto)
+const STORY_MAX = MAX_STORY_TEXT; // "História e memória afetiva" (um único campo de texto, opcional)
+const TEXT_MAX = MAX_RECIPE_TEXT; // ingredientes e modo de preparo: sem limite prático, só proteção técnica
 
-type Fields = { dish_name: string; description: string };
+type Fields = { dish_name: string; description: string; ingredients: string; preparation: string };
+type FieldErrs = Partial<Record<keyof Fields, string>>;
+const EMPTY: Fields = { dish_name: "", description: "", ingredients: "", preparation: "" };
 
-function validate(f: Fields): { dish_name?: string; description?: string } {
-  const out: { dish_name?: string; description?: string } = {};
+function validate(f: Fields): FieldErrs {
+  const out: FieldErrs = {};
   const n = f.dish_name.trim().length;
   if (n < TITLE_MIN) out.dish_name = `Escreva o título da receita (mínimo ${TITLE_MIN} letras).`;
   else if (n > TITLE_MAX) out.dish_name = `O título pode ter até ${TITLE_MAX} letras.`;
   if (f.description.trim().length > STORY_MAX) out.description = `A história pode ter até ${STORY_MAX} letras.`;
+  if (!f.ingredients.trim()) out.ingredients = "Escreva os ingredientes da receita.";
+  else if (f.ingredients.trim().length > TEXT_MAX) out.ingredients = `Os ingredientes passaram do limite de ${TEXT_MAX} letras.`;
+  if (!f.preparation.trim()) out.preparation = "Escreva o modo de preparo.";
+  else if (f.preparation.trim().length > TEXT_MAX) out.preparation = `O modo de preparo passou do limite de ${TEXT_MAX} letras.`;
   return out;
 }
 
+/** Mensagens por campo quando o servidor devolve INVALID_FIELDS com a lista (ex.: "ingredients,preparation"). */
+const SERVER_FIELD_MSG: Record<string, string> = {
+  dish_name: "Confira o título da receita.",
+  description: "Confira a história (limite de tamanho).",
+  ingredients: "Confira os ingredientes.",
+  preparation: "Confira o modo de preparo.",
+};
+
 const LABEL = "text-xs font-bold uppercase tracking-wider text-muted-foreground";
 const FIELD = "rounded-xl border-border focus:ring-primary/30";
+
+/** Contador discreto: sempre na história; nos textos longos só quando já passou de 75% do limite. */
+function Count({ n, max, always }: { n: number; max: number; always?: boolean }) {
+  if (!always && n < max * 0.75) return null;
+  return <span className={cn("shrink-0 text-[11px] tabular-nums text-muted-foreground", n > max && "font-bold text-destructive")} aria-live="off">{n}/{max}</span>;
+}
 
 /** Rota `enviar` = nova receita; `enviar/:id` = editar uma das minhas receitas. Remonta ao trocar de uma para a outra. */
 export function CampaignSubmit() {
@@ -49,7 +73,7 @@ export function CampaignSubmit() {
   return <SubmitForm key={id ?? "new"} editId={id ?? null} />;
 }
 
-/** Enviar (ou editar) uma receita: título, UM campo "História e memória afetiva" e UMA foto. */
+/** Enviar (ou editar) uma receita: título, história (opcional), ingredientes, modo de preparo e até 3 fotos. */
 function SubmitForm({ editId }: { editId: string | null }) {
   const { campaign, state, refresh, slug } = useCampaignCtx();
   const { user } = useAuth();
@@ -70,25 +94,34 @@ function SubmitForm({ editId }: { editId: string | null }) {
     if (redirectId) navigate(`${base}/enviar/${redirectId}`, { replace: true });
   }, [redirectId, base, navigate]);
 
-  const [fields, setFields] = useState<Fields>({ dish_name: "", description: "" });
+  const [fields, setFields] = useState<Fields>(EMPTY);
   const [original, setOriginal] = useState<Fields | null>(null);
-  const [photo, setPhoto] = useState<PhotoDraft | null>(null);
-  // Linhas de foto principal que já existem no servidor (para saber o que remover ao trocar a foto).
-  const [serverMainIds, setServerMainIds] = useState<string[]>([]);
+  const [photos, setPhotos] = useState<PhotoDraft[]>([]);
+  // Linhas de foto que já existem no servidor (para saber o que remover ao trocar/tirar uma foto).
+  const [serverPhotoIds, setServerPhotoIds] = useState<string[]>([]);
   const [submissionId, setSubmissionId] = useState<string | null>(editId);
   const [recipeStatus, setRecipeStatus] = useState<SubmissionStatus | null>(null);
   const [loading, setLoading] = useState(isEdit);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [showErrors, setShowErrors] = useState(false);
+  const [srvErrs, setSrvErrs] = useState<FieldErrs>({});
   const [banner, setBanner] = useState<string | null>(null);
   const [blockedMsg, setBlockedMsg] = useState<string | null>(null);
   const [doneDish, setDoneDish] = useState("");
   const inflight = useRef(false);
-  const photoRef = useRef<PhotoDraft | null>(null);
-  photoRef.current = photo;
+  const photosRef = useRef<PhotoDraft[]>([]);
+  photosRef.current = photos;
 
   const busy = phase === "saving" || phase === "uploading" || phase === "finalizing";
+
+  // Libera as miniaturas locais (blob:) ao sair da tela.
+  useEffect(() => () => {
+    photosRef.current.forEach((p) => { if (p.previewUrl.startsWith("blob:")) URL.revokeObjectURL(p.previewUrl); });
+  }, []);
+
+  const patchPhoto = (uid: string | undefined, patch: Partial<PhotoDraft>) =>
+    setPhotos((prev) => prev.map((p) => (p.uid === uid ? { ...p, ...patch } : p)));
 
   // ── Carrega a receita existente (modo edição), uma única vez ──────────────
   const loadExisting = useCallback(async () => {
@@ -106,27 +139,37 @@ function SubmitForm({ editId }: { editId: string | null }) {
         s = r.submission && r.submission.id === editId ? r.submission : undefined;
       }
       if (!s) { setLoadError("Não encontramos esta receita."); return; }
-      const f: Fields = { dish_name: s.dish_name, description: s.description ?? "" };
+      const f: Fields = {
+        dish_name: s.dish_name,
+        description: s.description ?? "",
+        ingredients: s.ingredients ?? "",
+        preparation: s.preparation ?? "",
+      };
       setFields(f);
       setOriginal(f);
       setSubmissionId(s.id);
       setRecipeStatus(s.status);
-      const main = s.media.find((m) => m.kind === "main_photo") ?? s.media.find((m) => m.kind === "photo");
-      const ids: string[] = main ? [main.id] : [];
-      if (main) {
-        setPhoto({ previewUrl: main.url, mime: main.mime, size: main.size, serverId: main.id, serverStatus: "ready", progress: 0 });
-      } else if (s.status === "pending_media") {
-        // Envio interrompido: a linha existe no servidor, mas o arquivo não chegou.
+      // Fotos que já estão no servidor, a principal primeiro.
+      const rows = s.media
+        .filter((m) => m.kind === "main_photo" || m.kind === "photo")
+        .sort((a, b) => (a.kind === "main_photo" ? 0 : 1) - (b.kind === "main_photo" ? 0 : 1));
+      const drafts: PhotoDraft[] = rows.map((m) => ({
+        uid: newPhotoUid(), previewUrl: m.url, mime: m.mime, size: m.size, serverId: m.id, serverStatus: "ready", progress: 0, kind: m.kind as MediaKind,
+      }));
+      const ids = rows.map((m) => m.id);
+      if (s.status === "pending_media") {
+        // Envio interrompido: a(s) linha(s) existe(m) no servidor, mas o arquivo não chegou.
         try {
           const u = await campaignsApi.post<{ uploads: UploadTicket[] }>(`${api}/submission/${s.id}/uploads`);
-          const t = (u.uploads ?? []).find((x) => x.kind === "main_photo") ?? (u.uploads ?? [])[0];
-          if (t) {
+          for (const t of u.uploads ?? []) {
+            if (ids.includes(t.id)) continue;
             ids.push(t.id);
-            setPhoto({ previewUrl: "", mime: t.mime, size: 0, serverId: t.id, serverStatus: "pending", progress: 0 });
+            drafts.push({ uid: newPhotoUid(), previewUrl: "", mime: t.mime, size: 0, serverId: t.id, serverStatus: "pending", progress: 0, kind: t.kind as MediaKind });
           }
         } catch { /* sem o ticket a pessoa ainda consegue escolher a foto de novo */ }
       }
-      setServerMainIds(ids);
+      setPhotos(drafts);
+      setServerPhotoIds(ids);
     } catch (e) {
       setLoadError(errMsg(e, "Não foi possível carregar a sua receita."));
     } finally {
@@ -147,7 +190,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
   const blockReason = (): string | null => {
     if (blockedMsg) return blockedMsg;
     if (isEdit) {
-      // Campanha de várias receitas: vale a regra da receita (não aprovada + inscrições abertas).
+      // Campanha de várias receitas: vale a regra da receita (não aprovada + participação aberta).
       const regOpen = !!state.released && state.registration === "open" && state.stage !== "closed";
       const allowed = multi ? regOpen && recipeStatus !== "approved" : !!state.can_edit;
       if (allowed || recipeStatus === null) return null;
@@ -158,9 +201,9 @@ function SubmitForm({ editId }: { editId: string | null }) {
     if (multi && count >= max) return `Você chegou ao limite de ${max} receitas nesta campanha.`;
     if (state.can_submit) return null;
     switch (state.registration) {
-      case "upcoming": return "As inscrições ainda não abriram.";
-      case "paused": return "As inscrições estão em pausa.";
-      case "closed": return "As inscrições foram encerradas.";
+      case "upcoming": return "A participação ainda não abriu.";
+      case "paused": return "A participação está em pausa.";
+      case "closed": return "A participação foi encerrada.";
       default: return "Esta campanha não está recebendo receitas agora.";
     }
   };
@@ -172,13 +215,15 @@ function SubmitForm({ editId }: { editId: string | null }) {
   });
 
   const resetForm = () => {
-    setFields({ dish_name: "", description: "" });
+    setFields(EMPTY);
     setOriginal(null);
-    setPhoto(null);
-    setServerMainIds([]);
+    photosRef.current.forEach((p) => { if (p.previewUrl.startsWith("blob:")) URL.revokeObjectURL(p.previewUrl); });
+    setPhotos([]);
+    setServerPhotoIds([]);
     setSubmissionId(null);
     setRecipeStatus(null);
     setBanner(null);
+    setSrvErrs({});
     setBlockedMsg(null);
     setShowErrors(false);
     setDoneDish("");
@@ -189,28 +234,43 @@ function SubmitForm({ editId }: { editId: string | null }) {
   // ── Salvar / enviar ───────────────────────────────────────────────────────
   const persist = async () => {
     if (inflight.current) return;
-    const cur = photoRef.current;
+    const cur = photosRef.current;
     const errs = validate(fields);
-    const photoMissing = needPhoto && !(cur && (cur.file || cur.serverStatus === "ready"));
-    if (errs.dish_name || errs.description || photoMissing) {
+    const hasErr = Object.keys(errs).length > 0;
+    // Só conta a foto que já tem arquivo ou já está no servidor (a "pendente" sem arquivo precisa ser escolhida de novo).
+    const usable = cur.filter((p) => p.file || p.serverStatus === "ready");
+    const photoMissing = needPhoto && usable.length === 0;
+    const needRepick = needPhoto && cur.some((p) => p.serverStatus === "pending" && !p.file);
+    if (hasErr || photoMissing || needRepick) {
       setShowErrors(true);
-      toast.warning("Confira os campos destacados.");
+      toast.warning(needRepick && !hasErr && !photoMissing ? "Escolha de novo a foto que não chegou." : "Confira os campos destacados.");
       requestAnimationFrame(() => document.querySelector('[aria-invalid="true"], [role="alert"]')?.scrollIntoView({ behavior: "smooth", block: "center" }));
       return;
     }
-    if (cur?.invalid) { toast.warning("Troque a foto para continuar."); return; }
+    if (cur.some((p) => p.invalid)) { toast.warning("Troque a foto marcada para continuar."); return; }
 
     inflight.current = true;
     setBanner(null);
+    setSrvErrs({});
     let sid = submissionId;
     let createdNow = false;
     try {
       setPhase("saving");
-      const f: Fields = { dish_name: fields.dish_name.trim(), description: fields.description.trim() };
-      const keepId = cur?.serverId; // linha existente (pronta ou pendente) que continua valendo
-      const isNewFile = !!cur?.file && !cur.serverId; // foto nova: precisa de uma nova intenção de envio
-      const remove = serverMainIds.filter((id) => id !== keepId);
-      const addMeta = isNewFile && cur ? [{ kind: "main_photo" as const, mime: cur.mime, size: cur.size }] : [];
+      const f: Fields = {
+        dish_name: fields.dish_name.trim(), description: fields.description.trim(),
+        ingredients: fields.ingredients.trim(), preparation: fields.preparation.trim(),
+      };
+      // Fotos: as que continuam no servidor, as que saíram e as novas (com o tipo certo: 1ª principal, demais extras).
+      const photoList = needPhoto ? cur : [];
+      const keepIds = new Set(photoList.filter((p) => p.serverId).map((p) => p.serverId as string));
+      const remove = needPhoto ? serverPhotoIds.filter((id) => !keepIds.has(id)) : [];
+      const newOnes = photoList.filter((p) => p.file && !p.serverId);
+      let mainTaken = photoList.some((p) => p.kind === "main_photo");
+      const addMeta = newOnes.map((p) => {
+        const kind: MediaKind = p.kind ?? (mainTaken ? "photo" : "main_photo");
+        if (kind === "main_photo") mainTaken = true;
+        return { kind, mime: p.mime, size: p.size };
+      });
       let tickets: UploadTicket[] = [];
       let changed = false;
 
@@ -222,7 +282,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
         tickets = r.uploads ?? [];
         setSubmissionId(sid);
       } else {
-        const textChanged = !original || f.dish_name !== original.dish_name || f.description !== original.description;
+        const textChanged = !original || (Object.keys(f) as (keyof Fields)[]).some((k) => f[k] !== original[k]);
         if (textChanged || remove.length > 0 || addMeta.length > 0) {
           const r = await campaignsApi.put<UpdateResp>(`${api}/submission/${sid}`, { ...f, remove, add: addMeta });
           tickets = r.uploads ?? [];
@@ -230,39 +290,50 @@ function SubmitForm({ editId }: { editId: string | null }) {
         }
       }
       if (addMeta.length > 0 && tickets.length !== addMeta.length) {
-        throw new Error("O servidor não preparou o envio da foto. Tente de novo.");
+        throw new Error("O servidor não preparou o envio das fotos. Tente de novo.");
       }
       setOriginal(f);
-      let ticket: UploadTicket | undefined = tickets[0];
-      const serverId = keepId ?? ticket?.id;
-      setServerMainIds(serverId ? [serverId] : []);
-      if (isNewFile && ticket) setPhoto((p) => (p ? { ...p, serverId: ticket!.id, serverStatus: "pending" } : p));
+      // Cada foto nova recebe o seu ticket (mesma ordem em que foram pedidos).
+      const ticketOf = new Map<string, UploadTicket>();
+      newOnes.forEach((p, i) => {
+        const t = tickets[i];
+        ticketOf.set(p.uid as string, t);
+        patchPhoto(p.uid, { serverId: t.id, serverStatus: "pending", kind: addMeta[i].kind });
+      });
+      setServerPhotoIds([...keepIds, ...tickets.map((t) => t.id)]);
 
-      // Falta subir o arquivo? (foto nova agora, ou falha de uma tentativa anterior)
-      const needsUpload = !!cur?.file && !cur.uploaded && (isNewFile || cur.serverStatus === "pending");
-      if (needsUpload && !ticket) {
+      // Quais fotos ainda precisam subir? (novas agora, ou falha de uma tentativa anterior)
+      const toUpload = photoList.filter((p) => p.file && !p.uploaded && (!p.serverId || p.serverStatus === "pending"));
+      let retryTickets: UploadTicket[] | null = null;
+      if (toUpload.some((p) => !ticketOf.get(p.uid as string))) {
         const re = await campaignsApi.post<{ uploads: UploadTicket[] }>(`${api}/submission/${sid}/uploads`);
-        ticket = (re.uploads ?? []).find((t) => t.id === keepId) ?? (re.uploads ?? [])[0];
+        retryTickets = re.uploads ?? [];
       }
 
-      if (needsUpload) {
+      if (toUpload.length > 0) {
         setPhase("uploading");
-        if (!ticket || !cur?.file) {
-          setPhoto((p) => (p ? { ...p, error: "Não foi possível preparar o envio da foto." } : p));
-          setPhase("partial");
-          setBanner("Sua receita foi registrada, mas a foto não foi enviada. Toque em “Tentar de novo”.");
-          return;
+        let failed = false;
+        for (const p of toUpload) {
+          const t = ticketOf.get(p.uid as string) ?? retryTickets?.find((x) => x.id === p.serverId);
+          if (!t || !p.file) {
+            patchPhoto(p.uid, { error: "Não foi possível preparar o envio da foto." });
+            failed = true;
+            continue;
+          }
+          patchPhoto(p.uid, { progress: 0.01, error: undefined });
+          let last = 0;
+          try {
+            await uploadToSignedUrl(t.signedUrl, p.file, (frac) => {
+              if (frac - last >= 0.03 || frac === 1) { last = frac; patchPhoto(p.uid, { progress: frac }); }
+            });
+            patchPhoto(p.uid, { progress: 1, uploaded: true, error: undefined });
+          } catch (e) {
+            patchPhoto(p.uid, { progress: 0, error: errMsg(e, "Falha no envio da foto.") });
+            failed = true;
+          }
         }
-        setPhoto((p) => (p ? { ...p, progress: 0.01, error: undefined } : p));
-        let last = 0;
-        try {
-          await uploadToSignedUrl(ticket.signedUrl, cur.file, (p) => {
-            if (p - last >= 0.03 || p === 1) { last = p; setPhoto((d) => (d ? { ...d, progress: p } : d)); }
-          });
-          setPhoto((d) => (d ? { ...d, progress: 1, uploaded: true, error: undefined } : d));
-        } catch (e) {
-          const msg = "Sua receita foi registrada, mas a foto não foi enviada. Toque em “Tentar de novo”.";
-          setPhoto((d) => (d ? { ...d, progress: 0, error: errMsg(e, "Falha no envio da foto.") } : d));
+        if (failed) {
+          const msg = "Sua receita foi registrada, mas alguma foto não foi enviada. Toque em “Tentar de novo”.";
           setPhase("partial");
           setBanner(msg);
           toast.error(msg);
@@ -270,18 +341,20 @@ function SubmitForm({ editId }: { editId: string | null }) {
         }
       }
 
-      const needsFinalize = !!photoRef.current && (needsUpload || photoRef.current.serverStatus === "pending" || isNewFile);
+      const needsFinalize = toUpload.length > 0 || addMeta.length > 0 || photoList.some((p) => p.serverStatus === "pending");
       if (needsFinalize) {
         setPhase("finalizing");
         try {
           await campaignsApi.post(`${api}/submission/${sid}/finalize`);
         } catch (e) {
           if (e instanceof CampaignApiError && (e.code === "MEDIA_NOT_VERIFIED" || e.code === "MEDIA_INVALID")) {
-            setPhoto((d) => (d
-              ? (e.code === "MEDIA_INVALID"
-                  ? { ...d, error: e.message, invalid: true, uploaded: false, progress: 0 }
-                  : { ...d, error: "A foto não chegou ao servidor. Tente enviar de novo.", uploaded: false, progress: 0 })
-              : d));
+            const badId = (e.details as { id?: string } | undefined)?.id;
+            const bad = photosRef.current.find((p) => p.serverId === badId);
+            if (bad) {
+              patchPhoto(bad.uid, e.code === "MEDIA_INVALID"
+                ? { error: e.message, invalid: true, uploaded: false, progress: 0 }
+                : { error: "A foto não chegou ao servidor. Tente enviar de novo.", uploaded: false, progress: 0 });
+            }
             setPhase("partial");
             setBanner(e.message);
             toast.error(e.message);
@@ -289,7 +362,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
           }
           throw e;
         }
-        setPhoto((d) => (d ? { ...d, serverStatus: "ready", error: undefined } : d));
+        setPhotos((prev) => prev.map((p) => (p.serverId ? { ...p, serverStatus: "ready", error: undefined } : p)));
       }
 
       const touched = createdNow || changed || remove.length > 0 || addMeta.length > 0 || needsFinalize;
@@ -314,6 +387,16 @@ function SubmitForm({ editId }: { editId: string | null }) {
         await refresh();
         navigate(existing ? `${base}/enviar/${existing}` : `${base}/participacao`, { replace: true });
         return;
+      }
+      if (code === "INVALID_FIELDS" && e instanceof CampaignApiError && typeof e.details === "string") {
+        // O servidor apontou os campos (ex.: "ingredients,preparation"): marca cada um na tela.
+        const marked: FieldErrs = {};
+        for (const k of e.details.split(",")) {
+          const key = k.trim() as keyof Fields;
+          if (SERVER_FIELD_MSG[key]) marked[key] = SERVER_FIELD_MSG[key];
+        }
+        setSrvErrs(marked);
+        setShowErrors(true);
       }
       const msg = code === "SUBMISSION_LIMIT" ? `Você chegou ao limite de ${max} receitas nesta campanha.` : errMsg(e);
       if (BLOCKING_CODES.includes(code)) {
@@ -379,12 +462,16 @@ function SubmitForm({ editId }: { editId: string | null }) {
   const disabled = busy || !!blocked;
   const label =
     phase === "saving" ? "Salvando…"
-    : phase === "uploading" ? "Enviando a foto…"
+    : phase === "uploading" ? (photos.filter((p) => p.file && !p.uploaded).length > 1 ? "Enviando as fotos…" : "Enviando a foto…")
     : phase === "finalizing" ? "Finalizando…"
     : phase === "partial" ? "Tentar de novo"
     : isEdit ? "Salvar alterações" : "Enviar receita";
-  const errs = showErrors ? validate(fields) : {};
-  const storyLen = fields.description.length;
+  const errs: FieldErrs = showErrors ? { ...validate(fields), ...srvErrs } : {};
+  const set = (k: keyof Fields) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const v = e.target.value;
+    setFields((f) => ({ ...f, [k]: v }));
+    if (srvErrs[k]) setSrvErrs((s) => ({ ...s, [k]: undefined }));
+  };
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
@@ -428,7 +515,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
           <Input
             id="camp-dish"
             value={fields.dish_name}
-            onChange={(e) => setFields((f) => ({ ...f, dish_name: e.target.value }))}
+            onChange={set("dish_name")}
             disabled={disabled}
             maxLength={TITLE_MAX}
             placeholder="Ex.: Bolo de fubá da vovó"
@@ -438,6 +525,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
           />
           {errs.dish_name && <p role="alert" className="text-sm font-medium text-destructive">{errs.dish_name}</p>}
         </div>
+
         <div className="space-y-1.5">
           <label htmlFor="camp-story" className={LABEL}>
             História e memória afetiva <span className="font-medium normal-case tracking-normal">(opcional)</span>
@@ -445,32 +533,87 @@ function SubmitForm({ editId }: { editId: string | null }) {
           <Textarea
             id="camp-story"
             value={fields.description}
-            onChange={(e) => setFields((f) => ({ ...f, description: e.target.value }))}
+            onChange={set("description")}
             disabled={disabled}
-            maxLength={Math.max(STORY_MAX, storyLen)}
-            rows={6}
-            placeholder="Conte a história desta receita: quem fazia, onde você provou pela primeira vez, que lembrança ela traz."
+            maxLength={Math.max(STORY_MAX, fields.description.length)}
+            rows={5}
+            placeholder="Quem fazia, onde você provou pela primeira vez, que lembrança ela traz."
             aria-invalid={!!errs.description}
-            className={cn(FIELD, "min-h-[140px]")}
+            className={cn(FIELD, "min-h-[120px]")}
           />
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               {errs.description && <p role="alert" className="text-sm font-medium text-destructive">{errs.description}</p>}
             </div>
-            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground" aria-live="off">{storyLen}/{STORY_MAX}</span>
+            <Count n={fields.description.length} max={STORY_MAX} always />
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <label htmlFor="camp-ingredients" className={LABEL}>Ingredientes</label>
+          <Textarea
+            id="camp-ingredients"
+            value={fields.ingredients}
+            onChange={set("ingredients")}
+            disabled={disabled}
+            maxLength={Math.max(TEXT_MAX, fields.ingredients.length)}
+            rows={6}
+            placeholder={"Um ingrediente por linha. Ex.:\n2 xícaras de fubá\n3 ovos\n1 xícara de açúcar"}
+            aria-invalid={!!errs.ingredients}
+            className={cn(FIELD, "min-h-[150px]")}
+          />
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              {errs.ingredients && <p role="alert" className="text-sm font-medium text-destructive">{errs.ingredients}</p>}
+            </div>
+            <Count n={fields.ingredients.length} max={TEXT_MAX} />
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <label htmlFor="camp-preparation" className={LABEL}>Modo de preparo</label>
+          <Textarea
+            id="camp-preparation"
+            value={fields.preparation}
+            onChange={set("preparation")}
+            disabled={disabled}
+            maxLength={Math.max(TEXT_MAX, fields.preparation.length)}
+            rows={8}
+            placeholder={"Conte o passo a passo, um passo por linha. Ex.:\n1. Misture os secos.\n2. Junte os ovos e bata bem.\n3. Asse por 40 minutos."}
+            aria-invalid={!!errs.preparation}
+            className={cn(FIELD, "min-h-[190px]")}
+          />
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              {errs.preparation && <p role="alert" className="text-sm font-medium text-destructive">{errs.preparation}</p>}
+            </div>
+            <Count n={fields.preparation.length} max={TEXT_MAX} />
           </div>
         </div>
       </Card>
 
       {needPhoto && (
         <div data-tutorial="camp-photo" className="space-y-2">
-          <p className={LABEL}>Foto da receita</p>
-          <PhotoPicker draft={photo} setDraft={setPhoto} maxMb={maxMb} disabled={disabled} showError={showErrors} />
+          <p className={LABEL}>Fotos da receita <span className="font-medium normal-case tracking-normal">(1 a {MAX_PHOTOS_PER_RECIPE})</span></p>
+          <PhotoSet
+            photos={photos}
+            setPhotos={setPhotos}
+            max={MAX_PHOTOS_PER_RECIPE}
+            maxMb={maxMb}
+            disabled={disabled}
+            showError={showErrors}
+          />
         </div>
       )}
 
       {!blocked && (
-        <div className="sticky bottom-[4.75rem] z-10 -mx-4 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-2 pt-4 md:bottom-4 md:mx-0 md:px-0">
+        <div className="sticky bottom-[4.75rem] z-10 -mx-4 space-y-2 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-2 pt-4 md:bottom-4 md:mx-0 md:px-0">
+          {!isEdit && (
+            <p className="flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground">
+              <ShieldCheck size={13} className="mt-px shrink-0" aria-hidden="true" />
+              Ao enviar, você autoriza a divulgação da sua receita, com seu nome, na campanha e no Livro de Receitas.
+            </p>
+          )}
           <Button
             size="lg"
             data-tutorial="camp-send"
@@ -481,7 +624,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
             {busy ? <Loader2 size={18} className="animate-spin" /> : phase === "partial" ? <RefreshCw size={18} /> : <Send size={18} />}
             {label}
           </Button>
-          {busy && <p className="mt-2 text-center text-xs text-muted-foreground" aria-live="polite">Não feche esta tela até terminar.</p>}
+          {busy && <p className="text-center text-xs text-muted-foreground" aria-live="polite">Não feche esta tela até terminar.</p>}
         </div>
       )}
 
