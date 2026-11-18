@@ -40,6 +40,30 @@ export function fmtPeriod(starts: string | null | undefined, ends: string | null
 export function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
+/** Intervalo curto, do jeito que cabe numa linha: "17 nov → 20 nov" (um dia só: "17 nov"). Sem datas: "Sem datas". */
+export function fmtRange(starts: string | null | undefined, ends: string | null | undefined): string {
+  if (!starts && !ends) return "Sem datas";
+  const p = (iso: string) => formatInTimeZone(new Date(iso), TIMEZONE, "dd MMM", { locale: ptBR }).replace(".", "");
+  if (starts && ends) {
+    const a = p(starts);
+    const b = p(ends);
+    return a === b ? a : `${a} → ${b}`;
+  }
+  return starts ? `desde ${p(starts)}` : `até ${p(ends as string)}`;
+}
+/** "25/11 às 14:00" (Brasília) — para horários marcados. */
+export function fmtDayTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return formatInTimeZone(new Date(iso), TIMEZONE, "dd/MM 'às' HH:mm", { locale: ptBR });
+}
+/** Do primeiro início ao último encerramento entre as etapas que têm data (participação e, se houver, votação). */
+export function stagesSpan(stages: { stage_key: string; starts_at: string | null; ends_at: string | null }[]): { starts: string | null; ends: string | null } {
+  const live = stages.filter((s) => (s.stage_key === "registration" || s.stage_key === "voting") && (s.starts_at || s.ends_at));
+  const t = (x: string) => new Date(x).getTime();
+  const starts = live.map((s) => s.starts_at).filter((x): x is string => !!x).sort((a, b) => t(a) - t(b))[0] ?? null;
+  const ends = live.map((s) => s.ends_at).filter((x): x is string => !!x).sort((a, b) => t(b) - t(a))[0] ?? null;
+  return { starts, ends };
+}
 
 // ─────────────────────────── Rótulos e cores ───────────────────────────
 // Mesmo padrão de badges do site (amarelo / azul / verde, com variantes dark).
@@ -69,11 +93,11 @@ export type DisplayState = "draft" | "scheduled" | "published" | "unpublished" |
 
 export const DISPLAY_STATE: Record<DisplayState, { label: string; hint: string; className: string }> = {
   draft: { label: "Rascunho", hint: "Em construção. Só a gestão vê.", className: GRAY },
-  scheduled: { label: "Agendada", hint: "Publicada, vai aparecer para os colaboradores na data marcada.", className: BLUE },
-  published: { label: "Publicada", hint: "Visível para os colaboradores elegíveis.", className: GREEN },
-  unpublished: { label: "Não publicada", hint: "Retirada de exibição. Tudo continua salvo e pode ser republicada.", className: ORANGE },
-  closed: { label: "Encerrada", hint: "Finalizada. Não recebe mais receitas nem votos.", className: PURPLE },
-  archived: { label: "Arquivada", hint: "Fora da lista principal. Dados e histórico preservados.", className: GRAY },
+  scheduled: { label: "Agendada", hint: "Aparece para os colaboradores na data marcada.", className: BLUE },
+  published: { label: "Publicada", hint: "Em exibição.", className: GREEN },
+  unpublished: { label: "Não publicada", hint: "Retirada de exibição. Tudo continua salvo.", className: ORANGE },
+  closed: { label: "Encerrada", hint: "Finalizada.", className: PURPLE },
+  archived: { label: "Arquivada", hint: "Fora da lista principal.", className: GRAY },
 };
 
 export function campaignDisplayState(c: {
@@ -91,7 +115,7 @@ export function campaignDisplayState(c: {
   return "draft"; // draft e in_review
 }
 
-/** Situação de uma etapa (inscrições, votação...) calculada a partir das datas. */
+/** Situação de uma etapa (participação, votação...) calculada a partir das datas. */
 export type PhaseState = "unset" | "upcoming" | "open" | "paused" | "closed";
 export const PHASE_STATE: Record<PhaseState, { label: string; className: string }> = {
   unset: { label: "Sem datas", className: GRAY },
@@ -120,8 +144,9 @@ export const RESULT_STATUS: Record<ResultStatus, { label: string; className: str
 /** Etapa que o colaborador enxerga (calculada no banco com o relógio do servidor). */
 export const COLLAB_STAGE: Record<CollabStage, { label: string; className: string }> = {
   upcoming: { label: "Em breve", className: GRAY },
-  registration: { label: "Inscrições abertas", className: GREEN },
-  registration_paused: { label: "Inscrições pausadas", className: ORANGE },
+  registration: { label: "Participação aberta", className: GREEN },
+  open: { label: "Participação e votação abertas", className: GREEN },
+  registration_paused: { label: "Participação pausada", className: ORANGE },
   review: { label: "Em análise", className: YELLOW },
   voting: { label: "Em votação", className: ORANGE },
   voting_paused: { label: "Votação em pausa", className: YELLOW },
@@ -131,7 +156,7 @@ export const COLLAB_STAGE: Record<CollabStage, { label: string; className: strin
 };
 
 export const STAGE_LABEL: Record<string, string> = {
-  registration: "Inscrições",
+  registration: "Participação",
   voting: "Votação",
   results: "Apuração",
   announcement: "Divulgação",
@@ -150,6 +175,9 @@ export const AUDIT_ACTION: Record<string, string> = {
   REJECT_SUBMISSION: "Receita reprovada", CAST_VOTE: "Voto registrado", INVALIDATE_VOTE: "Voto invalidado",
   END_VOTING_NOW: "Votação encerrada manualmente", CLOSE_VOTING: "Votação apurada", DECIDE_TIE: "Desempate decidido",
   CONFIRM_WINNER: "Vencedor confirmado", ANNOUNCE_RESULTS: "Resultado divulgado", EXPORT_REPORT: "Relatório exportado",
+  SCHEDULE_ANNOUNCEMENT: "Divulgação programada", CANCEL_ANNOUNCEMENT: "Programação de divulgação cancelada",
+  UNSCHEDULE_ANNOUNCEMENT: "Programação de divulgação cancelada", AUTO_ANNOUNCE: "Resultado divulgado (programado)",
+  ANNOUNCE_RESULTS_SCHEDULED: "Resultado divulgado (programado)",
   MODULE_ENABLED: "Módulo ligado", MODULE_DISABLED: "Módulo desligado",
   SET_CAMPAIGN_ADMIN: "Acesso ao módulo alterado", REMOVE_CAMPAIGN_ADMIN: "Acesso ao módulo removido",
 };

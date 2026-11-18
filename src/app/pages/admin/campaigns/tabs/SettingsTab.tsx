@@ -4,6 +4,7 @@ import { Archive, CalendarClock, FileDown, History as HistoryIcon, IdCard, Penci
 import { Button } from "../../../../components/ui/Button";
 import { DISPLAY_STATE, plural } from "../../../../lib/campaigns/format";
 import type { DisplayState } from "../../../../lib/campaigns/format";
+import { MAX_SUBMISSIONS_PER_USER } from "../../../../lib/campaigns/types";
 import type { AdminCampaign, AdminDashboard } from "../../../../lib/campaigns/types";
 import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
@@ -118,7 +119,7 @@ export function SettingsTab(props: SettingsTabProps) {
 
   return (
     <div className="space-y-4">
-      <TabIntro>Ajuste as informações e o período, baixe relatórios e consulte o histórico. O que muda o destino da campanha fica na zona de risco.</TabIntro>
+      <TabIntro>Ajuste as informações e as datas, baixe relatórios e consulte o histórico. O que muda o destino da campanha fica na zona de risco.</TabIntro>
 
       <Fold {...foldProps("info")} icon={<IdCard size={18} />} title="Informações" hint="O que os colaboradores leem sobre a campanha.">
         {perms.campaigns_edit && !finished && (
@@ -130,18 +131,18 @@ export function SettingsTab(props: SettingsTabProps) {
         )}
         <dl className="divide-y divide-border">
           <Row label="Nome">{c.name}</Row>
-          <Row label="Endereço"><span className="font-mono text-xs">/campanhas/{c.slug}</span></Row>
-          <Row label="Situação">{DISPLAY_STATE[display].label} — {DISPLAY_STATE[display].hint}</Row>
+          <Row label="Situação">{DISPLAY_STATE[display].label}</Row>
           <Row label="Descrição"><span className="line-clamp-4 whitespace-pre-line">{c.description || "—"}</span></Row>
           <Row label="Detalhes">{lines > 0 ? `${plural(lines, "linha", "linhas")} de regras e orientações` : "—"}</Row>
-          <Row label="Votação">{c.features.voting ? "Com votação" : "Sem votação"}</Row>
+          {c.features.voting && <Row label="Votação">Com votação</Row>}
+          <Row label="Receitas por pessoa">{c.features.multiple_submissions ? `Até ${MAX_SUBMISSIONS_PER_USER}` : "Uma"}</Row>
           <Row label="Capa e banner">{c.cover_url ? "Imagem cadastrada (a mesma do banner da Home)" : "Sem imagem — o banner usa o fundo laranja com o nome"}</Row>
           <Row label="Público">{audienceText(c, dashboard?.eligible)}</Row>
         </dl>
       </Fold>
 
       {perms.campaigns_schedule && (
-        <Fold {...foldProps("period")} icon={<CalendarClock size={18} />} title="Período" hint="Início e encerramento da campanha.">
+        <Fold {...foldProps("period")} icon={<CalendarClock size={18} />} title={c.features.voting ? "Períodos" : "Período"} hint={c.features.voting ? "Participação e votação: início e encerramento de cada uma." : "Início e encerramento da campanha."}>
           <PeriodSection {...tabProps} />
         </Fold>
       )}

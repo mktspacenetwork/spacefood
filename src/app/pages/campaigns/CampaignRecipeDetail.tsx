@@ -111,9 +111,14 @@ export function CampaignRecipeDetail() {
         </p>
       </header>
 
-      {recipe.description && <p className="whitespace-pre-line text-sm leading-relaxed text-foreground">{recipe.description}</p>}
+      {recipe.description?.trim() && (
+        <section className="space-y-2">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">História e memória afetiva</h3>
+          <p className="whitespace-pre-line text-sm leading-relaxed text-foreground">{recipe.description}</p>
+        </section>
+      )}
 
-      {/* Receitas antigas podem ter ingredientes e preparo; as novas não pedem esses campos. */}
+      {/* Receitas antigas podem ter ingredientes e preparo; as novas não pedem esses campos (nada aparece vazio). */}
       {ingredients.length > 0 && (
         <section className="space-y-2">
           <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Ingredientes</h3>

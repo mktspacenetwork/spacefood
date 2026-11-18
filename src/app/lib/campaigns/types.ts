@@ -6,7 +6,7 @@ export type SubmissionStatus = "pending_media" | "submitted" | "in_review" | "ap
 export type ResultStatus = "none" | "preliminary" | "tie_pending" | "confirmed" | "announced";
 /** Etapa derivada, calculada pelo banco, que o colaborador enxerga. */
 export type CollabStage =
-  | "upcoming" | "registration" | "registration_paused" | "review"
+  | "upcoming" | "registration" | "registration_paused" | "review" | "open"
   | "voting" | "voting_paused" | "voting_closed" | "results" | "closed";
 
 export type TourConfig = { enabled: boolean; version: number };
@@ -22,7 +22,12 @@ export type Features = {
   results: boolean;
   announcement: boolean;
   tour: TourConfig;
+  /** Permite mais de uma receita por colaborador (até MAX_SUBMISSIONS_PER_USER). Ausente = false (uma só). */
+  multiple_submissions?: boolean;
 };
+
+/** Teto técnico de receitas por colaborador quando `features.multiple_submissions` está ligado (aplicado no banco). */
+export const MAX_SUBMISSIONS_PER_USER = 10;
 
 export type Visibility = {
   ranking_mode: "hidden_until_confirmed" | "after_close" | "live";
@@ -87,6 +92,9 @@ export type CollabState = {
   can_submit?: boolean;
   can_edit?: boolean;
   can_vote?: boolean;
+  /** Quantas receitas o colaborador já enviou nesta campanha e o máximo permitido (1, ou até 10 com várias). */
+  my_submissions_count?: number;
+  max_submissions?: number;
   my_submission_id?: string | null;
   my_submission_status?: SubmissionStatus | null;
   has_voted?: boolean;
@@ -99,7 +107,14 @@ export type CollabState = {
 };
 
 export type CollabCampaignListItem = PublicCampaign & {
-  state: { stage: CollabStage; released: boolean; my_submission_status: SubmissionStatus | null };
+  state: {
+    stage: CollabStage; released: boolean; my_submission_status: SubmissionStatus | null;
+    /** Opcionais: se o servidor enviar, o botão do cartão usa; senão a lista deduz pelas datas. */
+    can_submit?: boolean; can_vote?: boolean; has_voted?: boolean; results_visible?: boolean;
+    my_submissions_count?: number; max_submissions?: number;
+  };
+  /** true quando o período da campanha já acabou (último fim entre inscrições e votação): o slide some da Home. */
+  ended: boolean;
 };
 
 export type MediaItem = { id: string; kind: "main_photo" | "photo" | "video"; mime: string; size: number; url: string };
@@ -114,6 +129,16 @@ export type MySubmission = {
   id: string; dish_name: string; description: string; ingredients: string; preparation: string;
   status: SubmissionStatus; rejection_reason: string | null;
   submitted_at: string | null; updated_at: string | null; reviewed_at: string | null; media: MediaItem[];
+};
+
+/** `GET /campaigns/:slug/my-submissions` — todas as receitas do colaborador na campanha (1, ou várias). */
+export type MySubmissions = {
+  items: MySubmission[];
+  count: number;
+  max: number;
+  can_submit_more: boolean;
+  state: CollabState;
+  my_vote: { dish_name: string; author: string; at: string | null } | null;
 };
 
 export type UploadTicket = {
@@ -174,7 +199,22 @@ export type AdminResults = {
   confirmed_by_name: string | null;
   confirmed_at: string | null;
   announced_at: string | null;
+  /** Divulgação agendada (null = nenhuma). Ao chegar a hora o banco divulga e notifica sozinho, uma única vez. */
+  announce_at?: string | null;
+  announce_scheduled_by_name?: string | null;
+  announce_scheduled_at?: string | null;
 };
+
+/** `PUT /admin/campaigns/:id/period`. Sem os campos `voting_*` a votação usa a mesma janela das inscrições. */
+export type PeriodPayload = {
+  starts_at: string | null;
+  ends_at: string | null;
+  voting_starts_at?: string | null;
+  voting_ends_at?: string | null;
+};
+
+/** `GET /tours` — chaves de tour que o usuário logado já viu (histórico por usuário, guardado no servidor). */
+export type ToursSeen = { seen: string[] };
 
 export type TallyRow = { submission_id: string; dish_name: string; author: string; votes: number };
 

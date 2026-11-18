@@ -9,7 +9,7 @@ import { Progress } from "../../../../components/ui/progress";
 import { cn } from "../../../../lib/utils";
 import { TIMEZONE } from "../../../../lib/date-utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
-import { RESULT_STATUS, fmtDate, fmtDateTime, plural } from "../../../../lib/campaigns/format";
+import { RESULT_STATUS, fmtDate, fmtDateTime, fmtDayTime, plural } from "../../../../lib/campaigns/format";
 import type { DisplayState } from "../../../../lib/campaigns/format";
 import type {
   AdminDashboard, AdminParticipant, AdminSubmissionRow, PublishCheck,
@@ -41,7 +41,7 @@ export type SummaryTabProps = TabProps & {
 export function SummaryTab(props: SummaryTabProps) {
   const {
     campaignId, campaign, perms, goTab, dashboard: d, dashboardLoading, dashboardError, onReloadDashboard, display,
-    publishCheck, top, tourUserId, tourSignal,
+    publishCheck, top, tourUserId, tourSignal, results,
   } = props;
   const navigate = useNavigate();
   const f = campaign.features;
@@ -116,7 +116,7 @@ export function SummaryTab(props: SummaryTabProps) {
           <Notice tone="info" title="Rascunho">Complete as informações e as datas; depois a pessoa com permissão clica em Publicar.</Notice>
         )}
         <p className="px-1 text-center text-xs text-muted-foreground">
-          Participação, receitas, votos e ranking aparecem aqui quando a campanha for publicada.
+          {f.voting ? "Participação, receitas, votos e ranking aparecem aqui quando a campanha for publicada." : "Participação e receitas aparecem aqui quando a campanha for publicada."}
         </p>
         {tourEl}
       </div>
@@ -134,6 +134,8 @@ export function SummaryTab(props: SummaryTabProps) {
   const votingEnds = d.voting_ends_at ?? d.stages.find((x) => x.stage_key === "voting")?.ends_at ?? null;
   const rs = d.results?.status ?? "none";
   const rsMeta = RESULT_STATUS[rs];
+  // Divulgação programada (vem do registro da campanha; o painel do resumo traz só o essencial).
+  const announceAt = rs === "confirmed" ? (results?.announce_at ?? d.results?.announce_at ?? null) : null;
   const tally = resultsLocked ? [] : d.tally ?? [];
   const official = rs === "confirmed" || rs === "announced";
   const canGoVoting = !!goTab && (!!perms.campaigns_schedule || !!perms.campaigns_results || !!perms.campaigns_votes_view);
@@ -255,17 +257,20 @@ export function SummaryTab(props: SummaryTabProps) {
                 </>
               ) : (
                 <>
-                  <Badge className={cn("border text-[11px]", rsMeta.className)}>{rsMeta.label}</Badge>
+                  <Badge className={cn("border text-[11px]", announceAt ? "border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300" : rsMeta.className)}>
+                    {announceAt ? "Divulgação programada" : rsMeta.label}
+                  </Badge>
                   <p className="text-[12px] leading-relaxed text-muted-foreground">
-                    {rs === "none" && "A votação encerrou. Veja o resultado e o vencedor."}
-                    {rs === "preliminary" && "Confira o resultado e confirme o vencedor."}
+                    {rs === "none" && "A votação encerrou. Veja o ganhador."}
+                    {rs === "preliminary" && "Confira o resultado e confirme o ganhador."}
                     {rs === "tie_pending" && "Há empate: registre a decisão para continuar."}
-                    {rs === "confirmed" && `Vencedor confirmado em ${fmtDateTime(d.results?.confirmed_at)}.`}
+                    {rs === "confirmed" && !announceAt && `Ganhador confirmado em ${fmtDateTime(d.results?.confirmed_at)}.`}
+                    {rs === "confirmed" && announceAt && `Será divulgado em ${fmtDayTime(announceAt)}.`}
                     {rs === "announced" && `Divulgado em ${fmtDateTime(d.results?.announced_at)}.`}
                   </p>
                   {canGoVoting && (
                     <button type="button" onClick={() => goTab?.("voting")} className="text-xs font-semibold text-primary hover:underline">
-                      Ver resultado →
+                      {rs === "confirmed" && !announceAt ? "Divulgar resultado →" : rs === "announced" ? "Ver resultado →" : "Ver ganhador →"}
                     </button>
                   )}
                 </>
@@ -448,13 +453,19 @@ function DailyBars({ rows }: { rows: AdminSubmissionRow[] }) {
 /** Participação por unidade: quem enviou receita entre os elegíveis de cada sede. */
 function UnitBars({ items }: { items: AdminParticipant[] }) {
   const groups = useMemo(() => {
-    const m = new Map<string, { eligible: number; sent: number }>();
+    // Com várias receitas por pessoa há uma linha por receita: aqui conta cada PESSOA uma vez.
+    const people = new Map<string, { unit: string; sent: boolean }>();
     for (const p of items) {
-      const u = p.unit?.trim() || "Sem unidade";
-      const g = m.get(u) ?? { eligible: 0, sent: 0 };
+      const cur = people.get(p.user_id) ?? { unit: p.unit?.trim() || "Sem unidade", sent: false };
+      if (p.submission_id && p.submission_status && p.submission_status !== "pending_media") cur.sent = true;
+      people.set(p.user_id, cur);
+    }
+    const m = new Map<string, { eligible: number; sent: number }>();
+    for (const { unit, sent } of people.values()) {
+      const g = m.get(unit) ?? { eligible: 0, sent: 0 };
       g.eligible += 1;
-      if (p.submission_id && p.submission_status && p.submission_status !== "pending_media") g.sent += 1;
-      m.set(u, g);
+      if (sent) g.sent += 1;
+      m.set(unit, g);
     }
     return [...m.entries()].sort((a, b) => b[1].eligible - a[1].eligible);
   }, [items]);

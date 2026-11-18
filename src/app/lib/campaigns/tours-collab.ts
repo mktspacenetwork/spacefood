@@ -26,25 +26,45 @@ export const LIST_TOUR: TourStep[] = [
     selector: "camp-card",
     icon: icon(CalendarDays),
     title: "Sua campanha",
-    description: "Veja o período e se está aberta. Toque no cartão para abrir.",
+    description: "Veja a situação e o período. Toque no cartão para abrir.",
+  },
+  {
+    selector: "camp-card-action",
+    icon: icon(MousePointerClick),
+    title: "Ir direto à ação",
+    description: "O botão leva ao que dá para fazer agora, como participar ou ver as suas receitas.",
   },
 ];
 
-/** Início da campanha. */
-export const HOME_TOUR: TourStep[] = [
-  {
-    selector: "camp-cta",
-    icon: icon(MousePointerClick),
-    title: "Ação do momento",
-    description: "Este botão leva ao que dá para fazer agora: participar, votar ou ver o resultado.",
-  },
-  {
-    selector: "camp-details",
-    icon: icon(Info),
-    title: "Mais informações",
-    description: "Regras, datas e como funciona ficam em “Ver detalhes”.",
-  },
-];
+/**
+ * Início da campanha. Os textos se adaptam: campanha sem votação nunca fala de voto, ranking ou resultado.
+ */
+export function homeTour(hasVoting: boolean): TourStep[] {
+  return [
+    {
+      selector: "camp-cta",
+      icon: icon(MousePointerClick),
+      title: "Ação do momento",
+      description: hasVoting
+        ? "Este botão leva ao que dá para fazer agora: enviar sua receita, votar ou ver o resultado."
+        : "Este botão leva ao que dá para fazer agora: enviar sua receita ou ver as suas receitas.",
+    },
+    {
+      selector: "camp-period",
+      icon: icon(CalendarDays),
+      title: hasVoting ? "Períodos" : "Período",
+      description: hasVoting
+        ? "Aqui estão as datas para participar e para votar."
+        : "Aqui estão as datas para participar.",
+    },
+    {
+      selector: "camp-details",
+      icon: icon(Info),
+      title: "Mais informações",
+      description: "Regras, datas e como funciona ficam em “Ver detalhes”.",
+    },
+  ];
+}
 
 /** Galeria de receitas. */
 export const RECIPES_TOUR: TourStep[] = [
@@ -82,8 +102,8 @@ export const SUBMIT_TOUR: TourStep[] = [
   {
     selector: "camp-fields",
     icon: icon(ListChecks),
-    title: "Nome e descrição",
-    description: "Escreva o nome da receita. A descrição é opcional.",
+    title: "Título e história",
+    description: "Dê um título à receita e, se quiser, conte a história e a memória afetiva por trás dela.",
   },
   {
     selector: "camp-photo",
@@ -95,16 +115,16 @@ export const SUBMIT_TOUR: TourStep[] = [
     selector: "camp-send",
     icon: icon(Send),
     title: "Enviar",
-    description: "A equipe confere sua receita. Você acompanha em “Minha receita”.",
+    description: "A equipe confere sua receita. Você acompanha em “Minhas receitas”.",
   },
 ];
 
-/** Minha receita. */
+/** Minhas receitas. */
 export const MYENTRY_TOUR: TourStep[] = [
   {
     icon: icon(ClipboardList),
-    title: "Minha receita",
-    description: "Aqui você vê se sua receita está em análise, aprovada ou se precisa de ajuste.",
+    title: "Minhas receitas",
+    description: "Aqui você vê as receitas que enviou: em análise, aprovadas ou que precisam de ajuste.",
   },
   {
     selector: "camp-status",
@@ -117,6 +137,12 @@ export const MYENTRY_TOUR: TourStep[] = [
     icon: icon(Pencil),
     title: "Editar",
     description: "Dá para editar enquanto ela não for aprovada.",
+  },
+  {
+    selector: "camp-new-recipe",
+    icon: icon(Send),
+    title: "Enviar receita",
+    description: "Use este botão para enviar uma receita. Quando a campanha permitir, dá para enviar outras.",
   },
 ];
 

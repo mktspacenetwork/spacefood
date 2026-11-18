@@ -5,6 +5,7 @@ import { Button } from "../../components/ui/Button";
 import { Skeleton } from "../../components/ui/skeleton";
 import { ErrorState } from "../../components/campaigns/ErrorState";
 import { campaignsApi, CampaignApiError, errMsg } from "../../lib/campaigns/api";
+import { submissionsCount } from "../../components/campaigns/campaignInfo";
 import { cn } from "../../lib/utils";
 import type { CollabState, PublicCampaign } from "../../lib/campaigns/types";
 
@@ -101,15 +102,22 @@ export function CampaignLayout() {
   const { campaign, state } = ctx;
   const base = `/campanhas/${slug}`;
   const isHome = pathname.replace(/\/+$/, "") === base;
-  const isForm = pathname.endsWith("/enviar");
+  const isForm = /\/enviar(\/|$)/.test(pathname);
 
   // Seções: só as que existem para esta campanha e esta pessoa agora.
+  // "Minhas receitas" aparece para quem já enviou ou ainda pode enviar (é a porta de entrada para cadastrar).
+  // "Votação" só existe em campanha COM votação; sem votação nem o resultado/ranking aparecem.
+  const hasVoting = !!campaign.features.voting;
   const sections: { to: string; label: string; end?: boolean }[] = [{ to: base, label: "Início", end: true }];
   if (state.gallery_visible) sections.push({ to: `${base}/receitas`, label: "Receitas" });
-  if (state.my_submission_id) sections.push({ to: `${base}/participacao`, label: "Meu envio" });
-  if (state.results_visible) sections.push({ to: `${base}/resultado`, label: "Resultado" });
-  else if (campaign.features.voting && state.released && (state.voting === "open" || state.has_voted || state.voting === "closed")) {
-    sections.push({ to: `${base}/votacao`, label: state.can_vote ? "Votar" : "Votação" });
+  if (state.released && (submissionsCount(state) > 0 || state.can_submit)) {
+    sections.push({ to: `${base}/participacao`, label: "Minhas receitas" });
+  }
+  if (hasVoting) {
+    if (state.results_visible) sections.push({ to: `${base}/resultado`, label: "Resultado" });
+    else if (state.released && (state.voting === "open" || state.has_voted || state.voting === "closed")) {
+      sections.push({ to: `${base}/votacao`, label: state.can_vote ? "Votar" : "Votação" });
+    }
   }
 
   return (
@@ -131,8 +139,7 @@ export function CampaignLayout() {
         <nav
           aria-label="Seções da campanha"
           data-tutorial="camp-sections"
-          className="grid gap-1 rounded-2xl bg-muted p-1"
-          style={{ gridTemplateColumns: `repeat(${sections.length}, minmax(0, 1fr))` }}
+          className="flex gap-1 overflow-x-auto rounded-2xl bg-muted p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {sections.map((s) => (
             <NavLink
@@ -141,7 +148,7 @@ export function CampaignLayout() {
               end={s.end}
               className={({ isActive }) =>
                 cn(
-                  "flex h-10 items-center justify-center truncate rounded-xl px-1 text-[13px] font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                  "flex h-10 flex-1 shrink-0 items-center justify-center whitespace-nowrap rounded-xl px-3 text-[13px] font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
                   isActive ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground",
                 )
               }

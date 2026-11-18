@@ -20,12 +20,15 @@ export function DuplicateDialog({
   onOpenChange,
   campaignId,
   campaignName,
+  hasVoting,
   onDuplicated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   campaignId: string;
   campaignName: string;
+  /** false = campanha sem votação: o texto não fala de votos nem de ranking. Desconhecido (undefined) mantém o texto completo. */
+  hasVoting?: boolean;
   onDuplicated: (newId: string) => void;
 }) {
   const [name, setName] = useState("");
@@ -52,8 +55,10 @@ export function DuplicateDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Copy size={18} className="text-primary" /> Duplicar campanha</DialogTitle>
           <DialogDescription>
-            Cria um novo rascunho com a mesma configuração (público, funcionalidades, regras e etapas, sem datas). Receitas,
-            fotos, votos, ranking, resultados e histórico não são copiados.
+            Cria um novo rascunho com a mesma configuração (público, regras e opções, sem datas).{" "}
+            {hasVoting === false
+              ? "Receitas, fotos e histórico não são copiados."
+              : "Receitas, fotos, votos, ranking, resultados e histórico não são copiados."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">

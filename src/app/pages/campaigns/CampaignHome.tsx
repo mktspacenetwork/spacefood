@@ -1,16 +1,19 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { CalendarDays, CheckCircle2, ChevronRight, Info } from "lucide-react";
+import { CheckCircle2, ChevronRight, Info } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "../../components/ui/Button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { CampaignCover } from "../../components/campaigns/CampaignCover";
 import { StatusChip } from "../../components/campaigns/StatusChip";
-import { periodText, statusOfDetail, myRecipeLine } from "../../components/campaigns/campaignInfo";
+import { PeriodRows } from "../../components/campaigns/PeriodRows";
+import {
+  hasVoting as campaignHasVoting, periodRows, recipesSummary, statusOfDetail, submissionsCount, submissionsMax,
+} from "../../components/campaigns/campaignInfo";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
 import { useCampaignCtx } from "./CampaignLayout";
 import { useAuth } from "../../context/Store";
-import { HOME_TOUR } from "../../lib/campaigns/tours-collab";
+import { homeTour } from "../../lib/campaigns/tours-collab";
 import { fmtDateTime } from "../../lib/campaigns/format";
 
 type Cta = { label: string; to: string };
@@ -22,32 +25,43 @@ export function CampaignHome() {
   const base = `/campanhas/${slug}`;
   const [detailsOpen, setDetailsOpen] = useState(false);
 
+  const hasVoting = campaignHasVoting(campaign);
+  const steps = useMemo(() => homeTour(hasVoting), [hasVoting]);
   const tour = useTour({
     storageKey: tourKey("collab", user?.id, "home", campaign.id, state.tour?.version),
     enabled: !!state.tour?.enabled && !!user,
   });
 
-  const hasVoting = campaign.features.voting;
   const status = statusOfDetail(campaign, state);
-  const period = periodText(campaign);
-  const reg = campaign.stages.find((s) => s.key === "registration");
-  const mine = myRecipeLine(state.my_submission_status);
+  const periods = periodRows(campaign);
+  const count = submissionsCount(state);
+  const max = submissionsMax(campaign, state);
+  const multi = max > 1;
+  const mine = recipesSummary(count, state.my_submission_status);
 
   // Um botão principal (a ação do momento) e, no máximo, um secundário.
   let primary: Cta | null = null;
   let secondary: Cta | null = null;
+  const votingNow = hasVoting && !!state.can_vote;
   if (state.released) {
-    if (state.results_visible) primary = { label: "Ver resultado", to: `${base}/resultado` };
-    else if (state.can_submit && !state.my_submission_id) {
-      primary = { label: "Participar", to: `${base}/enviar` };
-      if (hasVoting && state.can_vote) secondary = { label: "Votar nas receitas", to: `${base}/votacao` };
+    if (hasVoting && state.results_visible) primary = { label: "Ver resultado", to: `${base}/resultado` };
+    else if (count === 0 && state.can_submit) {
+      primary = { label: "Enviar minha receita", to: `${base}/enviar` };
+      if (votingNow) secondary = { label: "Votar nas receitas", to: `${base}/votacao` };
       else if (state.gallery_visible) secondary = { label: "Ver receitas", to: `${base}/receitas` };
-    } else if (state.can_vote) {
+    } else if (votingNow) {
       primary = { label: "Votar", to: `${base}/votacao` };
-      if (state.my_submission_id) secondary = { label: "Minha receita", to: `${base}/participacao` };
-    } else if (state.my_submission_id) {
-      primary = { label: "Ver minha receita", to: `${base}/participacao` };
-      if (state.gallery_visible) secondary = { label: "Ver receitas", to: `${base}/receitas` };
+      if (count > 0) secondary = state.can_submit
+        ? { label: "Enviar outra receita", to: `${base}/enviar` }
+        : { label: "Minhas receitas", to: `${base}/participacao` };
+    } else if (count > 0) {
+      if (state.can_submit) {
+        primary = { label: "Enviar outra receita", to: `${base}/enviar` };
+        secondary = { label: "Minhas receitas", to: `${base}/participacao` };
+      } else {
+        primary = { label: "Minhas receitas", to: `${base}/participacao` };
+        if (state.gallery_visible) secondary = { label: "Ver receitas", to: `${base}/receitas` };
+      }
     } else if (state.gallery_visible) primary = { label: "Ver receitas", to: `${base}/receitas` };
   }
 
@@ -60,20 +74,16 @@ export function CampaignHome() {
         {campaign.description && (
           <p className="line-clamp-3 whitespace-pre-line text-sm leading-relaxed text-muted-foreground">{campaign.description}</p>
         )}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-1" data-tutorial="camp-status-home">
-          {period && (
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
-              <CalendarDays size={13} aria-hidden="true" /> {period}
-            </span>
-          )}
+        <div className="space-y-2 pt-1" data-tutorial="camp-status-home">
           <StatusChip status={status} variant="pill" />
+          <PeriodRows campaign={campaign} />
         </div>
       </div>
 
-      {(mine || state.has_voted) && (
+      {(mine || (hasVoting && state.has_voted)) && (
         <p className="flex items-center gap-2 text-xs font-medium text-foreground/80" aria-label="Sua participação">
           <CheckCircle2 size={14} className="shrink-0 text-green-500" aria-hidden="true" />
-          {[mine, state.has_voted ? "Você já votou" : null].filter(Boolean).join(" · ")}
+          {[mine, hasVoting && state.has_voted ? "Você já votou" : null].filter(Boolean).join(" · ")}
         </p>
       )}
 
@@ -115,25 +125,31 @@ export function CampaignHome() {
                 <p className="whitespace-pre-line leading-relaxed text-foreground">{campaign.description}</p>
               </section>
             )}
-            {(reg?.starts_at || reg?.ends_at) && (
-              <section className="space-y-1.5">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Período</h3>
-                <p className="text-foreground">
-                  {reg?.starts_at && <>Início: {fmtDateTime(reg.starts_at)}<br /></>}
-                  {reg?.ends_at && <>Encerramento: {fmtDateTime(reg.ends_at)}</>}
-                </p>
+            {periods.length > 0 && (
+              <section className="space-y-2">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{periods.length > 1 || periods[0].key === "both" ? "Períodos" : "Período"}</h3>
+                {periods.map((p) => (
+                  <p key={p.key} className="text-foreground">
+                    {(periods.length > 1 || p.key === "both") && <span className="block text-xs font-semibold text-muted-foreground">{p.label}</span>}
+                    {p.startsAt && <>Início: {fmtDateTime(p.startsAt)}<br /></>}
+                    {p.endsAt && <>Encerramento: {fmtDateTime(p.endsAt)}</>}
+                  </p>
+                ))}
                 <p className="text-xs text-muted-foreground">Horário de Brasília.</p>
               </section>
             )}
             <section className="space-y-1.5">
               <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Como funciona</h3>
               <ul className="space-y-1.5 text-foreground">
-                <li className="flex gap-2.5"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />Envie o nome, uma breve descrição e a foto da receita.</li>
+                <li className="flex gap-2.5"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />Dê um título à receita, conte a história e a memória afetiva dela e envie uma foto.</li>
+                {multi && (
+                  <li className="flex gap-2.5"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />Você pode enviar até {max} receitas.</li>
+                )}
                 {campaign.features.approval && (
                   <li className="flex gap-2.5"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />A equipe confere antes de ela aparecer para todos.</li>
                 )}
                 {hasVoting && (
-                  <li className="flex gap-2.5"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />Vote na sua favorita: 1 voto por pessoa, definitivo, e não vale na própria receita.</li>
+                  <li className="flex gap-2.5"><span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />Vote na sua favorita: 1 voto por pessoa, definitivo, e não vale nas suas próprias receitas.</li>
                 )}
               </ul>
             </section>
@@ -147,7 +163,7 @@ export function CampaignHome() {
         </SheetContent>
       </Sheet>
 
-      <CampaignTour steps={HOME_TOUR} tour={tour} />
+      <CampaignTour steps={steps} tour={tour} />
     </motion.div>
   );
 }

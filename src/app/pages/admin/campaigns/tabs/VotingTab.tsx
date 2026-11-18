@@ -7,7 +7,7 @@ import { ConfirmDialog } from "../../../../components/ui/ConfirmDialog";
 import { Progress } from "../../../../components/ui/progress";
 import { cn } from "../../../../lib/utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
-import { PHASE_STATE, fmtDate, fmtPeriod, plural } from "../../../../lib/campaigns/format";
+import { PHASE_STATE, fmtDate, fmtDayTime, fmtRange, plural } from "../../../../lib/campaigns/format";
 import type { AdminDashboard, AdminResults } from "../../../../lib/campaigns/types";
 import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
@@ -52,6 +52,7 @@ export function VotingTab(props: TabProps) {
   const isBusy = busy !== null;
   const endsAt = vs?.ends_at ?? d.voting_ends_at ?? null;
   const resultShown = shown ?? resultsStatus !== "none";
+  const announceAt = resultsStatus === "confirmed" ? (res.announce_at ?? null) : null;
   const refresh = () => { dash.reload(); onChanged(); };
 
   const endNow = async () => {
@@ -72,7 +73,7 @@ export function VotingTab(props: TabProps) {
 
   return (
     <div className="space-y-4">
-      <TabIntro>Acompanhe quem já votou. O resultado fica disponível depois do encerramento.</TabIntro>
+      <TabIntro>Acompanhe quem já votou. O ganhador fica disponível depois do encerramento da votação.</TabIntro>
 
       {/* Situação */}
       <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-vote-status">
@@ -81,9 +82,10 @@ export function VotingTab(props: TabProps) {
             <SectionLabel>Situação da votação</SectionLabel>
             <Badge className={cn("border px-3 py-1 text-sm", phase.className)}>Votação {phase.label.toLowerCase()}</Badge>
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <CalendarDays size={13} aria-hidden="true" /> {vs?.starts_at || vs?.ends_at ? fmtPeriod(vs?.starts_at, vs?.ends_at) : "Defina o período em Configurações."}
+              <CalendarDays size={13} aria-hidden="true" /> {vs?.starts_at || vs?.ends_at ? fmtRange(vs?.starts_at, vs?.ends_at) : "Defina o período em Configurações."}
             </p>
             {state === "open" && endsAt && <p className="text-xs font-medium text-foreground">Encerra em {fmtDate(endsAt)} (fim do dia).</p>}
+            {announceAt && <p className="text-xs font-medium text-foreground">Divulgação programada para {fmtDayTime(announceAt)}.</p>}
             {state === "paused" && <p className="text-xs font-medium text-foreground">Pausada: ninguém consegue votar por enquanto.</p>}
           </div>
 
@@ -117,17 +119,17 @@ export function VotingTab(props: TabProps) {
           {!ended && resultsStatus === "none" ? (
             <div className="space-y-3">
               <Button size="lg" className="w-full gap-2 rounded-2xl sm:w-auto" disabled>
-                <Lock size={16} /> Ver resultado
+                <Lock size={16} /> Ver ganhador
               </Button>
               <p className="text-sm text-muted-foreground">
-                Disponível depois do encerramento da votação{endsAt ? ` (${fmtDate(endsAt)})` : ""}. Até lá, ninguém vê a contagem por receita — nem a gestão —, para o resultado não influenciar os votos.
+                Disponível depois do encerramento oficial da votação{endsAt ? ` (${fmtDate(endsAt)})` : ""}. Até lá, ninguém vê a contagem por receita — nem a gestão —, para o resultado não influenciar os votos.
               </p>
               {canSchedule && state === "open" && (
                 <div className="space-y-1 border-t pt-3">
                   <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => setEndNowOpen(true)} disabled={isBusy}>
                     {busy === "end" ? <Loader2 size={13} className="animate-spin" /> : <Square size={13} />} Encerrar votação agora
                   </Button>
-                  <p className="text-[11px] text-muted-foreground">Só se quiser antecipar o fim. Encerra também o envio de receitas e ninguém mais vota.</p>
+                  <p className="text-[11px] text-muted-foreground">Só se quiser antecipar o fim. Ninguém mais vota (e o envio de receitas também fecha, se ainda estiver aberto).</p>
                 </div>
               )}
             </div>
@@ -140,9 +142,9 @@ export function VotingTab(props: TabProps) {
               ) : (
                 <>
                   <Button size="lg" className="w-full gap-2 rounded-2xl sm:w-auto" onClick={seeResult} disabled={isBusy}>
-                    {busy === "tally" ? <Loader2 size={16} className="animate-spin" /> : <Trophy size={16} />} Ver resultado
+                    {busy === "tally" ? <Loader2 size={16} className="animate-spin" /> : <Trophy size={16} />} Ver ganhador
                   </Button>
-                  <p className="text-sm text-muted-foreground">A votação encerrou. Veja quem ganhou e confira os números.</p>
+                  <p className="text-sm text-muted-foreground">A votação encerrou. Veja quem ganhou, confira os números e divulgue.</p>
                 </>
               )}
             </div>
@@ -162,7 +164,7 @@ export function VotingTab(props: TabProps) {
         open={endNowOpen}
         onOpenChange={setEndNowOpen}
         title="Encerrar a votação agora?"
-        description="A campanha termina agora: ninguém mais poderá enviar receitas nem votar. Depois você poderá ver o resultado, confirmar o vencedor e divulgar."
+        description="A votação termina agora e ninguém mais poderá votar. Depois você poderá ver o ganhador, confirmar e divulgar."
         confirmLabel="Encerrar votação"
         variant="destructive"
         onConfirm={endNow}

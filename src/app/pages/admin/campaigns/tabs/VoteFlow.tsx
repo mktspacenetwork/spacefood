@@ -1,24 +1,30 @@
 import { useState } from "react";
-import { Loader2, Megaphone, ShieldCheck, Trophy, Users } from "lucide-react";
+import { CalendarClock, Loader2, Megaphone, ShieldCheck, Trophy, Users } from "lucide-react";
 import { Badge } from "../../../../components/ui/Badge";
 import { Button } from "../../../../components/ui/Button";
 import { Card, CardContent } from "../../../../components/ui/Card";
 import { ConfirmDialog } from "../../../../components/ui/ConfirmDialog";
+import { Input } from "../../../../components/ui/input";
 import { Label } from "../../../../components/ui/label";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "../../../../components/ui/dialog";
 import { Progress } from "../../../../components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../../components/ui/select";
 import { Textarea } from "../../../../components/ui/textarea";
 import { cn } from "../../../../lib/utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
-import { RESULT_STATUS, fmtDateTime, plural } from "../../../../lib/campaigns/format";
+import { RESULT_STATUS, fmtDateTime, fmtDayTime, fromInputValue, plural, toInputValue } from "../../../../lib/campaigns/format";
 import type { AdminResultsPayload, AdminSubmissionDetail, TallyRow } from "../../../../lib/campaigns/types";
 import { ErrorBox, LoadingBox, Notice, SectionLabel, useBusy, useLoader } from "../shared";
 import type { TabProps } from "./types";
 
 /**
- * RESULTADO da votação, numa tela só (aparece depois do encerramento):
- *   vencedor → conferência (totais e ranking) → [Confirmar vencedor] → [Divulgar para os colaboradores].
+ * RESULTADO da votação, numa tela só (aparece depois do encerramento oficial):
+ *   vencedor → conferência (totais e ranking) → [Confirmar vencedor] → [Divulgar agora] ou [Programar divulgação].
  * Em caso de empate, a decisão (com justificativa) vem antes. Cada ação pede confirmação e não dá duplo clique.
+ * Programada, a divulgação acontece sozinha no horário (o banco divulga e avisa quem participou, uma vez só);
+ * até lá dá para alterar o horário ou cancelar. Esta tela só agenda, altera, cancela e mostra o estado.
  */
 export function ResultView({
   campaignId, campaign, perms, goTab, onChanged, totals,
@@ -30,6 +36,9 @@ export function ResultView({
   const { busy, run } = useBusy();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [announceOpen, setAnnounceOpen] = useState(false);
+  const [schedOpen, setSchedOpen] = useState(false);
+  const [schedValue, setSchedValue] = useState(""); // datetime-local em Brasília
+  const [cancelOpen, setCancelOpen] = useState(false);
   const [tieChoice, setTieChoice] = useState("");
   const [tieReason, setTieReason] = useState("");
 
@@ -51,6 +60,9 @@ export function ResultView({
   const meta = RESULT_STATUS[status];
   const confirmed = status === "confirmed" || status === "announced";
   const announced = status === "announced";
+  const announceAt = r.announce_at ?? null;
+  const scheduled = !!announceAt && !announced;
+  const dueNow = scheduled && new Date(announceAt as string).getTime() <= Date.now();
   const tiePending = status === "tie_pending";
   const winner = winnerId ? tally.find((t) => t.submission_id === winnerId) : undefined;
   const photo = winnerSub.data?.media.find((m) => m.kind === "main_photo") ?? winnerSub.data?.media.find((m) => m.kind !== "video");
@@ -76,6 +88,28 @@ export function ResultView({
   const announce = async () => {
     setAnnounceOpen(false);
     const out = await run("announce", () => campaignsApi.post(`${base}/results/announce`), "Resultado divulgado aos colaboradores.");
+    if (out.ok) refresh();
+  };
+  // Horário sugerido: a próxima hora cheia (ou o horário já programado, ao alterar).
+  const openSchedule = () => {
+    const nextHour = new Date(Math.ceil((Date.now() + 120_000) / 3_600_000) * 3_600_000).toISOString();
+    setSchedValue(toInputValue(announceAt ?? nextHour));
+    setSchedOpen(true);
+  };
+  const schedIso = fromInputValue(schedValue);
+  const schedOk = !!schedIso && new Date(schedIso).getTime() > Date.now() + 60_000;
+  const schedule = async () => {
+    if (!schedIso || !schedOk) return;
+    const out = await run(
+      "schedule",
+      () => campaignsApi.post(`${base}/results/schedule`, { announce_at: schedIso }),
+      `Divulgação programada para ${fmtDayTime(schedIso)}.`,
+    );
+    if (out.ok) { setSchedOpen(false); refresh(); }
+  };
+  const unschedule = async () => {
+    setCancelOpen(false);
+    const out = await run("unschedule", () => campaignsApi.del(`${base}/results/schedule`), "Programação cancelada. O resultado segue sem divulgação.");
     if (out.ok) refresh();
   };
 
@@ -203,24 +237,56 @@ export function ResultView({
                 {confirmed ? "Vencedor confirmado" : "Confirmar vencedor"}
               </Button>
               {campaign.features.announcement && (
-                <Button
-                  className="gap-2 rounded-xl"
-                  variant={confirmed && !announced ? "primary" : "outline"}
-                  onClick={() => setAnnounceOpen(true)}
-                  disabled={!confirmed || announced || !perms.campaigns_announce || isBusy}
-                >
-                  {busy === "announce" ? <Loader2 size={14} className="animate-spin" /> : <Megaphone size={14} />}
-                  {announced ? "Resultado divulgado" : "Divulgar para os colaboradores"}
-                </Button>
+                <>
+                  <Button
+                    className="gap-2 rounded-xl"
+                    variant={confirmed && !announced && !scheduled ? "primary" : "outline"}
+                    onClick={() => setAnnounceOpen(true)}
+                    disabled={!confirmed || announced || !perms.campaigns_announce || isBusy}
+                  >
+                    {busy === "announce" ? <Loader2 size={14} className="animate-spin" /> : <Megaphone size={14} />}
+                    {announced ? "Resultado divulgado" : "Divulgar agora"}
+                  </Button>
+                  {confirmed && !announced && !scheduled && (
+                    <Button className="gap-2 rounded-xl" variant="outline" onClick={openSchedule} disabled={!perms.campaigns_announce || isBusy}>
+                      <CalendarClock size={14} /> Programar divulgação
+                    </Button>
+                  )}
+                </>
               )}
             </div>
+
+            {scheduled && campaign.features.announcement && (
+              <div className="space-y-2 rounded-2xl border border-blue-200 bg-blue-50/70 p-3.5 dark:border-blue-800 dark:bg-blue-950/20" data-tutorial="camp-result-schedule">
+                <p className="flex items-start gap-2 text-sm font-semibold text-foreground">
+                  <CalendarClock size={16} className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-300" aria-hidden="true" />
+                  <span>Divulgação programada para {fmtDayTime(announceAt)}{dueNow ? " — em instantes" : ""}</span>
+                </p>
+                <p className="text-[12px] text-muted-foreground">
+                  {r.announce_scheduled_by_name ? `Programada por ${r.announce_scheduled_by_name}. ` : ""}
+                  No horário, o resultado aparece para os colaboradores e quem participou recebe um aviso, uma única vez.
+                </p>
+                {perms.campaigns_announce && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" className="rounded-xl" onClick={openSchedule} disabled={isBusy || dueNow}>
+                      Alterar horário
+                    </Button>
+                    <Button size="sm" variant="ghost" className="gap-2 rounded-xl text-destructive hover:text-destructive" onClick={() => setCancelOpen(true)} disabled={isBusy || dueNow}>
+                      {busy === "unschedule" && <Loader2 size={13} className="animate-spin" />} Cancelar programação
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
             <p className="text-[12px] text-muted-foreground">
               {!confirmed
                 ? "Confira o resultado acima e confirme o vencedor. Depois de confirmado, os votos não podem mais ser alterados."
-                : campaign.features.announcement && !announced
-                ? "Quando quiser, divulgue: os colaboradores passam a ver o vencedor e recebem um aviso. Não dá para desfazer."
+                : campaign.features.announcement && !announced && !scheduled
+                ? "Divulgue agora ou programe data e hora: os colaboradores passam a ver o vencedor e quem participou recebe um aviso. Não dá para desfazer a divulgação."
                 : announced
                 ? `Divulgado${r.announced_at ? ` em ${fmtDateTime(r.announced_at)}` : ""}. A campanha cumpriu o ciclo.`
+                : scheduled
+                ? "Se preferir, divulgue agora: isso substitui a programação."
                 : "O resultado fica só com a gestão."}
             </p>
             {!confirmed && !perms.campaigns_winner_confirm && <p className="text-[11px] text-muted-foreground">Você não tem permissão para confirmar o vencedor.</p>}
@@ -240,12 +306,53 @@ export function ResultView({
       <ConfirmDialog
         open={announceOpen}
         onOpenChange={setAnnounceOpen}
-        title="Divulgar o resultado?"
-        description="Os colaboradores elegíveis passam a ver o vencedor e recebem uma notificação. A divulgação não pode ser desfeita."
-        confirmLabel="Divulgar resultado"
+        title="Divulgar o resultado agora?"
+        description={`Os colaboradores passam a ver o vencedor e quem participou recebe um aviso.${scheduled ? " A divulgação programada deixa de valer." : ""} A divulgação não pode ser desfeita.`}
+        confirmLabel="Divulgar agora"
         variant="destructive"
         onConfirm={announce}
       />
+      <ConfirmDialog
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        title="Cancelar a divulgação programada?"
+        description="O resultado não será divulgado no horário marcado. Você pode divulgar agora ou programar outro horário quando quiser."
+        confirmLabel="Cancelar programação"
+        variant="destructive"
+        onConfirm={unschedule}
+      />
+      <Dialog open={schedOpen} onOpenChange={(o) => busy !== "schedule" && setSchedOpen(o)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarClock size={18} className="text-primary" /> {scheduled ? "Alterar horário" : "Programar divulgação"}
+            </DialogTitle>
+            <DialogDescription>
+              No horário escolhido o resultado aparece para os colaboradores e quem participou recebe um aviso. Você pode alterar ou cancelar até lá.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Data e hora (Brasília)</Label>
+            <Input
+              type="datetime-local"
+              value={schedValue}
+              min={toInputValue(new Date(Date.now() + 120_000).toISOString())}
+              onChange={(e) => setSchedValue(e.target.value)}
+              className="h-11 rounded-xl"
+              aria-label="Data e hora da divulgação"
+              disabled={busy === "schedule"}
+            />
+            {schedValue && !schedOk && <p className="text-[11px] text-destructive">Escolha um horário no futuro.</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" className="rounded-xl" onClick={() => setSchedOpen(false)} disabled={busy === "schedule"}>Voltar</Button>
+            <Button className="gap-2 rounded-xl" onClick={schedule} disabled={!schedOk || busy === "schedule"}>
+              {busy === "schedule" && <Loader2 size={14} className="animate-spin" />}
+              {scheduled ? "Salvar horário" : "Programar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

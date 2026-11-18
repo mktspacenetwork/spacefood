@@ -135,6 +135,7 @@ export const router = createBrowserRouter([
               { path: "receitas", element: <LazyAdminPage><CampaignRecipes /></LazyAdminPage> },
               { path: "receitas/:id", element: <LazyAdminPage><CampaignRecipeDetail /></LazyAdminPage> },
               { path: "enviar", element: <LazyAdminPage><CampaignSubmit /></LazyAdminPage> },
+              { path: "enviar/:id", element: <LazyAdminPage><CampaignSubmit /></LazyAdminPage> },
               { path: "participacao", element: <LazyAdminPage><CampaignMyEntry /></LazyAdminPage> },
               { path: "votacao", element: <LazyAdminPage><CampaignVote /></LazyAdminPage> },
               { path: "ranking", element: <LazyAdminPage><CampaignRanking /></LazyAdminPage> },

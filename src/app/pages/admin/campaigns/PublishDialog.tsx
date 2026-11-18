@@ -12,7 +12,7 @@ import {
 } from "../../../components/ui/dialog";
 import { cn } from "../../../lib/utils";
 import { campaignsApi, errMsg } from "../../../lib/campaigns/api";
-import { fmtPeriod, plural } from "../../../lib/campaigns/format";
+import { fmtRange, plural } from "../../../lib/campaigns/format";
 import type { AdminCampaignDetail, PublishCheck } from "../../../lib/campaigns/types";
 import { ErrorBox, LoadingBox, Notice, useBusy } from "./shared";
 
@@ -85,6 +85,7 @@ export function PublishDialog({
 
   const eligible = check?.eligible_count ?? 0;
   const reg = detail?.stages.find((s) => s.stage_key === "registration");
+  const vot = detail?.stages.find((s) => s.stage_key === "voting");
 
   return (
     <Dialog open={open} onOpenChange={(v) => busy !== "publish" && onOpenChange(v)}>
@@ -106,7 +107,11 @@ export function PublishDialog({
             <div className="space-y-1 rounded-2xl border p-3 text-sm">
               <p className="font-semibold">{campaignName}</p>
               <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] text-muted-foreground">
-                <span className="inline-flex items-center gap-1.5"><CalendarDays size={13} aria-hidden="true" /> {fmtPeriod(reg?.starts_at, reg?.ends_at)}</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <CalendarDays size={13} aria-hidden="true" />
+                  {detail?.campaign.features.voting ? "Participação " : ""}{fmtRange(reg?.starts_at, reg?.ends_at)}
+                  {detail?.campaign.features.voting && <> · Votação {fmtRange(vot?.starts_at, vot?.ends_at)}</>}
+                </span>
                 <span>{plural(eligible, "pessoa elegível", "pessoas elegíveis")}</span>
               </p>
             </div>

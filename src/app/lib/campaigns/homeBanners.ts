@@ -29,8 +29,12 @@ const TIMEOUT_MS = 3_000;
 let cache: { key: string; ts: number; data: HomeCampaignBanner[] } | null = null;
 let pending: { key: string; promise: Promise<HomeCampaignBanner[]> } | null = null;
 
-/** Já passou do encerramento (inscrições e, se houver, votação)? Sem datas = continua. */
+/**
+ * Já acabou? Usa o `ended` do servidor e, como segurança, as datas (inscrições e, se houver, votação).
+ * Sem datas = continua. Encerrada, o slide some da Home (a campanha segue na lista de Campanhas).
+ */
 function hasEnded(c: CollabCampaignListItem): boolean {
+  if (c.ended === true) return true;
   const ends = (c.stages ?? [])
     .filter((s) => s.key === "registration" || (s.key === "voting" && c.features?.voting))
     .map((s) => s.ends_at)
@@ -51,7 +55,7 @@ function toBanner(c: CollabCampaignListItem, i: number): HomeCampaignBanner {
     active: true,
     order: -100 + i, // campanhas na frente dos banners comuns
     alt: c.name,
-    objectPosition: "center",
+    // sem `objectPosition`: o slide usa o recorte padrão dos banners ("center right"), igual ao menu Banners
   };
   if (c.cover_url) return { ...base, imageUrl: c.cover_url }; // imagem pura, como os banners só de imagem
   // Sem capa: texto sobre o laranja do site (mesmo padrão do banner padrão).

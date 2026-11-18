@@ -3,6 +3,9 @@ import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { ChevronLeft, ChevronRight, X, Rocket, Sparkles, HelpCircle } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { supabase } from "../../lib/supabase";
+import { campaignsApi } from "../../lib/campaigns/api";
+import type { ToursSeen } from "../../lib/campaigns/types";
 
 /**
  * Tour guiada do módulo Campanhas (colaborador e admin).
@@ -14,7 +17,8 @@ import { cn } from "../../lib/utils";
  * - Alvos: elementos com `data-tutorial="camp-..."` (prefixo `camp-` evita colisão).
  * - Passo cujo alvo não existe na tela é pulado; passo sem `selector` aparece centralizado.
  * - Nunca bloqueia o uso: "Pular" a qualquer momento; Esc fecha.
- * - Persistência por localStorage (chave por pessoa + tela + campanha + versão da tour).
+ * - Histórico por usuário: servidor (`/tours`, por pessoa) + localStorage como cache/plano B;
+ *   chave por pessoa + tela + campanha + versão da tour (nada é compartilhado entre usuários).
  */
 
 export type TourStep = {
@@ -52,9 +56,74 @@ export function tourKey(
   return `spacefood_camp_tour_${role}_${userId ?? "anon"}_${campaignId ?? "global"}_${screen}_v${version}`;
 }
 
+// ───────── Histórico de tours vistas, por usuário ─────────
+// Fonte de verdade: o servidor (`GET/POST /tours`, atrelado ao usuário logado pelo token — nunca compartilhado
+// entre pessoas, e acompanha a pessoa em outro aparelho). O localStorage é cache e plano B: se o servidor
+// não responder, a regra "abre uma vez" continua valendo neste aparelho.
+
+let seenCache: { uid: string; set: Set<string> } | null = null;
+let seenInflight: Promise<Set<string> | null> | null = null;
+let seenFailedAt = 0;
+const SEEN_TIMEOUT_MS = 3000;
+const SEEN_RETRY_AFTER_MS = 60_000;
+
+async function currentUid(): Promise<string | null> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data.session?.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Conjunto de chaves já vistas pelo usuário logado (null = servidor indisponível: vale só o localStorage). */
+function getServerSeen(): Promise<Set<string> | null> {
+  if (seenInflight) return seenInflight;
+  seenInflight = (async () => {
+    const uid = await currentUid();
+    if (!uid) return null;
+    if (seenCache && seenCache.uid === uid) return seenCache.set;
+    if (Date.now() - seenFailedAt < SEEN_RETRY_AFTER_MS) return null;
+    try {
+      const res = await Promise.race([
+        campaignsApi.get<ToursSeen>("/tours"),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), SEEN_TIMEOUT_MS)),
+      ]);
+      if (!res || !Array.isArray(res.seen)) { seenFailedAt = Date.now(); return null; }
+      seenCache = { uid, set: new Set(res.seen) };
+      return seenCache.set;
+    } catch {
+      seenFailedAt = Date.now();
+      return null;
+    }
+  })().finally(() => { seenInflight = null; });
+  return seenInflight;
+}
+
+/** Registra no servidor (sem bloquear a tela; falha de rede/rota não atrapalha: o localStorage já guardou). */
+function markSeenRemote(key: string): void {
+  void (async () => {
+    const uid = await currentUid();
+    if (!uid) return;
+    if (seenCache?.uid === uid) {
+      if (seenCache.set.has(key)) return;
+      seenCache.set.add(key);
+    }
+    try { await campaignsApi.post("/tours", { key }); } catch { /* o localStorage segura */ }
+  })();
+}
+
+function readLocalSeen(key: string): boolean {
+  try { return localStorage.getItem(key) === "1"; } catch { return false; /* storage indisponível: trata como não vista */ }
+}
+function writeLocalSeen(key: string): void {
+  try { localStorage.setItem(key, "1"); } catch { /* ignora */ }
+}
+
 /**
- * Controla a abertura. Abre sozinha UMA vez (se `enabled` e ainda não vista),
+ * Controla a abertura. Abre sozinha UMA vez por usuário (se `enabled` e ainda não vista),
  * depois de um pequeno atraso, e nunca por cima de um diálogo aberto.
+ * "Ver tour" (`start`) sempre reabre, sem alterar o histórico.
  */
 export function useTour({ storageKey, enabled, delay = 1100 }: { storageKey: string; enabled: boolean; delay?: number }): TourController {
   const [open, setOpen] = useState(false);
@@ -63,23 +132,41 @@ export function useTour({ storageKey, enabled, delay = 1100 }: { storageKey: str
 
   useEffect(() => {
     if (!enabled || !storageKey) return;
-    let seen = false;
-    try { seen = localStorage.getItem(storageKey) === "1"; } catch { /* storage indisponível: trata como não vista */ }
-    if (seen) return;
-    const t = setTimeout(() => {
-      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
-      // Regra única para todos os perfis: mostrou uma vez, não volta a abrir sozinha.
-      // Grava ao ABRIR (não só ao fechar), para não reaparecer se a pessoa sair da tela no meio.
-      try { localStorage.setItem(storageKey, "1"); autoMarked.current = true; } catch { /* ignora */ }
-      setOpen(true);
-    }, delay);
-    return () => clearTimeout(t);
+    if (readLocalSeen(storageKey)) return;
+    let alive = true;
+    let openTimer: ReturnType<typeof setTimeout> | undefined;
+    let remoteTimer: ReturnType<typeof setTimeout> | undefined;
+    void (async () => {
+      const server = await getServerSeen();
+      if (!alive) return;
+      // Já vista em outro aparelho: sincroniza o cache local e não abre.
+      if (server?.has(storageKey)) { writeLocalSeen(storageKey); return; }
+      openTimer = setTimeout(() => {
+        if (!alive) return;
+        if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+        // Regra única para todos os perfis: mostrou uma vez, não volta a abrir sozinha.
+        // Grava ao ABRIR (não só ao fechar), para não reaparecer se a pessoa sair da tela no meio.
+        writeLocalSeen(storageKey);
+        autoMarked.current = true;
+        setOpen(true);
+        // No servidor só depois de confirmar que o cartão realmente apareceu (se não havia alvo, `cancel` desfaz).
+        remoteTimer = setTimeout(() => { if (autoMarked.current) markSeenRemote(storageKey); }, 900);
+      }, delay);
+    })();
+    return () => {
+      alive = false;
+      clearTimeout(openTimer);
+      clearTimeout(remoteTimer);
+      // Saiu da tela com a tour aberta automaticamente: ela foi exibida, então entra no histórico.
+      if (autoMarked.current) markSeenRemote(storageKey);
+    };
   }, [storageKey, enabled, delay]);
 
   const start = useCallback(() => { autoMarked.current = false; setOpen(true); }, []);
   const close = useCallback(() => {
     autoMarked.current = false;
-    try { localStorage.setItem(storageKey, "1"); } catch { /* ignora */ }
+    writeLocalSeen(storageKey);
+    markSeenRemote(storageKey);
     setOpen(false);
   }, [storageKey]);
   // Não havia o que mostrar (alvos ausentes): desfaz a marcação automática para tentar na próxima visita.

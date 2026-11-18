@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import {
-  ChevronDown, ChevronUp, Loader2, Megaphone, Plus, Power, Search,
+  ChevronDown, ChevronUp, LayoutGrid, List as ListIcon, Loader2, Megaphone, Plus, Power, Search,
 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card, CardContent } from "../../../components/ui/Card";
@@ -21,6 +21,7 @@ import { useCampaignPerms } from "./useCampaignPerms";
 import { DuplicateDialog } from "./DuplicateDialog";
 import { PublishDialog } from "./PublishDialog";
 import { CampaignListCard, LIST_ROW_GRID } from "./CampaignListCard";
+import type { ListView } from "./CampaignListCard";
 import { ErrorBox, LoadingBox, ReasonDialog, RestrictedBox, stageState, useBusy, useLoader } from "./shared";
 
 // ───────────────────────────── Filtros por situação ─────────────────────────────
@@ -46,6 +47,43 @@ function matchesFilter(f: FilterKey, s: DisplayState): boolean {
   }
 }
 
+// ───────────────────────────── Cartões ou Lista ─────────────────────────────
+
+const VIEW_KEY = "spacefood_campaigns_list_view";
+
+/** Largura de tablet para cima (md = 768 px): lá a Lista vira linhas com colunas. */
+function useIsWide(): boolean {
+  const query = "(min-width: 768px)";
+  const [wide, setWide] = useState(() => (typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia(query).matches : true));
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const mql = window.matchMedia(query);
+    const on = () => setWide(mql.matches);
+    on();
+    mql.addEventListener("change", on);
+    return () => mql.removeEventListener("change", on);
+  }, []);
+  return wide;
+}
+
+/** Preferência guardada neste aparelho; sem escolha, Cartões em tela pequena e Lista de tablet para cima. */
+function useListView(): [ListView, (v: ListView) => void] {
+  const wide = useIsWide();
+  const [pref, setPref] = useState<ListView | null>(() => {
+    try {
+      const v = localStorage.getItem(VIEW_KEY);
+      return v === "cards" || v === "list" ? v : null;
+    } catch {
+      return null;
+    }
+  });
+  const choose = (v: ListView) => {
+    setPref(v);
+    try { localStorage.setItem(VIEW_KEY, v); } catch { /* sem armazenamento: vale só nesta sessão */ }
+  };
+  return [pref ?? (wide ? "list" : "cards"), choose];
+}
+
 // ─────────────────────────────────── Página ───────────────────────────────────
 
 export function AdminCampaigns() {
@@ -62,6 +100,7 @@ export function AdminCampaigns() {
   });
   const { busy, run } = useBusy();
 
+  const [view, setView] = useListView();
   const [filter, setFilter] = useState<FilterKey>("all");
   const [search, setSearch] = useState("");
   const [showActivity, setShowActivity] = useState(false);
@@ -104,7 +143,7 @@ export function AdminCampaigns() {
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (list.data ?? []).filter(
-      (c) => matchesFilter(filter, campaignDisplayState(c)) && (!q || c.name.toLowerCase().includes(q) || c.slug.toLowerCase().includes(q)),
+      (c) => matchesFilter(filter, campaignDisplayState(c)) && (!q || c.name.toLowerCase().includes(q)),
     );
   }, [list.data, filter, search]);
 
@@ -182,7 +221,7 @@ export function AdminCampaigns() {
             />
             <p className={cn("min-w-0 flex-1 text-[13px] leading-snug", moduleEnabled ? "text-green-800 dark:text-green-200" : "text-amber-800 dark:text-amber-200")}>
               {moduleEnabled ? (
-                <><b>Módulo ligado</b> — colaboradores veem as campanhas publicadas.</>
+                <b>Módulo ligado</b>
               ) : (
                 <><b>Módulo desligado</b> — nenhum colaborador vê o menu nem as campanhas, mesmo as publicadas.</>
               )}
@@ -240,15 +279,33 @@ export function AdminCampaigns() {
               );
             })}
           </div>
-          <div className="relative lg:w-72">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por nome ou endereço"
-              className="pl-9 rounded-xl h-10"
-              aria-label="Buscar campanha"
-            />
+          <div className="flex items-center gap-2">
+            <div className="relative min-w-0 flex-1 lg:w-64 lg:flex-none">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por nome"
+                className="pl-9 rounded-xl h-10"
+                aria-label="Buscar campanha"
+              />
+            </div>
+            <div data-tutorial="camp-view-toggle" className="inline-flex h-10 shrink-0 items-center rounded-xl border bg-card p-0.5" role="group" aria-label="Forma de exibição da lista">
+              {([["cards", "Cartões", LayoutGrid], ["list", "Lista", ListIcon]] as const).map(([key, label, Icon]) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={view === key}
+                  onClick={() => setView(key)}
+                  className={cn(
+                    "inline-flex h-9 items-center gap-1.5 rounded-[10px] px-2.5 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    view === key ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                >
+                  <Icon size={14} aria-hidden="true" /> {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -290,21 +347,24 @@ export function AdminCampaigns() {
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-3">
-              {/* Cabeçalho de colunas (só em tela larga, onde cada campanha é uma linha) */}
-              <div
-                className={cn("hidden px-5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground", LIST_ROW_GRID)}
-                aria-hidden="true"
-              >
-                <span>Campanha</span>
-                <span>Situação</span>
-                <span className="text-center">Receitas</span>
-                <span className="text-right">Ações</span>
-              </div>
+            <div className={view === "cards" ? "grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3" : "space-y-2"}>
+              {/* Cabeçalho de colunas (só na Lista, de tablet para cima, onde cada campanha é uma linha) */}
+              {view === "list" && (
+                <div
+                  className={cn("hidden px-5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground", LIST_ROW_GRID)}
+                  aria-hidden="true"
+                >
+                  <span>Campanha</span>
+                  <span>Situação</span>
+                  <span>Período</span>
+                  <span className="text-right">Ações</span>
+                </div>
+              )}
               {rows.map((c) => (
                 <CampaignListCard
                   key={c.id}
                   c={c}
+                  view={view}
                   moduleEnabled={moduleEnabled}
                   check={checks[c.id]}
                   canEdit={canEdit}

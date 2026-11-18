@@ -124,7 +124,7 @@ export function CampaignVote() {
 
       {phase === "open" && !hasVoted && (
         <p className="text-xs text-muted-foreground" data-tutorial="camp-vote-rules">
-          1 voto por pessoa, definitivo e não vale na própria receita
+          1 voto por pessoa, definitivo e não vale {campaign.features.multiple_submissions ? "nas suas receitas" : "na própria receita"}
           {stage?.ends_at ? ` · até ${fmtDateTime(stage.ends_at)}` : ""}.
         </p>
       )}

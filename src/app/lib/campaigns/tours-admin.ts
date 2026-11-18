@@ -39,6 +39,13 @@ export const ADMIN_TOUR_OVERVIEW: TourStep[] = [
     placement: "bottom",
   },
   {
+    selector: "camp-view-toggle",
+    title: "Cartões ou lista",
+    description: "Escolha como ver as campanhas: cartões (melhor no celular) ou lista com colunas (melhor no computador). A escolha fica guardada neste aparelho.",
+    icon: icon(LayoutList),
+    placement: "bottom",
+  },
+  {
     selector: "camp-list",
     title: "Suas campanhas",
     description:
@@ -62,7 +69,7 @@ export const ADMIN_TOUR_WIZARD: TourStep[] = [
     selector: "camp-wiz-cover",
     title: "A capa é o banner da Home",
     description:
-      "A mesma imagem vira o banner da Home quando a campanha for publicada — não precisa cadastrar outra. Ela é cortada na proporção do banner; confira a prévia no celular e no computador.",
+      "A mesma imagem vira o banner da Home quando a campanha for publicada — e sai de lá sozinha ao despublicar ou encerrar. É uma imagem só para todos os aparelhos, como no menu Banners; confira a prévia.",
     icon: icon(ImagePlus),
     placement: "bottom",
   },
@@ -76,9 +83,9 @@ export const ADMIN_TOUR_WIZARD: TourStep[] = [
   },
   {
     selector: "camp-wiz-period",
-    title: "Início e encerramento",
+    title: "Datas",
     description:
-      "É só isso: a participação (e a votação, se houver) abre no início e fecha sozinha no encerramento.",
+      "Início e encerramento da participação. Com votação, aparece também o período da votação — por padrão igual ao da participação, mas você pode votar depois. Tudo abre e fecha sozinho.",
     icon: icon(CalendarDays),
     placement: "top",
   },
@@ -88,6 +95,14 @@ export const ADMIN_TOUR_WIZARD: TourStep[] = [
     description:
       "Todos os colaboradores, ou pessoas específicas — ótimo para testar antes de abrir para todos. Salvar nunca publica: para isso há o botão Publicar no painel.",
     icon: icon(Users),
+    placement: "top",
+  },
+  {
+    selector: "camp-wiz-multiple",
+    title: "Mais de uma receita?",
+    description:
+      "Marque para cada pessoa poder enviar várias receitas (até 10). Dá para mudar até com a campanha publicada: o que já foi enviado continua como está.",
+    icon: icon(ChefHat),
     placement: "top",
   },
 ];
@@ -113,7 +128,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-panel-tabs",
       title: "As áreas da campanha",
       description:
-        "Resumo, Receitas, Participantes, Votação e Configurações ficam sempre aqui no topo, fixas enquanto você rola. Cada área abre a própria tour na primeira visita.",
+        "Resumo, Receitas, Participantes, Configurações — e Votação, nas campanhas com votação — ficam aqui no topo, fixas enquanto você rola. Cada área abre a própria tour na primeira visita.",
       icon: icon(LayoutList),
       placement: "bottom",
     },
@@ -121,7 +136,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-panel-cycle",
       title: "Período e próximo passo",
       description:
-        "Uma linha mostra o período e a situação. O cartão logo abaixo diz a única coisa que vale fazer agora, com um botão direto.",
+        "Aqui ficam o período (com votação, o de participação e o de votação) e a situação. Quando há algo a fazer — publicar, analisar receitas, ver o ganhador, divulgar —, um cartão aparece logo abaixo com o botão; sem pendências, ele some.",
       icon: icon(Compass),
       placement: "bottom",
     },
@@ -137,7 +152,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-summary-cards",
       title: "Os números que importam",
       description:
-        "Participação, receitas por situação, votos e resultado. Antes de a votação encerrar, a contagem por receita não aparece — nem para a gestão —, para não influenciar os votos.",
+        "Participação e receitas por situação. Em campanhas com votação aparecem também os votos e o resultado — e, antes de a votação encerrar, a contagem por receita fica escondida (até da gestão) para não influenciar os votos.",
       icon: icon(Gauge),
       placement: "bottom",
     },
@@ -175,7 +190,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-part-toolbar",
       title: "Busque e filtre as pessoas",
       description:
-        "Procure por nome, departamento, unidade ou prato. Os filtros mostram quantas pessoas há em cada grupo, como quem enviou receita e quem ainda não enviou.",
+        "Procure por nome, departamento, unidade ou prato. Um filtro só: Com receita (o padrão), Todos os elegíveis e, quando há votação, Já votaram e Ainda não votaram — cada um com a contagem.",
       icon: icon(Search),
       placement: "bottom",
     },
@@ -183,7 +198,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-part-table",
       title: "Uma tabela só",
       description:
-        "Cada linha é uma pessoa, com a receita e se já votou. Depois do encerramento da votação aparecem também os votos recebidos e a posição.",
+        "Cada linha é uma pessoa, com as receitas dela (uma ou várias). Com votação, mostra se já votou e, depois do encerramento, os votos recebidos e a posição.",
       icon: icon(Users),
       placement: "top",
     },
@@ -208,9 +223,9 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
     },
     {
       selector: "camp-vote-result",
-      title: "Ver resultado",
+      title: "Ver ganhador",
       description:
-        "O botão fica bloqueado até a votação encerrar: antes disso ninguém vê quem está na frente. Depois, um clique mostra o vencedor, o ranking e o que conferir.",
+        "O botão fica bloqueado até o encerramento oficial da votação: antes disso ninguém vê quem está na frente. Depois, um clique mostra o ganhador, o ranking e o que conferir.",
       icon: icon(Trophy),
       placement: "top",
     },
@@ -218,7 +233,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-result-actions",
       title: "Confirmar e divulgar",
       description:
-        "Confirme o vencedor e, quando quiser, divulgue para os colaboradores. Em caso de empate, a decisão vem antes, com justificativa. A divulgação não pode ser desfeita.",
+        "Confirme o vencedor e depois divulgue agora ou programe data e hora: no horário marcado o resultado aparece e quem participou recebe um aviso. Até lá dá para alterar ou cancelar. Em caso de empate, a decisão vem antes, com justificativa.",
       icon: icon(BadgeCheck),
       placement: "top",
     },
@@ -237,7 +252,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-sec-period",
       title: "Período",
       description:
-        "Início e encerramento da campanha. Para prorrogar, é só escolher uma nova data de encerramento.",
+        "Início e encerramento da participação e, quando há votação, também os da votação. Para prorrogar, é só escolher uma nova data de encerramento.",
       icon: icon(CalendarDays),
       placement: "bottom",
     },

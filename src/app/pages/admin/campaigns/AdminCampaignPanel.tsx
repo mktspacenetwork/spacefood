@@ -15,7 +15,7 @@ import { cn } from "../../../lib/utils";
 import { useAuth } from "../../../context/auth-context";
 import { campaignsApi } from "../../../lib/campaigns/api";
 import {
-  DISPLAY_STATE, PHASE_STATE, RESULT_STATUS, campaignDisplayState, fmtDateTime, fmtPeriod, fmtShort, plural,
+  DISPLAY_STATE, PHASE_STATE, RESULT_STATUS, campaignDisplayState, fmtDateTime, fmtDayTime, fmtRange, fmtShort, plural,
 } from "../../../lib/campaigns/format";
 import type { DisplayState } from "../../../lib/campaigns/format";
 import type {
@@ -61,16 +61,17 @@ function phaseBadge(
   const rs = results?.status ?? "none";
   if (c.features.voting) {
     if (rs === "announced") return { label: "Resultado divulgado", className: RESULT_STATUS.announced.className };
+    if (rs === "confirmed" && results?.announce_at) return { label: "Divulgação programada", className: PHASE_STATE.upcoming.className };
     if (rs === "confirmed") return { label: "Vencedor confirmado", className: RESULT_STATUS.confirmed.className };
     if (rs === "tie_pending") return { label: "Empate a decidir", className: RESULT_STATUS.tie_pending.className };
     if (rs === "preliminary") return { label: "Resultado pronto", className: RESULT_STATUS.preliminary.className };
     if (votState === "closed") return { label: "Votação encerrada", className: PHASE_STATE.closed.className };
-    if (votState === "open") return { label: "Em andamento", className: PHASE_STATE.open.className };
+    if (votState === "open") return { label: "Votação aberta", className: PHASE_STATE.open.className };
     if (votState === "paused") return { label: "Votação pausada", className: PHASE_STATE.paused.className };
   }
-  if (regState === "open") return { label: "Em andamento", className: PHASE_STATE.open.className };
-  if (regState === "paused") return { label: "Pausada", className: PHASE_STATE.paused.className };
-  if (regState === "closed") return { label: "Período encerrado", className: PHASE_STATE.closed.className };
+  if (regState === "open") return { label: "Participação aberta", className: PHASE_STATE.open.className };
+  if (regState === "paused") return { label: "Participação pausada", className: PHASE_STATE.paused.className };
+  if (regState === "closed") return { label: "Participação encerrada", className: PHASE_STATE.closed.className };
   if (regState === "upcoming") return { label: "Começa em breve", className: PHASE_STATE.upcoming.className };
   return { label: "Sem datas", className: PHASE_STATE.unset.className };
 }
@@ -86,10 +87,13 @@ function daysLeftText(ends: string): string | null {
 }
 
 function PeriodLine({
-  display, stages, canEdit, goTab,
-}: { display: DisplayState; stages: AdminStageRow[]; canEdit: boolean; goTab: (tab: string, section?: string) => void }) {
+  display, stages, hasVoting, results,
+}: { display: DisplayState; stages: AdminStageRow[]; hasVoting: boolean; results: AdminResults | null }) {
   const reg = stageOf(stages, "registration");
+  const vot = stageOf(stages, "voting");
   const regState = stageState(reg);
+  const votState = stageState(vot);
+  const live = display === "published" || display === "scheduled";
   let status: string;
   if (display === "closed") status = "Encerrada";
   else if (display === "archived") status = "Arquivada";
@@ -97,21 +101,33 @@ function PeriodLine({
   else if (display === "unpublished") status = "Não publicada";
   else if (regState === "unset") status = "Sem datas";
   else if (regState === "upcoming") status = `Começa em ${fmtShort(reg?.starts_at)}`;
-  else if (regState === "open") status = "Em andamento";
+  else if (regState === "open") status = "Aberta";
   else if (regState === "paused") status = "Pausada";
-  else status = "Período encerrado";
-  const left = (display === "published" || display === "scheduled") && (regState === "open" || regState === "paused") && reg?.ends_at ? daysLeftText(reg.ends_at) : null;
+  else status = "Encerrada";
+  const left = live && (regState === "open" || regState === "paused") && reg?.ends_at ? daysLeftText(reg.ends_at) : null;
+  const votStatus = !live ? null : votState === "unset" ? null : PHASE_STATE[votState].label;
+  const scheduledAt = hasVoting && results?.status === "confirmed" ? results.announce_at ?? null : null;
 
   return (
     <Card className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border p-3.5 hover:shadow-sm" data-tutorial="camp-panel-cycle">
       <CalendarDays size={18} className="shrink-0 text-primary" aria-hidden="true" />
-      <p className="min-w-0 flex-1 text-sm text-foreground">
-        <b>{fmtPeriod(reg?.starts_at, reg?.ends_at)}</b>
-        <span className="text-muted-foreground"> · {status}{left ? ` · ${left}` : ""}</span>
-      </p>
-      {!reg?.starts_at && canEdit && (
-        <Button size="sm" variant="outline" className="rounded-xl" onClick={() => goTab("settings", "period")}>Definir período</Button>
-      )}
+      <div className="min-w-0 flex-1 space-y-0.5 text-sm text-foreground">
+        <p>
+          {hasVoting && <span className="text-muted-foreground">Participação </span>}
+          <b>{fmtRange(reg?.starts_at, reg?.ends_at)}</b>
+          <span className="text-muted-foreground"> · {status}{left ? ` · ${left}` : ""}</span>
+        </p>
+        {hasVoting && (
+          <p>
+            <span className="text-muted-foreground">Votação </span>
+            <b>{fmtRange(vot?.starts_at, vot?.ends_at)}</b>
+            {votStatus && <span className="text-muted-foreground"> · {votStatus}</span>}
+          </p>
+        )}
+        {scheduledAt && (
+          <p className="text-[13px] text-muted-foreground">Divulgação do resultado: <b className="text-foreground">{fmtDayTime(scheduledAt)}</b></p>
+        )}
+      </div>
     </Card>
   );
 }
@@ -127,88 +143,68 @@ const NEXT_TONE = {
   ok: { box: "border-green-200 bg-green-50/70 dark:border-green-800 dark:bg-green-950/20", dot: "bg-green-100 text-green-700 dark:bg-green-950/60 dark:text-green-300" },
 } as const;
 
+/**
+ * "Próximo passo": só existe quando há UMA ação concreta e pendente para a gestão — e nunca para algo que não vale
+ * para a campanha (sem votação, nada de votação/resultado). Sem ação pendente, retorna null e o cartão some.
+ * Rascunho sem datas → definir período · rascunho pronto → publicar · votação encerrada sem ganhador confirmado →
+ * ver ganhador · ganhador confirmado e não divulgado (nem programado) → divulgar · receitas aguardando análise.
+ */
 function buildNext(x: {
   c: AdminCampaign; display: DisplayState; stages: AdminStageRow[]; results: AdminResults | null;
   dash: AdminDashboard | null; check: PublishCheck | null; perms: Record<string, boolean>;
-  goTab: (tab: string, section?: string) => void; openPublish: () => void; openResume: () => void; edit: () => void;
-}): NextStep {
-  const { c, display, stages, results, dash, check, perms, goTab, openPublish, openResume, edit } = x;
+  goTab: (tab: string, section?: string) => void; openPublish: () => void;
+}): NextStep | null {
+  const { c, display, stages, results, dash, check, perms, goTab, openPublish } = x;
   const f = c.features;
   const reg = stageOf(stages, "registration");
   const vot = stageOf(stages, "voting");
   const regState = stageState(reg);
   const votState = stageState(vot);
   const rs = results?.status ?? "none";
-  const pending = dash?.pending ?? 0;
-  const canPublish = !!perms.campaigns_publish;
-  const setPeriod: NextAction = { label: "Definir período", onClick: () => goTab("settings", "period"), primary: true };
-  const seeResult = (label: string): NextAction => ({ label, onClick: () => goTab("voting"), primary: true });
-  const analyze: NextAction[] = perms.campaigns_review ? [{ label: "Analisar receitas", onClick: () => goTab("submissions"), primary: true }] : [];
-
-  if (display === "closed" || display === "archived") {
-    return { tone: "ok", title: display === "closed" ? "Campanha encerrada" : "Campanha arquivada", text: "Nada pendente. Receitas, votos e histórico continuam salvos, e dá para duplicar a campanha para uma nova edição.", actions: [] };
-  }
 
   if (display === "draft") {
-    const missing = check?.items.filter((i) => !i.ok) ?? [];
-    if (check && missing.length === 0) {
+    if (regState === "unset" && perms.campaigns_schedule) {
+      return { tone: "warn", title: "Defina o período", text: "Sem datas, a campanha não pode ser publicada.", actions: [{ label: "Definir período", onClick: () => goTab("settings", "period"), primary: true }] };
+    }
+    if (check?.ok && perms.campaigns_publish) {
       return {
-        tone: "ok", title: "Tudo pronto para publicar",
+        tone: "ok", title: "Pronta para publicar",
         text: `Ao publicar, ${plural(check.eligible_count, "colaborador elegível passa", "colaboradores elegíveis passam")} a ver a campanha.`,
-        actions: canPublish ? [{ label: "Publicar", onClick: openPublish, primary: true }] : [],
+        actions: [{ label: "Publicar", onClick: openPublish, primary: true }],
       };
     }
-    if (check) {
-      const dates = missing.some((i) => i.key === "registration_dates" || i.key === "voting_dates");
+    return null;
+  }
+  if (display !== "published" && display !== "scheduled") return null;
+
+  const canVotingTab = !!perms.campaigns_schedule || !!perms.campaigns_votes_view || !!perms.campaigns_results;
+  if (f.voting && canVotingTab) {
+    if (rs === "confirmed" && f.announcement && !results?.announce_at && perms.campaigns_announce) {
       return {
-        tone: "warn", title: dates ? "Faltam as datas" : `${plural(missing.length, "item falta", "itens faltam")} para publicar`,
-        text: dates ? "Defina o início e o encerramento para poder publicar." : `${missing[0].message}${missing.length > 1 ? ` (e mais ${missing.length - 1})` : ""}.`,
-        actions: dates ? [setPeriod] : perms.campaigns_edit ? [{ label: "Editar informações", onClick: edit, primary: true }] : [],
+        tone: "warn", title: "Divulgue o resultado",
+        text: "O ganhador está confirmado. Divulgue agora ou programe um horário.",
+        actions: [{ label: "Divulgar resultado", onClick: () => goTab("voting"), primary: true }],
       };
     }
-    return { tone: "info", title: "Rascunho em construção", text: "Complete as informações e o período; depois a campanha pode ser publicada.", actions: canPublish ? [{ label: "Publicar", onClick: openPublish, primary: true }] : [] };
-  }
-
-  if (display === "unpublished") {
-    return {
-      tone: "warn", title: "Campanha não publicada",
-      text: "Está fora de exibição. Nada foi apagado: receitas, votos e histórico continuam salvos.",
-      actions: canPublish ? [{ label: "Republicar", onClick: openResume, primary: true }] : [],
-    };
-  }
-  if (display === "scheduled") {
-    return { tone: "info", title: "Publicação agendada", text: `Os colaboradores passam a ver a campanha em ${fmtDateTime(c.visible_from)}.`, actions: [] };
-  }
-
-  // Publicada
-  if (f.voting) {
-    if (rs === "announced") return { tone: "ok", title: "Campanha concluída", text: "O resultado foi divulgado aos colaboradores.", actions: [] };
-    if (rs === "confirmed") {
-      return f.announcement
-        ? { tone: "warn", title: "Divulgue o resultado", text: "O vencedor está confirmado. Divulgue para os colaboradores verem.", actions: [seeResult("Abrir resultado")] }
-        : { tone: "ok", title: "Campanha concluída", text: "O vencedor está confirmado.", actions: [] };
+    if ((rs === "none" || rs === "preliminary" || rs === "tie_pending") && votState === "closed" && perms.campaigns_results) {
+      return {
+        tone: "warn", title: rs === "tie_pending" ? "Empate: decida o ganhador" : "Votação encerrada",
+        text: rs === "tie_pending" ? "Registre a decisão, com justificativa, para continuar." : "Veja o ganhador, confira os números e confirme.",
+        actions: [{ label: "Ver ganhador", onClick: () => goTab("voting"), primary: true }],
+      };
     }
-    if (rs === "tie_pending") return { tone: "warn", title: "Há empate: decida o vencedor", text: "Registre a decisão, com justificativa, para continuar.", actions: [seeResult("Decidir empate")] };
-    if (rs === "preliminary") return { tone: "warn", title: "Confirme o vencedor", text: "Confira o resultado e confirme quem ganhou.", actions: [seeResult("Ver resultado")] };
-    if (votState === "closed") return { tone: "warn", title: "Votação encerrada — Ver resultado", text: "Veja quem ganhou e confira os números.", actions: [seeResult("Ver resultado")] };
   }
 
-  if (pending > 0) {
+  const pending = dash?.pending ?? 0;
+  const reviewOpen = !(f.voting && votState === "closed");
+  if (pending > 0 && perms.campaigns_review && reviewOpen) {
     return {
       tone: "warn", title: `${plural(pending, "receita aguarda", "receitas aguardam")} análise`,
       text: f.voting ? "As aprovadas já podem receber votos; as pendentes ficam de fora até a análise." : "Aprove ou reprove as receitas pendentes.",
-      actions: analyze,
+      actions: [{ label: "Analisar receitas", onClick: () => goTab("submissions"), primary: true }],
     };
   }
-  if (regState === "unset") return { tone: "warn", title: "Defina o período", text: "Sem datas, os colaboradores não conseguem participar.", actions: [setPeriod] };
-  if (regState === "upcoming") return { tone: "info", title: "Ainda não começou", text: reg?.starts_at ? `Abre em ${fmtDateTime(reg.starts_at)}.` : undefined, actions: [] };
-  if (regState === "open" || regState === "paused") {
-    const bits = [plural(dash?.submissions ?? 0, "receita enviada", "receitas enviadas")];
-    if (f.voting && dash) bits.push(`${dash.voting_pct}% já votaram`);
-    if (reg?.ends_at) bits.push(`encerra em ${fmtDateTime(reg.ends_at)}`);
-    return { tone: "info", title: regState === "paused" ? "Pausada" : "Em andamento", text: `${bits.join(" · ")}.`, actions: [] };
-  }
-  return { tone: "ok", title: "Período encerrado", text: "Nenhuma receita aguardando análise. Quando quiser, encerre a campanha em Configurações.", actions: [] };
+  return null;
 }
 
 function NextStepCard({ next, busy }: { next: NextStep; busy: boolean }) {
@@ -354,18 +350,8 @@ export function AdminCampaignPanel() {
 
   const next = buildNext({
     c, display, stages, results, dash: dashboard.data, check: check.data, perms, goTab,
-    openPublish: () => setPublishOpen(true), openResume: () => setConfirm("resume"), edit: () => navigate(`${base}/edit`),
+    openPublish: () => setPublishOpen(true),
   });
-
-  // Frase curta sob o título: quem enxerga a campanha agora.
-  const stateHint: Record<DisplayState, string> = {
-    draft: "Rascunho · só a gestão vê.",
-    scheduled: `Agendada · aparece para os colaboradores em ${fmtDateTime(c.visible_from)}.`,
-    published: "Publicada · visível para os colaboradores elegíveis.",
-    unpublished: "Não publicada · oculta dos colaboradores; tudo continua salvo.",
-    closed: "Encerrada · não recebe mais receitas nem votos.",
-    archived: "Arquivada · fora da lista principal.",
-  };
 
   // Avisos longos, ciclo e próximo passo ficam DENTRO da aba Resumo (o cabeçalho e as abas ficam enxutos).
   const summaryTop = (
@@ -379,8 +365,8 @@ export function AdminCampaignPanel() {
       {display === "scheduled" && (
         <Notice tone="info">Os colaboradores passam a ver esta campanha em {fmtDateTime(c.visible_from)}.</Notice>
       )}
-      <PeriodLine display={display} stages={stages} canEdit={!!perms.campaigns_schedule} goTab={goTab} />
-      <NextStepCard next={next} busy={busy !== null} />
+      <PeriodLine display={display} stages={stages} hasVoting={!!c.features.voting} results={results} />
+      {next && <NextStepCard next={next} busy={busy !== null} />}
     </div>
   );
 
@@ -413,9 +399,7 @@ export function AdminCampaignPanel() {
               <Badge className={cn("border px-3 py-1 text-xs", state.className)} title={state.hint}>{state.label}</Badge>
               {phase && <Badge className={cn("border text-[10px]", phase.className)}>{phase.label}</Badge>}
               {c.status === "in_review" && !perms.campaigns_publish && <Badge className={cn("border text-[10px]", YELLOW)}>Aguardando publicação</Badge>}
-              <span className="hidden font-mono text-[11px] text-muted-foreground sm:inline">/campanhas/{c.slug}</span>
             </div>
-            <p className="text-[11px] text-muted-foreground sm:text-xs">{stateHint[display]}</p>
           </div>
 
           {/* Ações numa linha só: principal (ocupa o espaço) + Editar (só ícone no celular) + ⋯ */}
@@ -522,6 +506,7 @@ export function AdminCampaignPanel() {
           onOpenChange={(o) => !o && setDupOpen(false)}
           campaignId={c.id}
           campaignName={c.name}
+          hasVoting={!!c.features.voting}
           onDuplicated={(newId) => navigate(`/admin/campaigns/${newId}`)}
         />
       )}

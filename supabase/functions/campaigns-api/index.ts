@@ -76,6 +76,20 @@ const ERR: Record<string, [number, string]> = {
   MEDIA_NOT_VERIFIED: [422, "Não foi possível confirmar o envio de um dos arquivos. Tente enviar de novo."],
   MAIN_PHOTO_REQUIRED: [422, "A foto principal é obrigatória nesta campanha."],
   LAST_ACCESS_MANAGER: [409, "É preciso manter pelo menos uma pessoa com gestão de acesso."],
+  SUBMISSION_LIMIT: [409, "Você já atingiu o limite de receitas desta campanha."],
+  ALREADY_ANNOUNCED: [409, "O resultado já foi divulgado."],
+  ANNOUNCE_IN_PAST: [422, "Escolha uma data e hora futuras para divulgar o resultado."],
+  RESULTS_NOT_CONFIRMED: [409, "Confirme o vencedor antes de divulgar ou agendar a divulgação."],
+  TOUR_LIMIT: [422, "Limite de histórico de tours atingido."],
+};
+// Mensagens específicas do INVALID_DATES (o banco manda o motivo em `detail`).
+const DATES_MSG: Record<string, string> = {
+  missing: "Informe a data de início e a de encerramento.",
+  ends_before_starts: "O encerramento deve ser depois do início.",
+  voting_missing: "Informe o início e o encerramento da votação.",
+  voting_ends_before_starts: "O encerramento da votação deve ser depois do início dela.",
+  voting_before_registration: "A votação não pode começar antes do início da participação.",
+  voting_ends_before_registration: "A votação não pode terminar antes do fim da participação.",
 };
 // deno-lint-ignore no-explicit-any
 function fromPg(error: any): AppError {
@@ -84,6 +98,7 @@ function fromPg(error: any): AppError {
     const info = ERR[code];
     let details: unknown = error?.details;
     if (code === "PUBLISH_CHECK_FAILED") { try { details = JSON.parse(String(error.details)); } catch { /* ignore */ } }
+    if (code === "INVALID_DATES" && typeof details === "string" && DATES_MSG[details]) return new AppError(info[0], code, DATES_MSG[details], details);
     if (info) return new AppError(info[0], code, info[1], details);
     return new AppError(422, code, "Operação não permitida (" + code + ").", details);
   }
@@ -206,7 +221,16 @@ async function notifyUser(campaignId: string, userId: string, event: string, ent
 }
 async function eligibleUserIds(campaignId: string): Promise<string[]> {
   const rows = await rpc<{ user_id: string }[]>("campaign_participants", { p_campaign: campaignId, p_with_votes: false });
-  return rows.map((r) => r.user_id);
+  // com várias receitas por pessoa a função devolve uma linha por receita: aqui interessa cada pessoa uma vez
+  return [...new Set(rows.map((r) => r.user_id))];
+}
+// Divulgações agendadas já vencidas: o pg_cron roda a cada minuto; isto é só a rede de segurança caso a extensão
+// não esteja ativa (no máximo 1 chamada a cada 20 s por instância; o banco garante "uma única vez").
+let lastDueRun = 0;
+function runDueAnnouncements() {
+  if (Date.now() - lastDueRun < 20_000) return;
+  lastDueRun = Date.now();
+  wait(rpc("campaign_run_due_announcements", {}));
 }
 async function notifyMany(campaignId: string, ids: string[], event: string, title: string, message: string) {
   for (let i = 0; i < ids.length; i += 10) {
@@ -285,6 +309,21 @@ async function resultsGate(camp: Row, stages?: Row[]): Promise<{ hasVoting: bool
   const closed = !!endsAt && new Date(endsAt).getTime() <= Date.now();
   return { hasVoting, locked: hasVoting && !closed, endsAt };
 }
+/**
+ * Período da campanha já acabou? Vale o ÚLTIMO fim entre participação e (se houver) votação; campanha encerrada
+ * ou arquivada também conta. Sem datas definidas = ainda não acabou. Usado para tirar o slide da Home.
+ */
+function campaignEnded(camp: Row, stages: Row[]): boolean {
+  if (camp.status === "closed" || camp.status === "archived") return true;
+  const keys = camp.features?.voting ? ["registration", "voting"] : ["registration"];
+  const ends: number[] = [];
+  for (const k of keys) {
+    const e = stages.find((s) => s.stage_key === k)?.ends_at;
+    if (!e) return false;
+    ends.push(new Date(e).getTime());
+  }
+  return Date.now() >= Math.max(...ends);
+}
 /** No contexto de ANÁLISE de receitas, "votação encerrada" tem mensagem própria (para o eleitor continua "não está aberta"). */
 function reviewErr(e: unknown): unknown {
   if (e instanceof AppError && e.code === "VOTING_CLOSED") {
@@ -344,9 +383,25 @@ app.onError((err, c) => {
 app.notFound((c) => c.json({ error: "Rota não encontrada.", code: "NOT_FOUND" }, 404));
 app.get("/health", (c) => c.json({ status: "ok" }));
 
+// ---------------------------------------------------- tours vistos (por usuário) ---
+// Qualquer usuário logado (colaborador ou admin); não depende do módulo estar ligado nem de campanha visível.
+// O usuário vem SEMPRE do JWT, nunca do corpo. Marcar de novo uma chave já vista também responde 200.
+app.get("/tours", async (c) => {
+  const user = await requireUser(c);
+  return c.json({ seen: await rpc<string[]>("campaign_tours_seen", { p_user: user.id }) });
+});
+app.post("/tours", async (c) => {
+  const user = await requireUser(c);
+  const b = await body(c);
+  if (typeof b.key !== "string") throw new AppError(422, "INVALID_FIELDS", ERR.INVALID_FIELDS[1]);
+  await rpc("campaign_tour_mark", { p_user: user.id, p_key: b.key });
+  return c.json({ ok: true });
+});
+
 // ------------------------------------------------------------ colaborador ---
 app.get("/campaigns/availability", async (c) => {
   const user = await requireUser(c);
+  runDueAnnouncements();
   const enabled = await rpc<boolean>("campaign_module_enabled", {});
   if (!enabled) return c.json({ enabled: false, hasVisible: false, campaigns: [] });
   const { data: list } = await sb.from("campaigns").select("id,slug,features").eq("status", "authorized");
@@ -360,6 +415,7 @@ app.get("/campaigns/availability", async (c) => {
 
 app.get("/campaigns", async (c) => {
   const user = await requireUser(c);
+  runDueAnnouncements();
   const enabled = await rpc<boolean>("campaign_module_enabled", {});
   if (!enabled) return c.json([]);
   const { data: list } = await sb.from("campaigns").select("*").eq("status", "authorized").order("authorized_at", { ascending: false });
@@ -373,7 +429,13 @@ app.get("/campaigns", async (c) => {
   return c.json(rows.map((r) => ({
     ...publicCampaign(r.camp, r.stages, urls[r.camp.cover_path]),
     description: String(r.camp.description).slice(0, 240),
-    state: { stage: r.st.stage, released: r.st.released, my_submission_status: r.st.my_submission_status ?? null },
+    state: {
+      stage: r.st.stage, released: r.st.released, my_submission_status: r.st.my_submission_status ?? null,
+      my_submissions_count: r.st.my_submissions_count ?? 0, max_submissions: r.st.max_submissions ?? 1,
+      can_submit: r.st.can_submit === true, can_vote: r.st.can_vote === true,
+      has_voted: r.st.has_voted === true, results_visible: r.st.results_visible === true,
+    },
+    ended: campaignEnded(r.camp, r.stages),
   })));
 });
 
@@ -415,7 +477,8 @@ app.get("/campaigns/:slug/recipes/:id", async (c) => {
 
 app.get("/campaigns/:slug/my-submission", async (c) => {
   const { camp, state, user } = await collab(c, c.req.param("slug"));
-  const { data: s } = await sb.from("campaign_submissions").select("*").eq("campaign_id", camp.id).eq("user_id", user.id).maybeSingle();
+  // com "várias receitas" pode haver mais de uma: esta rota (singular) devolve sempre a de menor slot
+  const { data: s } = await sb.from("campaign_submissions").select("*").eq("campaign_id", camp.id).eq("user_id", user.id).order("slot").limit(1).maybeSingle();
   if (!s) return c.json({ submission: null, state });
   const media = (await mediaFor([s.id]))[s.id] ?? [];
   let voted: Row | null = null;
@@ -425,11 +488,33 @@ app.get("/campaigns/:slug/my-submission", async (c) => {
   }
   return c.json({
     submission: {
-      id: s.id, dish_name: s.dish_name, description: s.description, ingredients: s.ingredients, preparation: s.preparation,
+      id: s.id, slot: s.slot, dish_name: s.dish_name, description: s.description, ingredients: s.ingredients, preparation: s.preparation,
       status: s.status, rejection_reason: s.status === "rejected" ? s.rejection_reason : null,
       submitted_at: s.submitted_at, updated_at: s.updated_at, reviewed_at: s.reviewed_at, media,
     },
     state, my_vote: voted,
+  });
+});
+
+// Todas as receitas da pessoa nesta campanha (1, ou várias), em ordem de slot. Só enxerga as PRÓPRIAS.
+app.get("/campaigns/:slug/my-submissions", async (c) => {
+  const { camp, state, user } = await collab(c, c.req.param("slug"));
+  const { data } = await sb.from("campaign_submissions").select("*").eq("campaign_id", camp.id).eq("user_id", user.id).order("slot");
+  const rows = data ?? [];
+  const media = await mediaFor(rows.map((s) => s.id));
+  let voted: Row | null = null;
+  if (state.has_voted && state.voted_submission_id) {
+    const { data: vs } = await sb.from("campaign_submissions").select("id,dish_name,user_name").eq("id", state.voted_submission_id).maybeSingle();
+    voted = vs ? { dish_name: vs.dish_name, author: vs.user_name, at: state.voted_at } : null;
+  }
+  const max = Number(state.max_submissions ?? 1);
+  return c.json({
+    items: rows.map((s) => ({
+      id: s.id, slot: s.slot, dish_name: s.dish_name, description: s.description, ingredients: s.ingredients, preparation: s.preparation,
+      status: s.status, rejection_reason: s.status === "rejected" ? s.rejection_reason : null,
+      submitted_at: s.submitted_at, updated_at: s.updated_at, reviewed_at: s.reviewed_at, media: media[s.id] ?? [],
+    })),
+    count: rows.length, max, can_submit_more: state.can_submit === true, state, my_vote: voted,
   });
 });
 
@@ -447,7 +532,7 @@ app.post("/campaigns/:slug/submission", async (c) => {
   });
   const uploads = await uploadTokens(r.uploads ?? []);
   if (r.status === "submitted") wait(notifyUser(camp.id, user.id, "submission_received", r.submission_id, "Receita recebida", `Recebemos a sua receita na campanha ${camp.name}. Ela passará por análise.`));
-  return c.json({ submission_id: r.submission_id, status: r.status, uploads });
+  return c.json({ submission_id: r.submission_id, status: r.status, slot: r.slot, uploads });
 });
 
 app.post("/campaigns/:slug/submission/:id/uploads", async (c) => {
@@ -564,6 +649,7 @@ app.put("/admin/module", async (c) => {
 
 app.get("/admin/overview", async (c) => {
   await requireAdmin(c, "campaigns");
+  runDueAnnouncements();
   const { data } = await sb.from("campaigns").select("id,status,authorized_at,visible_from,suspended_at");
   const rows = data ?? [];
   const now = Date.now();
@@ -662,12 +748,17 @@ for (const [route, key] of [["stages/:key", "campaigns_schedule"]] as const) {
     return c.json({ ok: true });
   });
 }
-// Período único da campanha: início + encerramento. Inscrições = [início, encerramento]; com votação, a
-// votação usa a MESMA janela (tudo no banco, em uma transação, com uma linha de auditoria SET_PERIOD).
+// Período da campanha: participação = [starts_at, ends_at]; com votação, a votação usa a MESMA janela, a menos
+// que venham voting_starts_at/voting_ends_at (tudo no banco, em uma transação, com uma linha de auditoria SET_PERIOD).
 app.put("/admin/campaigns/:id/period", async (c) => {
   const a = await requireAdmin(c, "campaigns_schedule");
   const b = await body(c);
-  await rpc("campaign_set_period", { p_actor: a.actor, p_campaign: c.req.param("id"), p_starts: isoOrNull(b.starts_at), p_ends: isoOrNull(b.ends_at) });
+  // Sem `voting_*` a votação usa a mesma janela da participação; com os dois campos, a votação tem janela própria.
+  await rpc("campaign_set_periods", {
+    p_actor: a.actor, p_campaign: c.req.param("id"),
+    p_reg_starts: isoOrNull(b.starts_at), p_reg_ends: isoOrNull(b.ends_at),
+    p_vot_starts: isoOrNull(b.voting_starts_at), p_vot_ends: isoOrNull(b.voting_ends_at),
+  });
   return c.json({ ok: true });
 });
 app.post("/admin/campaigns/:id/stages/:key/extend", async (c) => {
@@ -747,7 +838,7 @@ app.get("/admin/campaigns/:id/dashboard", async (c) => {
     sb.from("campaign_submissions").select("status,user_id").eq("campaign_id", id),
     sb.from("campaign_votes").select("voter_id,invalidated_at").eq("campaign_id", id),
     rpc<number>("campaign_eligible_count", { p_campaign: id }),
-    sb.from("campaign_results").select("status,winner_submission_id,winner_votes,confirmed_at,announced_at,total_valid_votes").eq("campaign_id", id).maybeSingle(),
+    sb.from("campaign_results").select("status,winner_submission_id,winner_votes,confirmed_at,announced_at,total_valid_votes,announce_at,announce_scheduled_by_name,announce_scheduled_at").eq("campaign_id", id).maybeSingle(),
     getStages(id),
   ]);
   const sRows = (subs.data ?? []).filter((s) => s.status !== "pending_media");
@@ -774,7 +865,7 @@ app.get("/admin/campaigns/:id/dashboard", async (c) => {
 app.get("/admin/campaigns/:id/submissions", async (c) => {
   await requireAdmin(c, "campaigns_review");
   const id = c.req.param("id");
-  let q = sb.from("campaign_submissions").select("id,user_id,user_name,user_department,dish_name,status,submitted_at,reviewed_at,rejection_reason,content_version").eq("campaign_id", id).neq("status", "pending_media").order("submitted_at", { ascending: false }).limit(500);
+  let q = sb.from("campaign_submissions").select("id,user_id,slot,user_name,user_department,dish_name,status,submitted_at,reviewed_at,rejection_reason,content_version").eq("campaign_id", id).neq("status", "pending_media").order("submitted_at", { ascending: false }).limit(500);
   const status = c.req.query("status");
   if (status && status !== "all") q = status === "pending" ? q.in("status", ["submitted", "in_review"]) : q.eq("status", status);
   if (c.req.query("from")) q = q.gte("submitted_at", c.req.query("from")!);
@@ -806,7 +897,7 @@ app.post("/admin/campaigns/:id/submissions/:sid/reject", async (c) => {
   const b = await body(c);
   const r = await rpc<Row>("campaign_review", { p_actor: a.actor, p_campaign: id, p_submission: c.req.param("sid"), p_decision: "reject", p_reason: strOrUndef(b.reason) ?? "" }).catch((e) => { throw reviewErr(e); });
   const camp = await getCampaignById(id);
-  wait(notifyUser(id, r.user_id, "submission_rejected", c.req.param("sid"), "Receita reprovada", `Sua receita ${r.dish_name} não foi aprovada na campanha ${camp.name}. Veja o motivo em Minha participação.`));
+  wait(notifyUser(id, r.user_id, "submission_rejected", c.req.param("sid"), "Receita reprovada", `Sua receita ${r.dish_name} não foi aprovada na campanha ${camp.name}. Veja o motivo em Minhas receitas.`));
   return c.json({ status: r.status });
 });
 app.put("/admin/campaigns/:id/submissions/:sid", async (c) => {
@@ -871,12 +962,23 @@ app.post("/admin/campaigns/:id/results/confirm", async (c) => {
 app.post("/admin/campaigns/:id/results/announce", async (c) => {
   const a = await requireAdmin(c, "campaigns_announce");
   const id = c.req.param("id");
-  const r = await rpc<Row>("campaign_announce", { p_actor: a.actor, p_campaign: id });
-  const camp = await getCampaignById(id);
-  wait((async () => {
-    await notifyUser(id, r.winner_user_id, "you_won", "", "Sua receita venceu!", `Parabéns! ${r.dish_name} foi a receita vencedora da campanha ${camp.name}.`);
-    await notifyMany(id, await eligibleUserIds(id), "results_announced", "Resultado divulgado", `O resultado da campanha ${camp.name} já está disponível em Campanhas.`);
-  })());
+  // Divulgar AGORA. As notificações (vencedor + participantes) são gravadas pelo próprio banco, na mesma
+  // transação e uma única vez por pessoa — a API não faz mais envio em segundo plano.
+  await rpc<Row>("campaign_announce", { p_actor: a.actor, p_campaign: id });
+  return c.json({ ok: true });
+});
+// Agendar a divulgação (data + hora). O banco divulga e notifica sozinho na hora marcada; o último agendamento vale.
+app.post("/admin/campaigns/:id/results/schedule", async (c) => {
+  const a = await requireAdmin(c, "campaigns_announce");
+  const b = await body(c);
+  const at = isoOrNull(b.announce_at);
+  if (!at) throw new AppError(422, "ANNOUNCE_IN_PAST", ERR.ANNOUNCE_IN_PAST[1]);
+  const r = await rpc<Row>("campaign_schedule_announcement", { p_actor: a.actor, p_campaign: c.req.param("id"), p_at: at });
+  return c.json({ ok: true, announce_at: r.announce_at });
+});
+app.delete("/admin/campaigns/:id/results/schedule", async (c) => {
+  const a = await requireAdmin(c, "campaigns_announce");
+  await rpc("campaign_cancel_announcement", { p_actor: a.actor, p_campaign: c.req.param("id") });
   return c.json({ ok: true });
 });
 app.post("/admin/campaigns/:id/notify", async (c) => {
@@ -917,8 +1019,9 @@ app.get("/admin/campaigns/:id/export/:kind", async (c) => {
   if (kind === "participants") {
     const withVotes = a.perms.campaigns_votes_view === true;
     const p = await rpc<Row[]>("campaign_participants", { p_campaign: id, p_with_votes: withVotes });
-    columns = ["Nome", "Departamento", "Unidade", "Receita", "Status", "Enviada em", ...(withVotes ? ["Votou"] : [])];
-    rows = p.map((x) => [x.user_name, x.department, x.unit, x.submission_id ? "Sim" : "Não", stOf[x.submission_status] ?? "", x.submitted_at ?? "", ...(withVotes ? [x.voted ? "Sim" : "Não"] : [])]);
+    // com várias receitas por pessoa há uma linha por receita (coluna "Prato" identifica qual)
+    columns = ["Nome", "Departamento", "Unidade", "Receita", "Prato", "Status", "Enviada em", ...(withVotes ? ["Votou"] : [])];
+    rows = p.map((x) => [x.user_name, x.department, x.unit, x.submission_id ? "Sim" : "Não", x.dish_name ?? "", stOf[x.submission_status] ?? "", x.submitted_at ?? "", ...(withVotes ? [x.voted ? "Sim" : "Não"] : [])]);
   } else if (kind === "submissions" || kind === "approved" || kind === "rejected") {
     const s = await sub(kind === "approved" ? ["approved"] : kind === "rejected" ? ["rejected"] : undefined);
     columns = ["Participante", "Departamento", "Prato", "Descrição", "Ingredientes", "Modo de preparo", "Status", "Justificativa", "Enviada em", "Analisada por", "Analisada em"];

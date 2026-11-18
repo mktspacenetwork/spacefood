@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
-import { AlertTriangle, CheckCircle2, Loader2, Lock, RefreshCw, Send } from "lucide-react";
+import { useNavigate, useParams } from "react-router";
+import { AlertTriangle, CheckCircle2, Loader2, Lock, Plus, RefreshCw, Send } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { Button } from "../../components/ui/Button";
@@ -11,57 +11,72 @@ import { Skeleton } from "../../components/ui/skeleton";
 import { PhotoPicker, type PhotoDraft } from "../../components/campaigns/PhotoPicker";
 import { ErrorState } from "../../components/campaigns/ErrorState";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
+import { submissionsCount, submissionsMax } from "../../components/campaigns/campaignInfo";
 import { useCampaignCtx } from "./CampaignLayout";
 import { useAuth } from "../../context/Store";
 import { campaignsApi, CampaignApiError, errMsg, uploadToSignedUrl } from "../../lib/campaigns/api";
 import { DEFAULT_PHOTO_MB } from "../../lib/campaigns/media";
 import { SUBMIT_TOUR } from "../../lib/campaigns/tours-collab";
 import { cn } from "../../lib/utils";
-import type { MySubmission, UploadTicket } from "../../lib/campaigns/types";
+import type { MySubmission, MySubmissions, SubmissionStatus, UploadTicket } from "../../lib/campaigns/types";
 
 type Phase = "idle" | "saving" | "uploading" | "finalizing" | "partial" | "done";
 type CreateResp = { submission_id: string; status: string; uploads: UploadTicket[] };
 type UpdateResp = { changed: boolean; status: string; uploads: UploadTicket[] };
 
-const BLOCKING_CODES = ["EDIT_LOCKED", "REGISTRATION_CLOSED", "REGISTRATION_PAUSED", "CAMPAIGN_UNAVAILABLE", "NOT_ELIGIBLE"];
-const NAME_MIN = 3;
-const NAME_MAX = 120;
-const DESC_SHOWN = 300; // limite exibido (o servidor aceita até 600)
-const DESC_MAX = 600;
+const BLOCKING_CODES = ["EDIT_LOCKED", "REGISTRATION_CLOSED", "REGISTRATION_PAUSED", "CAMPAIGN_UNAVAILABLE", "NOT_ELIGIBLE", "SUBMISSION_LIMIT"];
+const TITLE_MIN = 3;
+const TITLE_MAX = 120;
+const STORY_MAX = 2000; // "História e memória afetiva" (um único campo de texto)
 
 type Fields = { dish_name: string; description: string };
 
 function validate(f: Fields): { dish_name?: string; description?: string } {
   const out: { dish_name?: string; description?: string } = {};
   const n = f.dish_name.trim().length;
-  if (n < NAME_MIN) out.dish_name = `Escreva o nome da receita (mínimo ${NAME_MIN} letras).`;
-  else if (n > NAME_MAX) out.dish_name = `O nome pode ter até ${NAME_MAX} letras.`;
-  if (f.description.trim().length > DESC_MAX) out.description = `A descrição pode ter até ${DESC_MAX} letras.`;
+  if (n < TITLE_MIN) out.dish_name = `Escreva o título da receita (mínimo ${TITLE_MIN} letras).`;
+  else if (n > TITLE_MAX) out.dish_name = `O título pode ter até ${TITLE_MAX} letras.`;
+  if (f.description.trim().length > STORY_MAX) out.description = `A história pode ter até ${STORY_MAX} letras.`;
   return out;
 }
 
 const LABEL = "text-xs font-bold uppercase tracking-wider text-muted-foreground";
 const FIELD = "rounded-xl border-border focus:ring-primary/30";
 
-/** Participar (ou editar a própria receita): nome, descrição breve opcional e UMA foto. */
+/** Rota `enviar` = nova receita; `enviar/:id` = editar uma das minhas receitas. Remonta ao trocar de uma para a outra. */
 export function CampaignSubmit() {
+  const { id } = useParams();
+  return <SubmitForm key={id ?? "new"} editId={id ?? null} />;
+}
+
+/** Enviar (ou editar) uma receita: título, UM campo "História e memória afetiva" e UMA foto. */
+function SubmitForm({ editId }: { editId: string | null }) {
   const { campaign, state, refresh, slug } = useCampaignCtx();
   const { user } = useAuth();
   const navigate = useNavigate();
   const base = `/campanhas/${slug}`;
   const api = `/campaigns/${encodeURIComponent(slug)}`;
 
-  // Modo definido na entrada da tela: quem já tem receita edita; os demais criam.
-  const isEdit = useRef(Boolean(state.my_submission_id)).current;
+  const isEdit = !!editId;
+  const max = submissionsMax(campaign, state);
+  const multi = max > 1;
+  const count = submissionsCount(state);
   const maxMb = campaign.media_limits?.max_photo_mb || DEFAULT_PHOTO_MB;
   const needPhoto = campaign.features.photos !== false;
+
+  // Campanha de uma receita só: quem já tem uma cai direto na edição dela (links antigos para /enviar continuam valendo).
+  const redirectId = useRef(!isEdit && !multi && state.my_submission_id ? state.my_submission_id : null).current;
+  useEffect(() => {
+    if (redirectId) navigate(`${base}/enviar/${redirectId}`, { replace: true });
+  }, [redirectId, base, navigate]);
 
   const [fields, setFields] = useState<Fields>({ dish_name: "", description: "" });
   const [original, setOriginal] = useState<Fields | null>(null);
   const [photo, setPhoto] = useState<PhotoDraft | null>(null);
   // Linhas de foto principal que já existem no servidor (para saber o que remover ao trocar a foto).
   const [serverMainIds, setServerMainIds] = useState<string[]>([]);
-  const [submissionId, setSubmissionId] = useState<string | null>(state.my_submission_id ?? null);
+  const [submissionId, setSubmissionId] = useState<string | null>(editId);
+  const [recipeStatus, setRecipeStatus] = useState<SubmissionStatus | null>(null);
   const [loading, setLoading] = useState(isEdit);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -80,13 +95,22 @@ export function CampaignSubmit() {
     setLoading(true);
     setLoadError(null);
     try {
-      const r = await campaignsApi.get<{ submission: MySubmission | null }>(`${api}/my-submission`);
-      const s = r.submission;
-      if (!s) { setLoadError("Não encontramos a sua receita."); return; }
+      let s: MySubmission | undefined;
+      try {
+        const r = await campaignsApi.get<MySubmissions>(`${api}/my-submissions`);
+        s = r.items.find((x) => x.id === editId);
+      } catch (e) {
+        // Plano B: servidor ainda sem a rota nova → rota de uma receita só.
+        if (!(e instanceof CampaignApiError && e.status === 404 && e.code === "NOT_FOUND")) throw e;
+        const r = await campaignsApi.get<{ submission: MySubmission | null }>(`${api}/my-submission`);
+        s = r.submission && r.submission.id === editId ? r.submission : undefined;
+      }
+      if (!s) { setLoadError("Não encontramos esta receita."); return; }
       const f: Fields = { dish_name: s.dish_name, description: s.description ?? "" };
       setFields(f);
       setOriginal(f);
       setSubmissionId(s.id);
+      setRecipeStatus(s.status);
       const main = s.media.find((m) => m.kind === "main_photo") ?? s.media.find((m) => m.kind === "photo");
       const ids: string[] = main ? [main.id] : [];
       if (main) {
@@ -108,7 +132,7 @@ export function CampaignSubmit() {
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, editId]);
 
   useEffect(() => { if (isEdit) void loadExisting(); }, [isEdit, loadExisting]);
 
@@ -123,11 +147,15 @@ export function CampaignSubmit() {
   const blockReason = (): string | null => {
     if (blockedMsg) return blockedMsg;
     if (isEdit) {
-      if (state.can_edit) return null;
-      return state.my_submission_status === "approved"
-        ? "Sua receita já foi aprovada e não pode mais ser alterada."
+      // Campanha de várias receitas: vale a regra da receita (não aprovada + inscrições abertas).
+      const regOpen = !!state.released && state.registration === "open" && state.stage !== "closed";
+      const allowed = multi ? regOpen && recipeStatus !== "approved" : !!state.can_edit;
+      if (allowed || recipeStatus === null) return null;
+      return recipeStatus === "approved"
+        ? "Esta receita já foi aprovada e não pode mais ser alterada."
         : "Não dá para editar a receita agora.";
     }
+    if (multi && count >= max) return `Você chegou ao limite de ${max} receitas nesta campanha.`;
     if (state.can_submit) return null;
     switch (state.registration) {
       case "upcoming": return "As inscrições ainda não abriram.";
@@ -136,12 +164,27 @@ export function CampaignSubmit() {
       default: return "Esta campanha não está recebendo receitas agora.";
     }
   };
-  const blocked = phase === "done" ? null : blockReason();
+  const blocked = phase === "done" || redirectId ? null : blockReason();
 
   const tour = useTour({
     storageKey: tourKey("collab", user?.id, "submit", campaign.id, state.tour?.version),
-    enabled: !!state.tour?.enabled && !!user && !blocked && !loading && !loadError,
+    enabled: !!state.tour?.enabled && !!user && !blocked && !loading && !loadError && !redirectId,
   });
+
+  const resetForm = () => {
+    setFields({ dish_name: "", description: "" });
+    setOriginal(null);
+    setPhoto(null);
+    setServerMainIds([]);
+    setSubmissionId(null);
+    setRecipeStatus(null);
+    setBanner(null);
+    setBlockedMsg(null);
+    setShowErrors(false);
+    setDoneDish("");
+    setPhase("idle");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   // ── Salvar / enviar ───────────────────────────────────────────────────────
   const persist = async () => {
@@ -172,7 +215,7 @@ export function CampaignSubmit() {
       let changed = false;
 
       if (!sid) {
-        const r = await campaignsApi.post<CreateResp>(`${api}/submission`, { ...f, ingredients: "", preparation: "", media: addMeta });
+        const r = await campaignsApi.post<CreateResp>(`${api}/submission`, { ...f, media: addMeta });
         sid = r.submission_id;
         createdNow = true;
         changed = true;
@@ -265,14 +308,21 @@ export function CampaignSubmit() {
     } catch (e) {
       const code = e instanceof CampaignApiError ? e.code : "";
       if (code === "ALREADY_SUBMITTED") {
-        toast.info("Você já enviou uma receita nesta campanha.");
+        // Campanha de uma receita só e a pessoa já tem a dela: abre essa receita (retoma a foto se faltou).
+        const existing = e instanceof CampaignApiError ? (e.details as { submission_id?: string } | undefined)?.submission_id : undefined;
+        toast.info("Você já tem uma receita nesta campanha. Abrimos ela para você.");
         await refresh();
-        navigate(`${base}/participacao`, { replace: true });
+        navigate(existing ? `${base}/enviar/${existing}` : `${base}/participacao`, { replace: true });
         return;
       }
-      if (BLOCKING_CODES.includes(code)) { setBlockedMsg(errMsg(e)); void refresh(); }
-      setBanner(errMsg(e));
-      toast.error(errMsg(e));
+      const msg = code === "SUBMISSION_LIMIT" ? `Você chegou ao limite de ${max} receitas nesta campanha.` : errMsg(e);
+      if (BLOCKING_CODES.includes(code)) {
+        setBlockedMsg(msg); // a tela já mostra o aviso de bloqueio; não repete em outra caixa
+        void refresh();
+      } else {
+        setBanner(msg);
+      }
+      toast.error(msg);
       setPhase(sid ? "partial" : "idle");
     } finally {
       inflight.current = false;
@@ -280,7 +330,17 @@ export function CampaignSubmit() {
   };
 
   // ── Telas ─────────────────────────────────────────────────────────────────
+  if (redirectId) {
+    return (
+      <div className="space-y-4" aria-busy="true" aria-live="polite">
+        <Skeleton className="h-44 w-full rounded-3xl" />
+        <span className="sr-only">Abrindo a sua receita…</span>
+      </div>
+    );
+  }
+
   if (phase === "done") {
+    const canSendAnother = multi && count < max;
     return (
       <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}>
         <Card className="rounded-3xl p-8 text-center hover:shadow-sm" role="status">
@@ -292,8 +352,13 @@ export function CampaignSubmit() {
             {doneDish ? <>“{doneDish}” </> : null}Ela será analisada pela equipe.
           </p>
           <div className="mt-6 flex flex-col gap-2">
-            <Button onClick={() => navigate(`${base}/participacao`)} className="h-12 rounded-xl px-6">Ver minha receita</Button>
-            <Button variant="outline" onClick={() => navigate(base)} className="h-12 rounded-xl px-6">Voltar à campanha</Button>
+            <Button onClick={() => navigate(`${base}/participacao`)} className="h-12 rounded-xl px-6">Ver minhas receitas</Button>
+            {canSendAnother && (
+              <Button variant="outline" onClick={resetForm} className="h-12 gap-2 rounded-xl px-6">
+                <Plus size={16} aria-hidden="true" /> Enviar outra receita
+              </Button>
+            )}
+            <Button variant="ghost" onClick={() => navigate(base)} className="h-12 rounded-xl px-6">Voltar à campanha</Button>
           </div>
         </Card>
       </motion.div>
@@ -319,12 +384,14 @@ export function CampaignSubmit() {
     : phase === "partial" ? "Tentar de novo"
     : isEdit ? "Salvar alterações" : "Enviar receita";
   const errs = showErrors ? validate(fields) : {};
-  const descLen = fields.description.length;
+  const storyLen = fields.description.length;
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-bold text-foreground">{isEdit ? "Editar minha receita" : "Participar"}</h2>
+        <h2 className="text-lg font-bold text-foreground">
+          {isEdit ? "Editar receita" : count > 0 ? "Enviar outra receita" : "Enviar minha receita"}
+        </h2>
         <TourButton onClick={tour.start} />
       </div>
 
@@ -334,8 +401,8 @@ export function CampaignSubmit() {
             <Lock size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
             <span>{blocked}</span>
           </p>
-          <Button variant="outline" size="sm" className="mt-3 h-11 rounded-xl px-4" onClick={() => navigate(isEdit ? `${base}/participacao` : base)}>
-            {isEdit ? "Ver minha receita" : "Voltar à campanha"}
+          <Button variant="outline" size="sm" className="mt-3 h-11 rounded-xl px-4" onClick={() => navigate(isEdit || count > 0 ? `${base}/participacao` : base)}>
+            {isEdit || count > 0 ? "Ver minhas receitas" : "Voltar à campanha"}
           </Button>
         </Card>
       )}
@@ -357,13 +424,13 @@ export function CampaignSubmit() {
 
       <Card className="space-y-4 rounded-3xl p-5 hover:shadow-sm" data-tutorial="camp-fields">
         <div className="space-y-1.5">
-          <label htmlFor="camp-dish" className={LABEL}>Nome da receita</label>
+          <label htmlFor="camp-dish" className={LABEL}>Título da receita</label>
           <Input
             id="camp-dish"
             value={fields.dish_name}
             onChange={(e) => setFields((f) => ({ ...f, dish_name: e.target.value }))}
             disabled={disabled}
-            maxLength={NAME_MAX}
+            maxLength={TITLE_MAX}
             placeholder="Ex.: Bolo de fubá da vovó"
             autoComplete="off"
             aria-invalid={!!errs.dish_name}
@@ -372,22 +439,26 @@ export function CampaignSubmit() {
           {errs.dish_name && <p role="alert" className="text-sm font-medium text-destructive">{errs.dish_name}</p>}
         </div>
         <div className="space-y-1.5">
-          <div className="flex items-baseline justify-between gap-2">
-            <label htmlFor="camp-desc" className={LABEL}>Descrição <span className="font-medium normal-case tracking-normal">(opcional)</span></label>
-            <span className="text-[11px] tabular-nums text-muted-foreground">{descLen}/{DESC_SHOWN}</span>
-          </div>
+          <label htmlFor="camp-story" className={LABEL}>
+            História e memória afetiva <span className="font-medium normal-case tracking-normal">(opcional)</span>
+          </label>
           <Textarea
-            id="camp-desc"
+            id="camp-story"
             value={fields.description}
             onChange={(e) => setFields((f) => ({ ...f, description: e.target.value }))}
             disabled={disabled}
-            maxLength={Math.max(DESC_SHOWN, descLen)}
-            rows={3}
-            placeholder="Uma frase sobre a receita ou a lembrança dela"
+            maxLength={Math.max(STORY_MAX, storyLen)}
+            rows={6}
+            placeholder="Conte a história desta receita: quem fazia, onde você provou pela primeira vez, que lembrança ela traz."
             aria-invalid={!!errs.description}
-            className={cn(FIELD, "min-h-[88px]")}
+            className={cn(FIELD, "min-h-[140px]")}
           />
-          {errs.description && <p role="alert" className="text-sm font-medium text-destructive">{errs.description}</p>}
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              {errs.description && <p role="alert" className="text-sm font-medium text-destructive">{errs.description}</p>}
+            </div>
+            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground" aria-live="off">{storyLen}/{STORY_MAX}</span>
+          </div>
         </div>
       </Card>
 
