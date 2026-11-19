@@ -6,6 +6,7 @@ import { Skeleton } from "../../components/ui/skeleton";
 import { ErrorState } from "../../components/campaigns/ErrorState";
 import { campaignsApi, CampaignApiError, errMsg } from "../../lib/campaigns/api";
 import { submissionsCount } from "../../components/campaigns/campaignInfo";
+import { useVisibleInterval } from "../../lib/campaigns/ranking";
 import { cn } from "../../lib/utils";
 import type { CollabState, PublicCampaign } from "../../lib/campaigns/types";
 
@@ -40,7 +41,8 @@ export function CampaignLayout() {
       }
       try {
         const r = await campaignsApi.get<Loaded>(`/campaigns/${encodeURIComponent(slug)}`);
-        setData(r);
+        // Recarga silenciosa sem mudança: mantém o mesmo objeto (nenhuma tela filha refaz carga nem pisca).
+        setData((prev) => (silent && prev && JSON.stringify(prev) === JSON.stringify(r) ? prev : r));
         setError(null);
       } catch (e) {
         // Recarga silenciosa que falha mantém a tela atual; só a carga inicial mostra erro.
@@ -58,6 +60,11 @@ export function CampaignLayout() {
   }, [load]);
 
   const refresh = useCallback(async () => { await load(true); }, [load]);
+
+  // O menu reage ao que a gestão muda (ex.: ligar/desligar o ranking parcial) sem recarregar a página: o estado é relido
+  // a cada 60 s (com sorteio de ±15 %), só com a aba visível, e só em campanha com votação ainda sem resultado divulgado.
+  const pollState = !!data && !!data.campaign.features.voting && !data.state.results_visible;
+  useVisibleInterval(() => void load(true), 60_000, pollState);
 
   const ctx = useMemo<CampaignCtx | null>(
     () => (data ? { campaign: data.campaign, state: data.state, refresh, slug } : null),
@@ -105,7 +112,8 @@ export function CampaignLayout() {
   const isForm = /\/enviar(\/|$)/.test(pathname);
 
   // Menu interno (a tela da campanha já traz nome, período e o botão do momento, então não há chip "Início"):
-  //   Receitas · Minhas receitas · Cadastrar receita · Votação (só com votação) · Resultado (só depois de divulgado).
+  //   Receitas · Minhas receitas · Cadastrar receita · Votação (só com votação) · Ranking (só se a gestão liberou o parcial)
+  //   · Resultado (só depois de divulgado; o ranking final fica dentro dele).
   // Só aparece o que existe para esta campanha e esta pessoa agora; o Livro de Receitas é global (tela de Campanhas).
   const hasVoting = !!campaign.features.voting;
   const sections: { to: string; label: string; short?: string }[] = [];
@@ -119,8 +127,18 @@ export function CampaignLayout() {
   if (hasVoting && !state.results_visible && state.released && (state.voting === "open" || state.has_voted || state.voting === "closed")) {
     sections.push({ to: `${base}/votacao`, label: state.can_vote ? "Votar" : "Votação" });
   }
+  // Ranking: só enquanto o administrador mantém o parcial liberado e o resultado ainda não foi divulgado (ranking_partial
+  // já vem falso depois da divulgação). Desligou → o item some na próxima releitura do estado.
+  if (hasVoting && state.released && !state.results_visible && state.ranking_visible && state.ranking_partial) {
+    sections.push({ to: `${base}/ranking`, label: "Ranking" });
+  }
   if (hasVoting && state.results_visible) {
     sections.push({ to: `${base}/resultado`, label: "Resultado" });
+  }
+  // Com 5 itens o menu estreita demais no celular: "Minhas receitas" vira "Minhas" só na tela pequena.
+  if (sections.length >= 5) {
+    const mine = sections.find((s) => s.to === `${base}/participacao`);
+    if (mine) mine.short = "Minhas";
   }
 
   return (

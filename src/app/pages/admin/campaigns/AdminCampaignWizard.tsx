@@ -22,10 +22,11 @@ import { CampaignTour, TourButton, tourKey, useTour } from "../../../components/
 import { ADMIN_TOUR_WIZARD } from "../../../lib/campaigns/tours-admin";
 import { useCampaignPerms } from "./useCampaignPerms";
 import { ErrorBox, LoadingBox, Notice, RestrictedBox, SectionLabel, useBusy, useLoader } from "./shared";
+import { PeriodFields } from "./PeriodFields";
 import {
-  EMPTY_PERIOD, PeriodFields, periodFromStages, periodPayload, samePeriod, validatePeriod,
-} from "./PeriodFields";
-import type { PeriodValues } from "./PeriodFields";
+  EMPTY_SCHEDULE, periodPayload, sameSchedule, scheduleFromServer, validateSchedule,
+} from "../../../lib/campaigns/schedule";
+import type { SavedSchedule, ScheduleValues } from "../../../lib/campaigns/schedule";
 
 // ─────────────────────────────── Modelo simples ───────────────────────────────
 // O formulário só pergunta o essencial. O resto vai com valores fixos (o colaborador envia 1 foto, sem vídeo;
@@ -58,14 +59,15 @@ type Form = {
   multiple: boolean;
   /** Receita com fotos (de 1 a 3). Desligado: sem campo de foto. */
   hasPhotos: boolean;
-  period: PeriodValues;
+  period: ScheduleValues;
   audienceMode: "all" | "users";
   users: string[];
 };
 type Snapshot = {
   version: number;
   status: string;
-  period: PeriodValues;
+  /** Datas gravadas no servidor (valores do formulário + instantes originais + se é janela única antiga). */
+  schedule: SavedSchedule;
   audienceKey: string;
   multiple: boolean;
   hasVoting: boolean;
@@ -83,7 +85,7 @@ type SiteUser = { id: string; name: string; department: string; unit: string };
 const initialForm = (): Form => ({
   name: "", description: "", instructions: "", coverPath: null, coverUrl: null,
   hasVoting: false, multiple: false, hasPhotos: true,
-  period: EMPTY_PERIOD, audienceMode: "all", users: [],
+  period: EMPTY_SCHEDULE, audienceMode: "all", users: [],
 });
 
 // ─────────────────────────────── Componentes ──────────────────────────────
@@ -204,8 +206,7 @@ export function AdminCampaignWizard() {
     const d = detail.data;
     if (!d) return;
     const c: AdminCampaign = d.campaign;
-    const reg = d.stages.find((s) => s.stage_key === "registration");
-    const period = periodFromStages(reg, c.features?.voting ? d.results?.announce_at : null);
+    const schedule = scheduleFromServer(d.stages, c.features?.voting ? d.results?.announce_at : null, !!c.features?.voting);
     const audience: Audience = c.audience ?? { mode: "all" };
     const legacy = audience.mode === "units" || audience.mode === "departments" ? audience : null;
     const mode: Form["audienceMode"] = audience.mode === "users" ? "users" : "all";
@@ -216,10 +217,10 @@ export function AdminCampaignWizard() {
       hasVoting: !!c.features?.voting,
       multiple: !!c.features?.multiple_submissions,
       hasPhotos: c.features?.photos !== false,
-      period, audienceMode: mode, users,
+      period: schedule.values, audienceMode: mode, users,
     });
     setSnap({
-      version: c.version, status: c.status, period,
+      version: c.version, status: c.status, schedule,
       audienceKey: JSON.stringify({ m: mode, u: [...users].sort() }),
       multiple: !!c.features?.multiple_submissions, hasMultipleSent: false,
       hasVoting: !!c.features?.voting, votesRegistered: 0, resultsStatus: d.results?.status ?? "none",
@@ -287,11 +288,14 @@ export function AdminCampaignWizard() {
   };
 
   // ── Validação ──
+  // Sequência participação → votação → divulgação; só avalia o que mudou em relação ao gravado. Roda ANTES de enviar
+  // qualquer requisição (nada é criado nem alterado se as datas estiverem fora de ordem).
+  const scheduleCheck = validateSchedule(form.period, form.hasVoting, snap?.schedule ?? null);
   const validate = (): string | null => {
     const name = form.name.trim();
     if (name.length < 3 || name.length > 120) return "Informe um nome com 3 a 120 caracteres.";
-    const periodProblem = validatePeriod(form.period, form.hasVoting, snap?.period.announce ?? "");
-    if (periodProblem) return periodProblem;
+    const scheduleProblem = scheduleCheck.issue;
+    if (scheduleProblem) return scheduleProblem.message;
     if (form.audienceMode === "users" && form.users.length === 0) return "Escolha pelo menos uma pessoa ou volte para \"Todos\".";
     return null;
   };
@@ -369,15 +373,15 @@ export function AdminCampaignWizard() {
         throw wrap(e);
       }
 
-      // Período: início e encerramento das participações (a votação usa a mesma janela) + data de anúncio do resultado
-      phase = "salvar o período";
+      // Datas: participação, votação (datas próprias; campanha antiga de janela única não envia `voting_*`) e divulgação
+      phase = "salvar as datas";
       try {
-        const base = periodPayload(form.period, form.hasVoting);
-        const votingOff = !!snap?.hasVoting && !form.hasVoting; // desligou a votação: limpa a data de anúncio
+        const base = periodPayload(form.period, form.hasVoting, snap?.schedule ?? null);
+        const votingOff = !!snap?.hasVoting && !form.hasVoting; // desligou a votação: limpa a data de divulgação
         const payload = base && votingOff ? { ...base, announce_at: null } : base;
-        // Também regrava quando a votação foi ligada agora (a votação passa a usar a janela das participações).
+        // Também regrava quando a votação foi ligada agora (a votação precisa de datas próprias).
         const votingOn = form.hasVoting && !!snap && !snap.hasVoting;
-        if (payload && (!isEdit || !snap || votingOn || votingOff || !samePeriod(snap.period, form.period, form.hasVoting))) {
+        if (payload && (!isEdit || !snap || votingOn || votingOff || !sameSchedule(snap.schedule.values, form.period, form.hasVoting))) {
           await campaignsApi.put(`/admin/campaigns/${cid}/period`, payload);
         }
       } catch (e) {
@@ -563,14 +567,15 @@ export function AdminCampaignWizard() {
       {/* Período */}
       <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-wiz-period">
         <CardContent className="space-y-3 p-5">
-          <SectionLabel>Período</SectionLabel>
+          <SectionLabel>{form.hasVoting ? "Datas" : "Período"}</SectionLabel>
           <PeriodFields
-            values={form.period} onChange={(p) => set("period", p)} hasVoting={form.hasVoting}
+            values={form.period} onChange={(p) => set("period", p)} hasVoting={form.hasVoting} check={scheduleCheck}
             disabled={closed} datesDisabled={snap?.resultsStatus === "confirmed" || snap?.resultsStatus === "announced"}
+            legacyWindow={snap?.schedule.legacy}
           />
           <p className="text-[11px] text-muted-foreground">
-            Abre às 00:00 do início e fecha no fim do dia do encerramento (horário de Brasília).
-            {form.hasVoting ? " A votação acontece nesse mesmo período." : ""}
+            Cada etapa abre às 00:00 do início e fecha no fim do dia do encerramento (horário de Brasília).
+            {form.hasVoting ? " A votação só começa depois da participação e a divulgação, depois da votação." : ""}
           </p>
         </CardContent>
       </Card>

@@ -1,25 +1,22 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useNavigate } from "react-router";
-import { formatInTimeZone } from "date-fns-tz";
 import { BarChart3, Check, ChevronRight, RefreshCw, X } from "lucide-react";
 import { Badge } from "../../../../components/ui/Badge";
 import { Button } from "../../../../components/ui/Button";
 import { Card, CardContent } from "../../../../components/ui/Card";
 import { Progress } from "../../../../components/ui/progress";
 import { cn } from "../../../../lib/utils";
-import { TIMEZONE } from "../../../../lib/date-utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
-import { AUDIT_ACTION, DISPLAY_STATE, PHASE_STATE, RESULT_STAGE, fmtDateTime, fmtDayTime, fmtRange, plural } from "../../../../lib/campaigns/format";
+import { AUDIT_ACTION, RESULT_STAGE, fmtDateTime, fmtDayTime, plural } from "../../../../lib/campaigns/format";
 import type { DisplayState } from "../../../../lib/campaigns/format";
 import type {
-  AdminAuditRow, AdminDashboard, AdminParticipant, AdminSubmissionRow, PublishCheck,
+  AdminAuditRow, AdminDashboard, AdminSubmissionRow, PublishCheck,
 } from "../../../../lib/campaigns/types";
 import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
 import { EmptyBox, ErrorBox, LoadingBox, Notice, SectionLabel, stageState, useLoader, visibleCheckItems } from "../shared";
 import type { TabProps } from "./types";
 import { Cronograma } from "./Cronograma";
-import { Fold } from "./ui";
 import { useTabTour } from "./useTabTour";
 
 export type SummaryTabProps = TabProps & {
@@ -37,7 +34,7 @@ export type SummaryTabProps = TabProps & {
 /**
  * Resumo da campanha: mostra só o que ajuda a decidir. Cada bloco respeita a permissão da pessoa
  * e some quando a funcionalidade está desligada ou quando a fase ainda não começou (nada de cartões de zeros).
- * Ordem: situação e próximo passo → números principais → ranking → "Mais indicadores" (recolhido).
+ * Ordem: situação e próximo passo → números principais → últimas atividades (no fim).
  */
 export function SummaryTab(props: SummaryTabProps) {
   const {
@@ -47,18 +44,12 @@ export function SummaryTab(props: SummaryTabProps) {
   const navigate = useNavigate();
   const f = campaign.features;
   const isDraft = display === "draft";
-  const [moreOpen, setMoreOpen] = useState(false);
 
-  // As receitas alimentam "Últimas atividades" e os gráficos; a lista de pessoas só carrega em "Mais indicadores".
+  // As receitas alimentam "Últimas atividades" (os gráficos agora vivem no dashboard da aba Relatórios).
   const canSubs = !isDraft && !!perms.campaigns_review && f.submission && (d?.submissions ?? 0) > 0;
-  const canParts = !isDraft && !!perms.campaigns_participants && f.submission;
   const subs = useLoader<AdminSubmissionRow[]>(
     () => (canSubs ? campaignsApi.get(`/admin/campaigns/${campaignId}/submissions`) : Promise.resolve([])),
     [campaignId, canSubs, d?.submissions],
-  );
-  const parts = useLoader<{ items: AdminParticipant[] }>(
-    () => (canParts && moreOpen ? campaignsApi.get(`/admin/campaigns/${campaignId}/participants`) : Promise.resolve({ items: [] })),
-    [campaignId, canParts, moreOpen, d?.participants],
   );
   const audit = useLoader<AdminAuditRow[]>(
     () => (isDraft ? Promise.resolve([]) : campaignsApi.get<AdminAuditRow[]>(`/admin/campaigns/${campaignId}/audit`).catch(() => [])),
@@ -149,8 +140,6 @@ export function SummaryTab(props: SummaryTabProps) {
   if (!d) return null;
 
   const hasVoting = f.voting;
-  const regStage = d.stages.find((x) => x.stage_key === "registration");
-  const regPhase = stageState(regStage);
   // Votação usa a janela da participação; `voting_live` vem do servidor (ranking parcial só para a gestão).
   const votingStage = d.stages.find((x) => x.stage_key === "voting");
   const votingOpen = hasVoting && (d.voting_live ?? ["open", "paused"].includes(stageState(votingStage)));
@@ -164,7 +153,6 @@ export function SummaryTab(props: SummaryTabProps) {
   const toRecipes = perms.campaigns_review ? go("submissions") : perms.campaigns_participants ? go("submissions", "people") : undefined;
   const toPeople = perms.campaigns_participants ? go("submissions", "people") : perms.campaigns_review ? go("submissions") : undefined;
   const toResults = hasVoting ? go("results") : undefined;
-  const toSettings = go("settings");
   // Sem votação, o indicador leva à edição da campanha (onde a votação pode ser ligada).
   const toVotingSetup = perms.campaigns_edit ? () => navigate(`/admin/campaigns/${campaignId}/edit`) : undefined;
   const autoAt = !!announceAt && new Date(announceAt).getTime() > Date.now();
@@ -173,11 +161,10 @@ export function SummaryTab(props: SummaryTabProps) {
     onReloadDashboard();
     subs.reload();
     audit.reload();
-    if (moreOpen) parts.reload();
   };
 
-  const hasMore = d.submissions > 0 && (canSubs || canParts);
-  const display_ = DISPLAY_STATE[display];
+  // Participantes + (Receitas) + Votação + (Resultado): com 4 cartões a grade vira 4 colunas em telas largas.
+  const cardCount = 2 + (f.submission ? 1 : 0) + (hasVoting ? 1 : 0);
 
   return (
     <div className="space-y-5">
@@ -189,18 +176,10 @@ export function SummaryTab(props: SummaryTabProps) {
 
       {top}
 
-      <div data-tutorial="camp-summary-cards" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {/* Status */}
-        <Kpi label="Status" onClick={toSettings}>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge className={cn("border px-3 py-1 text-xs", display_.className)}>{display_.label}</Badge>
-            {regPhase !== "unset" && (
-              <Badge className={cn("border text-[10px]", PHASE_STATE[regPhase].className)}>Participação {PHASE_STATE[regPhase].label.toLowerCase()}</Badge>
-            )}
-          </div>
-          <p className="text-[11px] text-muted-foreground">{fmtRange(regStage?.starts_at, regStage?.ends_at)}</p>
-        </Kpi>
-
+      <div
+        data-tutorial="camp-summary-cards"
+        className={cn("grid grid-cols-1 gap-3 sm:grid-cols-2", cardCount === 4 ? "xl:grid-cols-4" : "lg:grid-cols-3")}
+      >
         {/* Participantes */}
         <Kpi label="Participantes" onClick={toPeople}>
           <div className="flex items-end justify-between gap-3">
@@ -284,52 +263,6 @@ export function SummaryTab(props: SummaryTabProps) {
 
       <Cronograma campaign={campaign} stages={props.stages} results={results} display={display} />
 
-      {/* Últimas atividades: só o necessário para um olhar rápido */}
-      <Card className="rounded-3xl border hover:shadow-sm" data-tutorial="camp-summary-recent">
-        <CardContent className="space-y-2 p-5">
-          <SectionLabel>Últimas atividades</SectionLabel>
-          {recent.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{subs.loading || audit.loading ? "Carregando…" : "Nada por aqui ainda."}</p>
-          ) : (
-            <ul className="divide-y divide-border">
-              {recent.map((r) => (
-                <li key={r.key} className="flex items-baseline justify-between gap-3 py-2 text-sm">
-                  <span className="min-w-0 flex-1 truncate">
-                    {r.text}
-                    {r.sub && <span className="text-muted-foreground"> · {r.sub}</span>}
-                  </span>
-                  <span className="shrink-0 text-[11px] text-muted-foreground">{fmtDayTime(r.at)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Ritmo e alcance: recolhido para não encher a tela; só carrega ao abrir */}
-      {hasMore && (
-        <Fold
-          title="Mais indicadores"
-          hint="Receitas por dia e participação por unidade."
-          icon={<BarChart3 size={18} />}
-          open={moreOpen}
-          onOpenChange={setMoreOpen}
-          tutorial="camp-summary-more"
-        >
-          <MoreIndicators
-            wantSubs={canSubs}
-            wantParts={canParts}
-            subsLoading={subs.loading && !subs.data?.length}
-            partsLoading={parts.loading && !parts.data?.items.length}
-            subsError={subs.error}
-            partsError={parts.error}
-            rows={subs.data ?? []}
-            items={parts.data?.items ?? []}
-            onRetry={() => { subs.reload(); parts.reload(); }}
-          />
-        </Fold>
-      )}
-
       {d.submissions === 0 && (
         <EmptyBox
           icon={<BarChart3 size={34} />}
@@ -337,6 +270,25 @@ export function SummaryTab(props: SummaryTabProps) {
           hint="Quando as receitas chegarem, os números e as atividades aparecem aqui."
         />
       )}
+      {/* Últimas atividades: discreta, no fim da página (no máximo 5 linhas) */}
+      <section data-tutorial="camp-summary-recent" aria-label="Últimas atividades" className="border-t border-border pt-4">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Últimas atividades</h3>
+        {recent.length === 0 ? (
+          <p className="mt-2 text-[13px] text-muted-foreground">{subs.loading || audit.loading ? "Carregando…" : "Nada por aqui ainda."}</p>
+        ) : (
+          <ul className="mt-1 divide-y divide-border/60">
+            {recent.map((r) => (
+              <li key={r.key} className="flex items-baseline justify-between gap-3 py-1.5 text-[13px] text-muted-foreground">
+                <span className="min-w-0 flex-1 truncate">
+                  {r.text}
+                  {r.sub && <span className="opacity-80"> · {r.sub}</span>}
+                </span>
+                <span className="shrink-0 text-[11px]">{fmtDayTime(r.at)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       {tourEl}
     </div>
   );
@@ -369,151 +321,5 @@ function Kpi({ label, onClick, children }: { label: string; onClick?: () => void
       {head}
       {children}
     </button>
-  );
-}
-
-function MoreIndicators({
-  wantSubs, wantParts, subsLoading, partsLoading, subsError, partsError, rows, items, onRetry,
-}: {
-  wantSubs: boolean;
-  wantParts: boolean;
-  subsLoading: boolean;
-  partsLoading: boolean;
-  subsError: string | null;
-  partsError: string | null;
-  rows: AdminSubmissionRow[];
-  items: AdminParticipant[];
-  onRetry: () => void;
-}) {
-  const loading = (wantSubs && subsLoading) || (wantParts && partsLoading);
-  if (loading) return <LoadingBox />;
-  const error = (wantSubs && subsError) || (wantParts && partsError);
-  if (error && rows.length === 0 && items.length === 0) return <ErrorBox message={error} onRetry={onRetry} />;
-  const daily = wantSubs && rows.length > 0;
-  const byUnit = wantParts && items.length > 0;
-  if (!daily && !byUnit) return <p className="text-sm text-muted-foreground">Ainda não há dados suficientes para estes gráficos.</p>;
-  return (
-    <div className={cn("grid grid-cols-1 gap-5", daily && byUnit && "lg:grid-cols-2")}>
-      {daily && <DailyBars rows={rows} />}
-      {byUnit && <UnitBars items={items} />}
-    </div>
-  );
-}
-
-// ───────────────────────────────── Gráficos simples (CSS) ─────────────────────────────────
-
-function WidgetShell({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-4">
-      <div>
-        <SectionLabel>{title}</SectionLabel>
-        {hint && <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-const dayKey = (iso: string) => formatInTimeZone(new Date(iso), TIMEZONE, "yyyy-MM-dd");
-
-/** Receitas enviadas por dia (dia de Brasília), no máximo os últimos 30 dias. */
-function DailyBars({ rows }: { rows: AdminSubmissionRow[] }) {
-  const { days, total, max, peak } = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const r of rows) {
-      if (!r.submitted_at) continue;
-      const k = dayKey(r.submitted_at);
-      counts.set(k, (counts.get(k) ?? 0) + 1);
-    }
-    const keys = [...counts.keys()].sort();
-    if (keys.length === 0) return { days: [] as { key: string; n: number }[], total: 0, max: 0, peak: "" };
-    const today = dayKey(new Date().toISOString());
-    const first = keys[0];
-    const last = keys[keys.length - 1] > today ? keys[keys.length - 1] : today;
-    const list: { key: string; n: number }[] = [];
-    for (let t = new Date(`${first}T12:00:00Z`).getTime(); ; t += 86_400_000) {
-      const k = new Date(t).toISOString().slice(0, 10);
-      list.push({ key: k, n: counts.get(k) ?? 0 });
-      if (k >= last || list.length > 400) break;
-    }
-    const shown = list.slice(-30);
-    const mx = Math.max(...shown.map((x) => x.n));
-    const pk = shown.find((x) => x.n === mx);
-    return { days: shown, total: shown.reduce((s, x) => s + x.n, 0), max: mx, peak: pk ? pk.key : "" };
-  }, [rows]);
-
-  if (days.length === 0) return null;
-  const label = (k: string) => `${k.slice(8, 10)}/${k.slice(5, 7)}`;
-  const step = Math.max(1, Math.ceil(days.length / 6));
-
-  return (
-    <WidgetShell title="Receitas enviadas por dia" hint={days.length > 1 ? `${plural(total, "receita", "receitas")} em ${plural(days.length, "dia", "dias")}` : undefined}>
-      <div
-        role="img"
-        aria-label={`Receitas enviadas por dia: ${total} no total; maior dia ${label(peak)} com ${max}.`}
-      >
-        <div className="flex h-28 items-end justify-center gap-1">
-          {days.map((x) => (
-            <div key={x.key} className="flex h-full min-w-0 max-w-10 flex-1 flex-col items-center justify-end gap-1" title={`${label(x.key)}: ${x.n}`}>
-              {days.length <= 14 && x.n > 0 && <span className="text-[10px] font-semibold tabular-nums text-muted-foreground">{x.n}</span>}
-              <div
-                className={cn("w-full rounded-t-md", x.n > 0 ? "bg-primary/80" : "bg-muted")}
-                style={{ height: x.n > 0 ? `${Math.max(8, (x.n / max) * 80)}%` : "3px" }}
-              />
-            </div>
-          ))}
-        </div>
-        <div className="mt-1.5 flex justify-center gap-1">
-          {days.map((x, i) => (
-            <span key={x.key} className="min-w-0 max-w-10 flex-1 truncate text-center text-[9px] text-muted-foreground">
-              {i % step === 0 || i === days.length - 1 ? label(x.key) : ""}
-            </span>
-          ))}
-        </div>
-      </div>
-    </WidgetShell>
-  );
-}
-
-/** Participação por unidade: quem enviou receita entre os elegíveis de cada sede. */
-function UnitBars({ items }: { items: AdminParticipant[] }) {
-  const groups = useMemo(() => {
-    // Com várias receitas por pessoa há uma linha por receita: aqui conta cada PESSOA uma vez.
-    const people = new Map<string, { unit: string; sent: boolean }>();
-    for (const p of items) {
-      const cur = people.get(p.user_id) ?? { unit: p.unit?.trim() || "Sem unidade", sent: false };
-      if (p.submission_id && p.submission_status && p.submission_status !== "pending_media") cur.sent = true;
-      people.set(p.user_id, cur);
-    }
-    const m = new Map<string, { eligible: number; sent: number }>();
-    for (const { unit, sent } of people.values()) {
-      const g = m.get(unit) ?? { eligible: 0, sent: 0 };
-      g.eligible += 1;
-      if (sent) g.sent += 1;
-      m.set(unit, g);
-    }
-    return [...m.entries()].sort((a, b) => b[1].eligible - a[1].eligible);
-  }, [items]);
-
-  if (groups.length === 0) return null;
-  return (
-    <WidgetShell title="Participação por unidade" hint="Quem enviou receita entre os elegíveis de cada unidade.">
-      <ul className="space-y-3.5">
-        {groups.map(([name, g]) => {
-          const pct = g.eligible > 0 ? Math.round((g.sent / g.eligible) * 100) : 0;
-          return (
-            <li key={name} className="space-y-1.5">
-              <div className="flex items-center justify-between gap-3 text-sm">
-                <span className="min-w-0 truncate font-medium">{name}</span>
-                <span className="shrink-0 tabular-nums text-muted-foreground">
-                  <b className="text-foreground">{g.sent}</b> de {g.eligible} · {pct}%
-                </span>
-              </div>
-              <Progress value={pct} aria-label={`${name}: ${pct}%`} />
-            </li>
-          );
-        })}
-      </ul>
-    </WidgetShell>
   );
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { AlertTriangle, CheckCircle2, Loader2, Lock, Plus, RefreshCw, Send, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, Loader2, Lock, Plus, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { Button } from "../../components/ui/Button";
@@ -101,6 +101,9 @@ function SubmitForm({ editId }: { editId: string | null }) {
   const [serverPhotoIds, setServerPhotoIds] = useState<string[]>([]);
   const [submissionId, setSubmissionId] = useState<string | null>(editId);
   const [recipeStatus, setRecipeStatus] = useState<SubmissionStatus | null>(null);
+  // A receita que está sendo editada foi enviada fora do prazo (só ela continua editável na janela de atraso).
+  const [recipeLate, setRecipeLate] = useState(false);
+  const [doneLate, setDoneLate] = useState(false);
   const [loading, setLoading] = useState(isEdit);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -149,6 +152,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
       setOriginal(f);
       setSubmissionId(s.id);
       setRecipeStatus(s.status);
+      setRecipeLate(!!s.is_late);
       // Fotos que já estão no servidor, a principal primeiro.
       const rows = s.media
         .filter((m) => m.kind === "main_photo" || m.kind === "photo")
@@ -187,23 +191,31 @@ function SubmitForm({ editId }: { editId: string | null }) {
     return () => window.removeEventListener("beforeunload", h);
   }, [busy]);
 
+  // Janela de "fora do prazo": participação encerrada, mas o servidor ainda aceita envios (a receita não concorre à votação).
+  // Servidor antigo não manda `late_window`: fica falso e a tela se comporta como sempre.
+  const lateWindow = !!state.late_window;
+
   const blockReason = (): string | null => {
     if (blockedMsg) return blockedMsg;
     if (isEdit) {
+      if (recipeStatus === null) return null; // ainda carregando
       // Campanha de várias receitas: vale a regra da receita (não aprovada + participação aberta).
       const regOpen = !!state.released && state.registration === "open" && state.stage !== "closed";
-      const allowed = multi ? regOpen && recipeStatus !== "approved" : !!state.can_edit;
-      if (allowed || recipeStatus === null) return null;
-      return recipeStatus === "approved"
-        ? "Esta receita já foi aprovada e não pode mais ser alterada."
-        : "Não dá para editar a receita agora.";
+      // Na janela de atraso, só a receita enviada fora do prazo (e ainda não aprovada) pode ser editada.
+      const allowed = lateWindow
+        ? recipeLate && recipeStatus !== "approved"
+        : multi ? regOpen && recipeStatus !== "approved" : !!state.can_edit;
+      if (allowed) return null;
+      if (recipeStatus === "approved") return "Esta receita já foi aprovada e não pode mais ser alterada.";
+      if (lateWindow) return "O prazo de participação terminou e esta receita não pode mais ser alterada.";
+      return "Não dá para editar a receita agora.";
     }
     if (multi && count >= max) return `Você chegou ao limite de ${max} receitas nesta campanha.`;
-    if (state.can_submit) return null;
+    if (state.can_submit ?? state.registration === "open") return null;
     switch (state.registration) {
       case "upcoming": return "A participação ainda não abriu.";
       case "paused": return "A participação está em pausa.";
-      case "closed": return "A participação foi encerrada.";
+      case "closed": return lateWindow ? "Você não pode enviar novas receitas agora." : "A participação foi encerrada.";
       default: return "Esta campanha não está recebendo receitas agora.";
     }
   };
@@ -227,6 +239,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
     setBlockedMsg(null);
     setShowErrors(false);
     setDoneDish("");
+    setDoneLate(false);
     setPhase("idle");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -376,6 +389,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
       }
 
       setDoneDish(f.dish_name);
+      setDoneLate(lateWindow);
       setPhase("done");
       void refresh();
     } catch (e) {
@@ -434,6 +448,11 @@ function SubmitForm({ editId }: { editId: string | null }) {
           <p className="mx-auto mt-2 max-w-xs text-sm text-muted-foreground">
             {doneDish ? <>“{doneDish}” </> : null}Ela será analisada pela equipe.
           </p>
+          {doneLate && (
+            <p className="mx-auto mt-2 max-w-xs text-sm font-medium text-orange-800 dark:text-orange-300">
+              Enviada fora do prazo: ela aparece na campanha depois de aprovada, mas não concorre à votação.
+            </p>
+          )}
           <div className="mt-6 flex flex-col gap-2">
             <Button onClick={() => navigate(`${base}/participacao`)} className="h-12 rounded-xl px-6">Ver minhas receitas</Button>
             {canSendAnother && (
@@ -491,6 +510,15 @@ function SubmitForm({ editId }: { editId: string | null }) {
           <Button variant="outline" size="sm" className="mt-3 h-11 rounded-xl px-4" onClick={() => navigate(isEdit || count > 0 ? `${base}/participacao` : base)}>
             {isEdit || count > 0 ? "Ver minhas receitas" : "Voltar à campanha"}
           </Button>
+        </Card>
+      )}
+
+      {lateWindow && !blocked && (!isEdit || recipeLate) && (
+        <Card role="status" className="rounded-3xl border-orange-200 bg-orange-50 p-4 hover:shadow-sm dark:border-orange-900/50 dark:bg-orange-950/20" data-tutorial="camp-late">
+          <p className="flex items-start gap-2 text-sm font-medium text-orange-900 dark:text-orange-100">
+            <Clock size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span>O prazo de participação terminou. Sua receita será aceita, mas não concorrerá à votação.</span>
+          </p>
         </Card>
       )}
 
@@ -608,6 +636,9 @@ function SubmitForm({ editId }: { editId: string | null }) {
 
       {!blocked && (
         <div className="sticky bottom-[4.75rem] z-10 -mx-4 space-y-2 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-2 pt-4 md:bottom-4 md:mx-0 md:px-0">
+          {lateWindow && (!isEdit || recipeLate) && (
+            <p className="text-[11px] font-medium leading-snug text-orange-800 dark:text-orange-300">Esta receita não concorrerá à votação.</p>
+          )}
           {!isEdit && (
             <p className="flex items-start gap-1.5 text-[11px] leading-snug text-muted-foreground">
               <ShieldCheck size={13} className="mt-px shrink-0" aria-hidden="true" />

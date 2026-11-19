@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, List } from "lucide-react";
 import { cn } from "../../../lib/utils";
+import { RecipePhoto } from "../RecipePhoto";
 import { describeBook, ingredientItems, preparationSteps, recipeCampaign, storyParagraphs } from "../../../lib/campaigns/bookText";
 import type { AnyBook } from "../../../lib/campaigns/bookText";
 import { plural } from "../../../lib/campaigns/format";
@@ -180,8 +181,7 @@ function Summary({ recipes, onOpen }: { recipes: BookRecipe[]; onOpen: (index: n
 
 function RecipePage({ recipe, index, total }: { recipe: BookRecipe; index: number; total: number }) {
   const [sel, setSel] = useState(0);
-  const [failed, setFailed] = useState<Set<string>>(() => new Set());
-  const photos = recipe.photos.filter((p) => p.url && !failed.has(p.url));
+  const photos = recipe.photos.filter((p) => p.url);
   const current = photos[Math.min(sel, Math.max(photos.length - 1, 0))];
   const story = storyParagraphs(recipe.story);
   const ingredients = ingredientItems(recipe.ingredients);
@@ -203,18 +203,10 @@ function RecipePage({ recipe, index, total }: { recipe: BookRecipe; index: numbe
 
       {current && (
         <figure className="space-y-2">
-          <div className="overflow-hidden rounded-2xl bg-muted shadow-sm">
-            <img
-              src={current.url}
-              alt={`Foto da receita ${recipe.dish_name}`}
-              loading="lazy"
-              decoding="async"
-              className="aspect-[4/3] w-full object-cover"
-              onError={() => setFailed((s) => new Set(s).add(current.url))}
-            />
-          </div>
+          {/* Padrão único da plataforma: 4:3, centralizada, com esqueleto enquanto carrega (mesma peça das campanhas) */}
+          <RecipePhoto src={current.url} alt={`Foto da receita ${recipe.dish_name}`} variant="hero" className="shadow-sm" />
           {photos.length > 1 && (
-            <div className="book-nav flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Fotos da receita">
+            <div className="book-nav flex justify-center gap-2 overflow-x-auto pb-1" role="group" aria-label="Fotos da receita">
               {photos.map((p, i) => (
                 <button
                   key={p.url}
@@ -223,11 +215,11 @@ function RecipePage({ recipe, index, total }: { recipe: BookRecipe; index: numbe
                   aria-pressed={photos[Math.min(sel, photos.length - 1)] === p}
                   aria-label={`Foto ${i + 1} de ${photos.length}`}
                   className={cn(
-                    "h-14 w-14 shrink-0 overflow-hidden rounded-xl border-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    "shrink-0 rounded-xl border-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     photos[Math.min(sel, photos.length - 1)] === p ? "border-primary" : "border-transparent opacity-70",
                   )}
                 >
-                  <img src={p.url} alt="" loading="lazy" className="h-full w-full object-cover" onError={() => setFailed((s) => new Set(s).add(p.url))} />
+                  <RecipePhoto src={p.url} variant="thumb" className="rounded-[10px]" />
                 </button>
               ))}
             </div>

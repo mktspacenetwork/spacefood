@@ -2,6 +2,7 @@ import { createElement } from "react";
 import {
   Megaphone, Power, BarChart3, FilePlus2, ListChecks, IdCard, Users, ClipboardCheck, ChefHat, Vote, MousePointerClick,
   LayoutList, Search, Trophy, FileDown, ShieldAlert, ListFilter, Gauge, ImagePlus, CalendarDays, ThumbsUp, Compass, BadgeCheck,
+  BookOpen, Radio,
 } from "lucide-react";
 import type { TourStep } from "../../components/campaigns/CampaignTour";
 
@@ -14,6 +15,14 @@ export const ADMIN_TOUR_OVERVIEW: TourStep[] = [
     description:
       "Aqui você cria e acompanha campanhas internas, como o concurso de receitas. Esta tour mostra o caminho — e pode ser reaberta a qualquer momento em \"Ver tour\".",
     icon: icon(Megaphone),
+  },
+  {
+    selector: "camp-section-nav",
+    title: "Campanhas e Livro de Receitas",
+    description:
+      "As duas áreas ficam lado a lado, aqui no topo. O Livro de Receitas é um só, permanente, e agora mora nesta mesma área — a aba aparece para quem tem permissão de revisar ou publicar o livro.",
+    icon: icon(BookOpen),
+    placement: "bottom",
   },
   {
     selector: "camp-module-menu",
@@ -85,7 +94,7 @@ export const ADMIN_TOUR_WIZARD: TourStep[] = [
     selector: "camp-wiz-period",
     title: "Datas",
     description:
-      "Início e encerramento das participações — a votação, quando há, acontece nesse mesmo período. Com votação, dá para marcar também a data de anúncio do resultado (opcional). Tudo abre e fecha sozinho.",
+      "Com votação, são três datas em sequência: participação, votação e divulgação do resultado. A votação só começa depois do fim da participação, e a divulgação depois do fim da votação. Sem votação, só a participação. Tudo abre e fecha sozinho.",
     icon: icon(CalendarDays),
     placement: "top",
   },
@@ -136,7 +145,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-panel-cycle",
       title: "Cronograma",
       description:
-        "O período da campanha e, com votação, a data de anúncio do resultado. Para mudar as datas: Configurações → Período. Quando há algo a fazer (publicar, analisar receitas, divulgar), um cartão de próximo passo aparece no topo; sem pendências, ele some.",
+        "As datas da campanha: participação e, com votação, a votação e a divulgação do resultado, em sequência. Para mudar: Configurações → Período. Quando há algo a fazer (publicar, analisar receitas, divulgar), um cartão de próximo passo aparece no topo; sem pendências, ele some.",
       icon: icon(Compass),
       placement: "bottom",
     },
@@ -152,14 +161,14 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-summary-cards",
       title: "Os números que importam",
       description:
-        "Status, participantes, receitas cadastradas, votação e, com votação, o resultado. Toque em um indicador para abrir a tela detalhada. Durante a votação os números são parciais.",
+        "Participantes e receitas cadastradas e, nas campanhas com votação, a votação e o resultado. Toque em um indicador para abrir a tela detalhada. Durante a votação os números são parciais. A situação da campanha fica no cabeçalho do painel.",
       icon: icon(Gauge),
       placement: "bottom",
     },
     {
       selector: "camp-summary-recent",
       title: "Últimas atividades",
-      description: "As receitas e movimentações mais recentes, para um olhar rápido. O histórico completo está em Relatórios.",
+      description: "No fim da página, as cinco movimentações mais recentes, para um olhar rápido. O histórico completo está em Relatórios.",
       icon: icon(ListChecks),
       placement: "top",
     },
@@ -177,7 +186,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-sub-filters",
       title: "Encontre receitas",
       description:
-        "Filtre por situação (com a contagem de cada uma), busque por prato ou participante e, se precisar, limite por data de envio.",
+        "Filtre por situação (com a contagem de cada uma) — e por \"Fora do prazo\", quando houver —, busque por prato ou participante e, se precisar, limite por data de envio.",
       icon: icon(ListFilter),
       placement: "bottom",
     },
@@ -185,7 +194,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-sub-list",
       title: "O que precisa de ação vem primeiro",
       description:
-        "As receitas aguardando análise ficam no topo. Receitas aprovadas já podem receber votos e não podem mais ser editadas pelo colaborador.",
+        "As receitas aguardando análise ficam no topo. Receitas aprovadas já podem receber votos e não podem mais ser editadas pelo colaborador. Em campanhas com votação, quem envia depois do encerramento da participação (até o resultado ser divulgado) recebe o selo \"Fora do prazo\": a receita é aceita e pode ser aprovada, mas não entra na votação, no ranking nem no resultado.",
       icon: icon(ChefHat),
       placement: "top",
     },
@@ -204,7 +213,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-part-toolbar",
       title: "Busque e filtre as pessoas",
       description:
-        "Procure por nome, departamento, unidade ou prato. Um filtro só: Com receita (o padrão), Todos os elegíveis e, quando há votação, Já votaram e Ainda não votaram — cada um com a contagem.",
+        "Procure por nome, departamento, unidade ou prato. Um filtro só: Com receita (o padrão), Todos os elegíveis, Com receita fora do prazo (quando houver) e, quando há votação, Já votaram e Ainda não votaram — cada um com a contagem.",
       icon: icon(Search),
       placement: "bottom",
     },
@@ -220,7 +229,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-part-row",
       title: "Abra uma linha",
       description:
-        "Toque em uma pessoa para ver a receita dela e, depois do encerramento e com a permissão certa, de quem vieram os votos. Um voto só pode ser invalidado com justificativa.",
+        "Toque em uma pessoa para ver a receita dela e, depois do encerramento e com a permissão certa, de quem vieram os votos. Receita \"Fora do prazo\" não participa da votação e não recebe votos. Um voto só pode ser invalidado com justificativa.",
       icon: icon(Trophy),
       placement: "top",
     },
@@ -238,7 +247,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
     {
       selector: "camp-vote-status",
       title: "Acompanhe a votação",
-      description: "A situação, o total de votos e quantas pessoas já votaram ficam juntos aqui. O período vem de Configurações.",
+      description: "A situação, o total de votos e quantas pessoas já votaram ficam juntos aqui. As datas da votação vêm de Configurações → Período.",
       icon: icon(ThumbsUp),
       placement: "bottom",
     },
@@ -246,7 +255,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-vote-ranking",
       title: "Ranking ao vivo",
       description:
-        "As receitas mais votadas, atualizadas sozinhas enquanto a votação está aberta. É parcial: por padrão só a gestão vê.",
+        "A posição, os votos, a receita e quem a enviou, em tempo real: atualiza sozinho a cada 20 segundos, com \"Ao vivo\" e a hora da última atualização. Empates dividem a posição (1º, 1º, 3º). Receitas \"Fora do prazo\" não entram. É parcial: por padrão só a gestão vê.",
       icon: icon(Trophy),
       placement: "top",
     },
@@ -254,7 +263,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-results-partial",
       title: "Mostrar o parcial aos colaboradores?",
       description:
-        "Desligado, só a gestão vê o ranking parcial. Ligado, os colaboradores também veem posições e votos durante a votação. Só quem pode divulgar resultados altera. O resultado oficial só aparece depois da divulgação.",
+        "Desligado, só a gestão vê o ranking parcial. Ligado, aparece o item Ranking para os colaboradores, com posições e votos, e ele pode continuar visível depois do encerramento da votação, até a divulgação do resultado oficial. Ao desligar, o item some para eles em até 1 minuto. Só quem pode divulgar resultados altera.",
       icon: icon(Megaphone),
       placement: "top",
     },
@@ -285,9 +294,26 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
 
   reports: [
     {
+      selector: "camp-rep-dashboard",
+      title: "Dashboard ao vivo",
+      description:
+        "Os números e gráficos da campanha se atualizam sozinhos a cada 20 segundos enquanto a página está aberta e visível. \"Ao vivo\" e \"Atualizado às\" mostram a hora da última leitura — não precisa recarregar.",
+      icon: icon(Radio),
+      placement: "bottom",
+    },
+    {
+      selector: "camp-rep-cards",
+      title: "Cartões do dashboard",
+      description:
+        "Participantes, receitas enviadas, aprovadas, reprovadas e, nas campanhas com votação, votos e receitas fora do prazo. Toque em um cartão para ir à tela correspondente.",
+      icon: icon(Gauge),
+      placement: "bottom",
+    },
+    {
       selector: "camp-rep-list",
-      title: "Relatórios",
-      description: "Baixe planilhas da campanha (abrem direto no Excel). Só aparecem os relatórios que valem para esta campanha: sem votação, nada de votos.",
+      title: "Planilhas por período",
+      description:
+        "Baixe planilhas da campanha (abrem direto no Excel) e escolha o período: todo o período, hoje, últimos 7 ou 30 dias, ou datas personalizadas. Cada planilha filtra pela data certa: envio, análise, voto ou evento. O relatório de resultado ignora o período, e o dashboard não muda com ele. Sem votação, nada de votos.",
       icon: icon(FileDown),
       placement: "bottom",
     },
@@ -313,7 +339,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-sec-period",
       title: "Período",
       description:
-        "Início e encerramento das participações (a votação usa o mesmo período) e, com votação, a data de anúncio do resultado. Para prorrogar, é só escolher uma nova data de encerramento.",
+        "Participação, votação e divulgação do resultado, em sequência: a votação só começa depois do fim da participação, e a divulgação depois do fim da votação (sem intervalo, só um aviso). Campanhas antigas de janela única seguem com a votação acompanhando a participação, até você definir datas próprias. Para prorrogar, escolha uma nova data de encerramento.",
       icon: icon(CalendarDays),
       placement: "bottom",
     },

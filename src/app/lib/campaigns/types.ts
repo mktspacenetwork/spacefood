@@ -105,6 +105,12 @@ export type CollabState = {
   max_submissions?: number;
   /** O ranking exibido ao colaborador é PARCIAL (o administrador liberou); o oficial só depois da divulgação. */
   ranking_partial?: boolean;
+  /**
+   * Janela de receita FORA DO PRAZO (rodada 5): campanha com votação, participação já encerrada e resultado ainda não
+   * divulgado. Nela o envio continua aceito (`can_submit` = true), mas a receita não concorre à votação. Ausente = não há janela
+   * (servidor antigo): a tela se comporta como antes (`can_submit ?? registration === "open"`).
+   */
+  late_window?: boolean;
   my_submission_id?: string | null;
   my_submission_status?: SubmissionStatus | null;
   has_voted?: boolean;
@@ -129,16 +135,22 @@ export type CollabCampaignListItem = PublicCampaign & {
 
 export type MediaItem = { id: string; kind: "main_photo" | "photo" | "video"; mime: string; size: number; url: string };
 
-export type RecipeListItem = { id: string; dish_name: string; author: string; description: string; photo_url: string | null };
+export type RecipeListItem = {
+  id: string; dish_name: string; author: string; description: string; photo_url: string | null;
+  /** Enviada fora do prazo: aparece normalmente, mas não concorre à votação (só o autor vê o aviso). */
+  is_late?: boolean;
+};
 export type RecipeDetail = {
   id: string; dish_name: string; author: string; description: string; ingredients: string; preparation: string;
-  media: MediaItem[]; can_vote: boolean; mine: boolean;
+  media: MediaItem[]; can_vote: boolean; mine: boolean; is_late?: boolean;
 };
 
 export type MySubmission = {
   id: string; dish_name: string; description: string; ingredients: string; preparation: string;
   status: SubmissionStatus; rejection_reason: string | null;
   submitted_at: string | null; updated_at: string | null; reviewed_at: string | null; media: MediaItem[];
+  /** Enviada fora do prazo (não concorre à votação, ranking nem resultado). Gravado uma vez, no primeiro envio. */
+  is_late?: boolean;
 };
 
 /** `GET /campaigns/:slug/my-submissions` — todas as receitas do colaborador na campanha (1, ou várias). */
@@ -159,6 +171,7 @@ export type VoteCandidate = {
   id: string; dish_name: string; author: string; description: string; mine: boolean; photo_url: string | null; voted: boolean;
 };
 
+/** `position` é posição de COMPETIÇÃO (empate divide o lugar: 1º, 1º, 3º). Com zero votos para todos não há posição ("sem votos"). */
 export type RankingItem = { position: number; submission_id: string; dish_name: string; author: string; votes: number };
 
 // ─────────────────────────────── Admin ────────────────────────────────
@@ -216,25 +229,25 @@ export type AdminResults = {
 };
 
 /**
- * `PUT /admin/campaigns/:id/period`. Três informações: início e encerramento das participações (a votação, quando
- * existe, usa a MESMA janela) e a data de anúncio do resultado (só com votação; `null` limpa).
- * Os campos `voting_*` ficaram de fora da tela e do contrato novo.
+ * `PUT /admin/campaigns/:id/period` (rodada 5). Até três datas independentes, em sequência estrita quando há votação:
+ * participação (`starts_at`..`ends_at`) → votação (`voting_starts_at`..`voting_ends_at`) → divulgação (`announce_at`).
+ * `voting_*` AUSENTE (undefined) = modo legado: a votação acompanha a participação (campanhas antigas de janela única).
+ * `null` limpa. Sem votação: `voting_*` e `announce_at` são limpos pelo servidor.
+ * Erros 422 `INVALID_DATES` trazem `reason`: `voting_before_registration_end` | `announce_before_voting_end` | `announce_without_voting`.
  */
 export type PeriodPayload = {
   starts_at: string | null;
   ends_at: string | null;
+  voting_starts_at?: string | null;
+  voting_ends_at?: string | null;
   /** ISO. A divulgação automática só acontece se o ganhador já estiver confirmado antes dessa data. */
   announce_at?: string | null;
-  /** @deprecated saíram da tela e da API: a votação usa a janela da participação. Serão apagados. */
-  voting_starts_at?: string | null;
-  /** @deprecated idem. */
-  voting_ends_at?: string | null;
 };
 
 /** `GET /tours` — chaves de tour que o usuário logado já viu (histórico por usuário, guardado no servidor). */
 export type ToursSeen = { seen: string[] };
 
-export type TallyRow = { submission_id: string; dish_name: string; author: string; votes: number };
+export type TallyRow = { submission_id: string; dish_name: string; author: string; votes: number; position?: number };
 
 export type PublishCheck = {
   ok: boolean;
@@ -262,6 +275,8 @@ export type AdminDashboard = {
 export type AdminSubmissionRow = {
   id: string; user_id: string; user_name: string; user_department: string; dish_name: string; status: SubmissionStatus;
   submitted_at: string | null; reviewed_at: string | null; rejection_reason: string | null; content_version: number;
+  /** Fora do prazo: aceita depois do encerramento da participação; fica fora da votação, do ranking e do resultado. */
+  is_late?: boolean;
 };
 
 export type AdminSubmissionDetail = {
@@ -278,6 +293,8 @@ export type AdminParticipant = {
   user_id: string; user_name: string; department: string; unit: string;
   submission_id: string | null; submission_status: SubmissionStatus | null; submitted_at: string | null;
   voted: boolean | null; voted_at: string | null;
+  /** A receita deste participante foi enviada fora do prazo. */
+  is_late?: boolean;
 };
 
 export type AdminVote = {
@@ -292,7 +309,34 @@ export type AdminAuditRow = {
 
 export type AdminAccessRow = { user_id: string; user_name: string; permissions: Record<string, boolean>; added_at: string };
 
-export type ExportPayload = { kind: string; columns: string[]; rows: unknown[][] };
+export type ExportPayload = {
+  kind: string; columns: string[]; rows: unknown[][];
+  /** Período efetivamente aplicado (ISO); ausente/nulo = todo o período. O relatório `result` ignora o período. */
+  range?: { from: string | null; to: string | null } | null;
+};
+
+/** `GET /admin/campaigns/:id/analytics[?units=1]` — dashboard dos relatórios (dias em horário de Brasília). */
+export type AnalyticsDay = { d: string; submitted: number; approved: number; rejected: number; votes: number };
+export type AdminAnalytics = {
+  /** Instante (ISO) em que o servidor calculou — a tela mostra "Atualizado às HH:mm" a partir daqui. */
+  generated_at: string;
+  stages: AdminStageRow[];
+  /** A campanha tem votação ligada (sem votação não há votos/ranking/funil de voto). */
+  has_voting: boolean;
+  /** Votação aberta/pausada: o ranking em `tally` é parcial (só a gestão vê). */
+  voting_live: boolean;
+  totals: {
+    eligible: number; participants: number; submissions: number; pending: number; approved: number; rejected: number;
+    /** Receitas enviadas fora do prazo. */
+    late: number;
+    votes_valid: number; votes_invalidated: number; voters: number; participation_pct: number; voting_pct: number;
+  };
+  series: { from: string | null; to: string | null; days: AnalyticsDay[] };
+  /** Só receitas aprovadas e NO PRAZO; `position` de competição. */
+  tally?: TallyRow[];
+  /** Só com `?units=1` e permissão `campaigns_participants`. */
+  by_unit?: { unit: string; eligible: number; sent: number; voted: number }[];
+};
 
 /** Votos individuais: `locked` enquanto a votação não encerrou (nesse caso `items` vem vazio). */
 export type AdminVotesPayload = { locked: boolean; items: AdminVote[] };

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router";
 import { CheckCircle2, Clock, Flag, Lock, PauseCircle, User, UtensilsCrossed, Vote } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
@@ -9,6 +8,8 @@ import { Card } from "../../components/ui/Card";
 import { Skeleton } from "../../components/ui/skeleton";
 import { VoteConfirmDialog } from "../../components/campaigns/VoteConfirmDialog";
 import { PartialRanking } from "../../components/campaigns/PartialRanking";
+import { RecipePhoto } from "../../components/campaigns/RecipePhoto";
+import { GalleryRecipeSheet, useRecipeSheetParam } from "../../components/campaigns/RecipeSheet";
 import { EmptyState } from "../../components/campaigns/EmptyState";
 import { ErrorState } from "../../components/campaigns/ErrorState";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
@@ -37,6 +38,8 @@ export function CampaignVote() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [voting, setVoting] = useState(false);
   const [justVoted, setJustVoted] = useState(false);
+  // "Ver receita completa" abre a folha (na URL: o "voltar" do celular fecha a folha).
+  const [openId, setOpenId] = useRecipeSheetParam();
   const inflight = useRef(false);
 
   const load = useCallback(
@@ -168,14 +171,7 @@ export function CampaignVote() {
             const isSel = selected?.id === c.id;
             const selectable = canVoteNow && !c.mine;
             const photo = (
-              <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
-                {c.photo_url ? (
-                  <img src={c.photo_url} alt="" loading="lazy" className="h-full w-full object-cover" />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-orange-100 to-amber-100 text-orange-400 dark:from-orange-950/40 dark:to-amber-950/30">
-                    <UtensilsCrossed size={28} aria-hidden="true" />
-                  </div>
-                )}
+              <RecipePhoto src={c.photo_url} variant="tile">
                 {c.voted && (
                   <span className="absolute left-2 top-2 rounded-full bg-primary px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-primary-foreground shadow">Seu voto</span>
                 )}
@@ -195,7 +191,7 @@ export function CampaignVote() {
                     <CheckCircle2 size={16} />
                   </span>
                 )}
-              </div>
+              </RecipePhoto>
             );
             const body = (
               <div className="space-y-0.5 p-3 text-left">
@@ -237,12 +233,14 @@ export function CampaignVote() {
                   </>
                 )}
                 {state.gallery_visible && (
-                  <Link
-                    to={`/campanhas/${slug}/receitas/${c.id}`}
-                    className="mx-3 mb-3 mt-auto rounded-lg py-1 text-center text-xs font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  <button
+                    type="button"
+                    onClick={() => setOpenId(c.id)}
+                    aria-label={`Ver a receita completa de ${c.dish_name}`}
+                    className="mx-3 mb-3 mt-auto min-h-9 rounded-lg py-1 text-center text-xs font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     Ver receita completa
-                  </Link>
+                  </button>
                 )}
               </Card>
             );
@@ -273,6 +271,8 @@ export function CampaignVote() {
         </div>,
         document.body,
       )}
+
+      <GalleryRecipeSheet slug={slug} id={openId} onClose={() => setOpenId(null)} onChanged={async () => { await Promise.all([load(true), refresh()]); }} />
 
       <VoteConfirmDialog
         open={confirmOpen}

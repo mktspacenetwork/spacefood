@@ -33,7 +33,6 @@ import {
   ScrollText,
   BookMarked,
   Megaphone,
-  BookOpen,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -74,9 +73,9 @@ type MenuGroupDef = { title: string; items: MenuItemDef[] };
 
 // Campanhas NÃO usa as permissões gerais do site: o acesso vem da lista própria do módulo
 // (campaign_admins), consultada em /campaigns-api/admin/me. Sem acesso, o item nem existe no menu.
+// O Livro de Receitas não tem item próprio: é a aba "Livro de Receitas" dentro de Campanhas (/admin/campaigns/livro),
+// com a mesma regra de acesso de antes (revisar ou publicar), aplicada na própria página.
 const CAMPAIGNS_MENU_ITEM: MenuItemDef = { icon: Megaphone, label: "Campanhas", path: "/admin/campaigns", permKey: "campaigns" };
-// Livro de Receitas (acervo único): mesma lista própria do módulo; aparece para quem pode revisar ou publicar.
-const BOOK_MENU_ITEM: MenuItemDef = { icon: BookOpen, label: "Livro de Receitas", path: "/admin/recipe-book", permKey: "recipe-book" };
 
 // Grouped Menu Items
 const MENU_GROUPS: MenuGroupDef[] = [
@@ -147,12 +146,11 @@ export function AdminLayout() {
   const [settingsData, setSettingsData] = useState<{ unitName?: string, cutoffTime?: string }>({});
   const [badges, setBadges] = useState({ orders: 0, users: 0, reviews: 0 });
   const [campaignsAccess, setCampaignsAccess] = useState(false);
-  const [bookAccess, setBookAccess] = useState(false);
   const menuGroups = useMemo<MenuGroupDef[]>(
-    () => MENU_GROUPS.map((g) => (g.title === "Gestão" && (campaignsAccess || bookAccess)
-      ? { ...g, items: [...g.items, ...(campaignsAccess ? [CAMPAIGNS_MENU_ITEM] : []), ...(bookAccess ? [BOOK_MENU_ITEM] : [])] }
+    () => MENU_GROUPS.map((g) => (g.title === "Gestão" && campaignsAccess
+      ? { ...g, items: [...g.items, CAMPAIGNS_MENU_ITEM] }
       : g)),
-    [campaignsAccess, bookAccess],
+    [campaignsAccess],
   );
   const isItemActive = (path: string) =>
     location.pathname === path || (path === "/admin/campaigns" && location.pathname.startsWith("/admin/campaigns"));
@@ -225,7 +223,6 @@ export function AdminLayout() {
     // Acesso ao módulo Campanhas (lista própria; falha = sem item no menu, sem afetar o resto)
     fetchCampaignAdminMe().then((r) => {
       setCampaignsAccess(!!r.isAdmin);
-      setBookAccess(!!r.isAdmin && (!!r.permissions?.campaigns_review || !!r.permissions?.campaigns_publish));
     });
 
     // Load badges (counts)
@@ -266,7 +263,6 @@ export function AdminLayout() {
     if (!user) return false;
     // Campanhas: só a lista própria do módulo decide (nem o master entra sem estar nela).
     if (permKey === 'campaigns') return campaignsAccess;
-    if (permKey === 'recipe-book') return bookAccess;
     // Master has access to everything always
     if (user.role === 'master') return true;
     // Still loading (first render) — show everything briefly to avoid flicker.
@@ -654,12 +650,13 @@ export function AdminLayout() {
                         }}
                         className={cn(
                           "flex flex-col items-center gap-3 p-4 rounded-xl border bg-card hover:bg-accent transition-all relative",
-                          location.pathname === item.path && "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
+                          isItemActive(item.path) && "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
                         )}
+                        aria-current={isItemActive(item.path) ? "page" : undefined}
                       >
                         <div className={cn(
                           "h-10 w-10 rounded-full flex items-center justify-center relative",
-                          location.pathname === item.path ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                          isItemActive(item.path) ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
                         )}>
                           <item.icon size={20} />
                           {showBadge && (

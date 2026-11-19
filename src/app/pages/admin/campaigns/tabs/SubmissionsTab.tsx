@@ -21,6 +21,7 @@ import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
 import type { TabProps } from "./types";
 import { useTabTour } from "./useTabTour";
+import { LateBadge } from "./LateBadge";
 
 const FIELD_LIMITS = {
   dish_name: [3, 120], description: [0, MAX_STORY_TEXT], ingredients: [0, MAX_RECIPE_TEXT], preparation: [0, MAX_RECIPE_TEXT],
@@ -35,7 +36,7 @@ function StatusBadge({ status }: { status: AdminSubmissionRow["status"] }) {
   return <Badge className={cn("border text-[10px]", s.className)}>{s.label}</Badge>;
 }
 
-type StatusFilter = "all" | "pending" | "approved" | "rejected";
+type StatusFilter = "all" | "pending" | "approved" | "rejected" | "late";
 const isPending = (s: AdminSubmissionRow["status"]) => s === "submitted" || s === "in_review";
 
 export function SubmissionsTab({ campaignId, perms, onChanged, tourUserId, tourSignal }: TabProps) {
@@ -71,20 +72,26 @@ export function SubmissionsTab({ campaignId, perms, onChanged, tourUserId, tourS
     pending: all.filter((r) => isPending(r.status)).length,
     approved: all.filter((r) => r.status === "approved").length,
     rejected: all.filter((r) => r.status === "rejected").length,
+    late: all.filter((r) => r.is_late).length,
   }), [all]);
 
   // O que precisa de ação (aguardando análise) vem primeiro; dentro de cada grupo, a ordem da API (mais recentes antes).
   const rows = useMemo(() => {
     const filtered = all.filter((r) =>
-      status === "all" ? true : status === "pending" ? isPending(r.status) : r.status === status);
+      status === "all" ? true
+        : status === "late" ? !!r.is_late
+        : status === "pending" ? isPending(r.status)
+        : r.status === status);
     return [...filtered].sort((a, b) => Number(isPending(b.status)) - Number(isPending(a.status)));
   }, [all, status]);
 
+  // "Fora do prazo" só aparece quando existe alguma (ou enquanto estiver selecionado, para não sumir debaixo do dedo).
   const chips: { value: StatusFilter; label: string; n: number }[] = [
     { value: "all", label: "Todas", n: counts.all },
     { value: "pending", label: "Aguardando análise", n: counts.pending },
     { value: "approved", label: "Aprovadas", n: counts.approved },
     { value: "rejected", label: "Reprovadas", n: counts.rejected },
+    ...(counts.late > 0 || status === "late" ? [{ value: "late" as const, label: "Fora do prazo", n: counts.late }] : []),
   ];
 
   return (
@@ -148,6 +155,7 @@ export function SubmissionsTab({ campaignId, perms, onChanged, tourUserId, tourS
                     <span className="block truncate text-xs text-muted-foreground">{r.user_name}{r.user_department ? ` · ${r.user_department}` : ""}</span>
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <StatusBadge status={r.status} />
+                      {r.is_late && <LateBadge />}
                       <span className="text-[11px] text-muted-foreground">{fmtDateTime(r.submitted_at)}</span>
                     </span>
                   </span>
@@ -178,7 +186,12 @@ export function SubmissionsTab({ campaignId, perms, onChanged, tourUserId, tourS
                       <p className="text-[11px] text-muted-foreground">{r.user_department || "—"}</p>
                     </TableCell>
                     <TableCell className="max-w-[16rem] truncate">{r.dish_name}</TableCell>
-                    <TableCell><StatusBadge status={r.status} /></TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <StatusBadge status={r.status} />
+                        {r.is_late && <LateBadge />}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground">{fmtDateTime(r.submitted_at)}</TableCell>
                     <TableCell className="text-right pr-4">
                       <Button
@@ -272,12 +285,19 @@ function SubmissionDetail({
         <>
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={sub.status} />
+            {sub.is_late && <LateBadge />}
             <span className="text-[11px] text-muted-foreground">Enviada em {fmtDateTime(sub.submitted_at)}</span>
             {sub.reviewed_at && <span className="text-[11px] text-muted-foreground">· analisada em {fmtDateTime(sub.reviewed_at)}{sub.reviewed_by_name ? ` por ${sub.reviewed_by_name}` : ""}</span>}
           </div>
 
           {sub.status === "rejected" && sub.rejection_reason && (
             <Notice tone="danger" title="Justificativa da reprovação">{sub.rejection_reason}</Notice>
+          )}
+
+          {sub.is_late && (
+            <Notice tone="info" title="Enviada fora do prazo">
+              Pode ser aprovada ou reprovada normalmente e aparece nas listas e no Livro, mas não participa da votação, do ranking nem do resultado.
+            </Notice>
           )}
 
           {d.data.media.length > 0 && (

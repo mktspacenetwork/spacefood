@@ -7,6 +7,7 @@ import { cn } from "../../../../lib/utils";
 import { SUBMISSION_STATUS, fmtDate, fmtDateTime, plural } from "../../../../lib/campaigns/format";
 import type { AdminParticipant, AdminVote, SubmissionStatus } from "../../../../lib/campaigns/types";
 import { Notice, SectionLabel } from "../shared";
+import { LateBadge } from "./LateBadge";
 
 /** Uma receita de uma pessoa (com várias receitas por colaborador, cada pessoa tem uma ou mais). */
 export type RecipeRow = {
@@ -17,6 +18,8 @@ export type RecipeRow = {
   approved: boolean;
   votes: number | null;
   rank: number | null;
+  /** Enviada fora do prazo: não concorre à votação, ao ranking nem ao resultado. */
+  late?: boolean;
 };
 
 /** Uma pessoa: dados dela + todas as receitas que enviou. Votos e posição somam/escolhem entre as receitas. */
@@ -96,6 +99,7 @@ function RecipeBlock({
           <p className="text-base font-bold text-foreground">{rc.dish ?? "Receita enviada"}</p>
           <div className="flex flex-wrap items-center gap-2">
             {st && <Badge className={cn("border text-[10px]", st.className)}>{st.label}</Badge>}
+            {rc.late && <LateBadge />}
             <span className="text-[11px] text-muted-foreground">Enviada em {fmtDateTime(rc.submittedAt)}</span>
           </div>
         </div>
@@ -113,7 +117,9 @@ function RecipeBlock({
       {hasVoting && !locked && (
         <section className="space-y-3">
           <SectionLabel>Votos recebidos</SectionLabel>
-          {!rc.approved ? (
+          {rc.late ? (
+            <p className="text-sm text-muted-foreground">Receita enviada fora do prazo: não participa da votação e não recebe votos.</p>
+          ) : !rc.approved ? (
             <p className="text-sm text-muted-foreground">Só receitas aprovadas entram na votação e recebem votos.</p>
           ) : canResults ? (
             <div className="space-y-2 rounded-2xl border bg-muted/20 p-4">
@@ -137,7 +143,7 @@ function RecipeBlock({
       )}
 
       {/* De quem vieram os votos */}
-      {hasVoting && !locked && rc.approved && (
+      {hasVoting && !locked && rc.approved && !rc.late && (
         <section className="space-y-3">
           <SectionLabel>De quem vieram os votos</SectionLabel>
           {!canVotes ? (

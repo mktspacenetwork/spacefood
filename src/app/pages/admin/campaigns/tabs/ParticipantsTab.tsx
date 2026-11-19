@@ -19,6 +19,7 @@ import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
 import { EmptyBox, ErrorBox, LoadingBox, Notice, ReasonDialog, useBusy, useLoader } from "../shared";
 import type { TabProps } from "./types";
 import { useTabTour } from "./useTabTour";
+import { LateBadge } from "./LateBadge";
 
 /**
  * PARTICIPANTES — o único lugar para ver pessoas, votos recebidos e de quem vieram.
@@ -31,7 +32,7 @@ import { useTabTour } from "./useTabTour";
 
 type PartPayload = { with_votes: boolean; items: AdminParticipant[] };
 type ResPayload = { results: AdminResults | null; tally: TallyRow[]; tally_locked?: boolean };
-type Seg = "all" | "sent" | "voted" | "not_voted";
+type Seg = "all" | "sent" | "voted" | "not_voted" | "late";
 type SortKey = "auto" | "votes" | "name";
 
 type Row = PersonRow;
@@ -90,6 +91,8 @@ export function ParticipantsTab({ campaignId, campaign, results, stages, perms, 
 
   const tallyBySub = useMemo(() => new Map(tally.map((t) => [t.submission_id, t])), [tally]);
   const dishBySub = useMemo(() => new Map((subs.data ?? []).map((s) => [s.id, s.dish_name])), [subs.data]);
+  // "Fora do prazo": a lista de participantes traz `is_late`; se não trouxer (API antiga), vale a lista de receitas.
+  const lateBySub = useMemo(() => new Map((subs.data ?? []).map((s) => [s.id, !!s.is_late])), [subs.data]);
   // Posição "de competição": receitas com o mesmo número de votos dividem a posição.
   const rankBySub = useMemo(() => {
     const m = new Map<string, number>();
@@ -126,12 +129,13 @@ export function ParticipantsTab({ campaignId, campaign, results, stages, perms, 
         approved: p.submission_status === "approved",
         votes: t ? t.votes : null,
         rank,
+        late: p.is_late ?? lateBySub.get(p.submission_id) ?? false,
       });
       if (t) row.votes = (row.votes ?? 0) + t.votes;
       if (rank !== null) row.rank = row.rank === null ? rank : Math.min(row.rank, rank);
     }
     return [...byUser.values()];
-  }, [items, tallyBySub, dishBySub, rankBySub]);
+  }, [items, tallyBySub, dishBySub, rankBySub, lateBySub]);
 
   const effectiveSort: Exclude<SortKey, "auto"> = sort === "auto" ? (showVotesCols && totalVotes > 0 ? "votes" : "name") : sort;
 
@@ -147,6 +151,7 @@ export function ParticipantsTab({ campaignId, campaign, results, stages, perms, 
         if (!hay.includes(t)) return false;
       }
       if (seg === "sent") return r.recipes.length > 0;
+      if (seg === "late") return r.recipes.some((x) => x.late);
       if (seg === "voted") return r.p.voted === true;
       if (seg === "not_voted") return r.p.voted === false;
       return true;
@@ -169,6 +174,7 @@ export function ParticipantsTab({ campaignId, campaign, results, stages, perms, 
     sent: allRows.filter((r) => r.recipes.length > 0).length,
     voted: allRows.filter((r) => r.p.voted === true).length,
     not_voted: allRows.filter((r) => r.p.voted === false).length,
+    late: allRows.filter((r) => r.recipes.some((x) => x.late)).length,
   }), [allRows]);
 
   if (people.loading && !people.data) return <LoadingBox />;
@@ -185,6 +191,7 @@ export function ParticipantsTab({ campaignId, campaign, results, stages, perms, 
     { value: "all", label: "Todos os elegíveis", show: true },
     { value: "voted", label: "Já votaram", show: showVoted },
     { value: "not_voted", label: "Ainda não votaram", show: showVoted },
+    { value: "late", label: "Com receita fora do prazo", show: counts.late > 0 || seg === "late" },
   ];
 
   const invalidate = async (reason: string) => {
@@ -208,6 +215,7 @@ export function ParticipantsTab({ campaignId, campaign, results, stages, perms, 
       <p className="text-xs text-muted-foreground">
         <b className="text-foreground">{sent}</b> de {total} enviaram receita ({pct(sent)}%)
         {showVoted && <> · <b className="text-foreground">{counts.voted}</b> já votaram ({pct(counts.voted)}%)</>}
+        {counts.late > 0 && <> · <b className="text-foreground">{counts.late}</b> com receita fora do prazo</>}
       </p>
 
       {/* Busca, ordenação e filtros: uma barra só */}
@@ -287,6 +295,7 @@ export function ParticipantsTab({ campaignId, campaign, results, stages, perms, 
                               <span key={rc.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                                 <span className="min-w-0 truncate text-sm">{rc.dish ?? "Receita enviada"}</span>
                                 {st && <Badge className={cn("border text-[10px]", st.className)}>{st.label}</Badge>}
+                                {rc.late && <LateBadge />}
                               </span>
                             );
                           })}
@@ -345,7 +354,10 @@ export function ParticipantsTab({ campaignId, campaign, results, stages, perms, 
                                 return (
                                   <div key={rc.id} className="space-y-0.5">
                                     <p className="truncate text-sm">{rc.dish ?? "Receita enviada"}</p>
-                                    {st && <Badge className={cn("border text-[10px]", st.className)}>{st.label}</Badge>}
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      {st && <Badge className={cn("border text-[10px]", st.className)}>{st.label}</Badge>}
+                                      {rc.late && <LateBadge />}
+                                    </div>
                                   </div>
                                 );
                               })}

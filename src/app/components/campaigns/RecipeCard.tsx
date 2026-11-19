@@ -3,8 +3,8 @@ import type { RecipeListItem } from "../../lib/campaigns/types";
 
 /** Receita aprovada da galeria (cartão de 2 colunas no celular, ou linha de lista). */
 export function RecipeCard({
-  recipe, to, first, layout = "cards",
-}: { recipe: RecipeListItem; to: string; first?: boolean; layout?: RecipeLayout }) {
+  recipe, to, onOpen, first, layout = "cards",
+}: { recipe: RecipeListItem; to?: string; onOpen?: () => void; first?: boolean; layout?: RecipeLayout }) {
   return (
     <RecipeTile
       layout={layout}
@@ -12,6 +12,7 @@ export function RecipeCard({
       subtitle={recipe.author}
       photoUrl={recipe.photo_url}
       to={to}
+      onClick={onOpen}
       first={first}
       ariaLabel={`Ver a receita ${recipe.dish_name}, de ${recipe.author}`}
     />

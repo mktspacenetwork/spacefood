@@ -26,13 +26,13 @@ export const LIST_TOUR: TourStep[] = [
     selector: "camp-submit-cta",
     icon: icon(PlusCircle),
     title: "Cadastrar receita",
-    description: "Cadastre sua receita por aqui, enquanto a campanha estiver aberta.",
+    description: "Cadastre sua receita por aqui. Em campanha com votação, passado o prazo ainda dá para enviar até o resultado, mas a receita não concorre à votação.",
   },
   {
     selector: "camp-book-card",
     icon: icon(BookOpen),
     title: "Livro de Receitas",
-    description: "O livro reúne as receitas da plataforma. Leia aqui e baixe em PDF.",
+    description: "O livro reúne as receitas da plataforma. Leia aqui e use \"Baixar PDF\", na lista ou durante a leitura, para levar o livro inteiro.",
   },
   {
     selector: "camp-card",
@@ -66,7 +66,7 @@ export function homeTour(hasVoting: boolean): TourStep[] {
       icon: icon(ListChecks),
       title: "Menu da campanha",
       description: hasVoting
-        ? "Veja as receitas, as suas receitas, cadastre uma nova e vote quando a votação estiver aberta."
+        ? "Veja as receitas, as suas receitas, cadastre uma nova, vote quando a votação estiver aberta e acompanhe o Ranking, quando a equipe liberar."
         : "Veja as receitas, as suas receitas e cadastre uma nova.",
     },
     {
@@ -103,7 +103,7 @@ export const RECIPES_TOUR: TourStep[] = [
     selector: "camp-recipe-card",
     icon: icon(UtensilsCrossed),
     title: "Abra uma receita",
-    description: "Toque para ver a foto, os ingredientes e o modo de preparo.",
+    description: "Toque para abrir a receita completa — foto, ingredientes, modo de preparo e história — numa folha por cima da lista. Feche para voltar.",
   },
 ];
 
@@ -113,7 +113,7 @@ export const RECIPE_DETAIL_TOUR: TourStep[] = [
     selector: "camp-recipe-media",
     icon: icon(Images),
     title: "A receita",
-    description: "A foto, o nome de quem enviou, os ingredientes e o modo de preparo.",
+    description: "A foto, o nome de quem enviou, os ingredientes, o modo de preparo e a história. Seção sem texto aparece como \"Não informado\".",
   },
   {
     selector: "camp-recipe-vote",
@@ -125,6 +125,12 @@ export const RECIPE_DETAIL_TOUR: TourStep[] = [
 
 /** Participar / editar. */
 export const SUBMIT_TOUR: TourStep[] = [
+  {
+    selector: "camp-late",
+    icon: icon(ShieldCheck),
+    title: "Fora do prazo",
+    description: "O prazo de participação terminou. Sua receita será aceita, mas não concorrerá à votação.",
+  },
   {
     selector: "camp-fields",
     icon: icon(ListChecks),
@@ -156,7 +162,7 @@ export const MYENTRY_TOUR: TourStep[] = [
     selector: "camp-recipe-card",
     icon: icon(UtensilsCrossed),
     title: "Abra uma receita",
-    description: "O selo mostra a situação: em análise, aprovada ou não aprovada. Toque para ver ingredientes, modo de preparo e o motivo, se não for aprovada.",
+    description: "O selo mostra a situação: em análise, aprovada ou não aprovada. Receita enviada fora do prazo traz o aviso de que não concorre à votação. Toque para ver ingredientes, modo de preparo e o motivo, se não for aprovada.",
   },
   {
     selector: "camp-new-recipe",
@@ -203,13 +209,13 @@ export const RANKING_TOUR: TourStep[] = [
   {
     icon: icon(ListOrdered),
     title: "Ranking",
-    description: "Mostra a classificação das receitas por votos.",
+    description: "Mostra a classificação das receitas por votos. O item aparece no menu quando a equipe libera e some se ela desligar.",
   },
   {
     selector: "camp-ranking",
     icon: icon(ListOrdered),
     title: "Classificação",
-    description: "Se aparecer como parcial, ainda pode mudar. A final só vale depois que o resultado for divulgado.",
+    description: "Os três primeiros ficam em destaque; \"Ver classificação completa\" mostra todas, com os votos. Atualiza sozinha. Empates dividem a posição, e só receitas aprovadas e dentro do prazo entram. Se aparecer como parcial, ainda pode mudar: a final só vale depois que o resultado for divulgado.",
   },
 ];
 

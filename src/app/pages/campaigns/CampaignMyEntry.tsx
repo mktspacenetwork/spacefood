@@ -4,11 +4,11 @@ import { CheckCircle2, ClipboardList, Pencil, Plus } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "../../components/ui/Button";
 import { Skeleton } from "../../components/ui/skeleton";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { RecipeTile, RecipeViewToggle, StatusBadge, useRecipeView } from "../../components/campaigns/RecipeView";
 import { SubmissionStatus } from "../../components/campaigns/SubmissionStatus";
 import { EmptyState } from "../../components/campaigns/EmptyState";
-import { RecipePhotos, RecipeText } from "../../components/campaigns/RecipeBody";
+import { LateBadge, LateNote, RecipePhotos, RecipeText } from "../../components/campaigns/RecipeBody";
+import { RecipeSheet, useRecipeSheetParam } from "../../components/campaigns/RecipeSheet";
 import { ErrorState } from "../../components/campaigns/ErrorState";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
 import { useCampaignCtx } from "./CampaignLayout";
@@ -34,8 +34,8 @@ export function CampaignMyEntry() {
   const api = `/campaigns/${encodeURIComponent(slug)}`;
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Receita aberta na folha (texto completo, situação e botão de editar).
-  const [selId, setSelId] = useState<string | null>(null);
+  // Receita aberta na folha (texto completo, situação e botão de editar). Fica na URL: o "voltar" fecha a folha.
+  const [selId, setSelId] = useRecipeSheetParam();
   const [view, setView] = useRecipeView();
 
   const load = useCallback(async () => {
@@ -82,10 +82,14 @@ export function CampaignMyEntry() {
   const multi = max > 1 || campaign.features.multiple_submissions === true;
   const hasVoting = !!campaign.features.voting;
   const canSendMore = data.can_submit_more;
-  // Edição é por receita: só enquanto as inscrições estão abertas e a receita ainda não foi aprovada.
-  const regOpen = !!state.released && state.registration === "open" && state.stage !== "closed";
-  const canEdit = (s: MySubmission) => (multi ? regOpen && s.status !== "approved" : !!state.can_edit);
-  const limitReached = multi && items.length >= max && regOpen;
+  // Edição é por receita: enquanto a participação está aberta, e a receita ainda não foi aprovada. Na janela de
+  // "fora do prazo" (participação encerrada, resultado ainda não divulgado) só as receitas já enviadas fora do prazo.
+  const live = !!state.released && state.stage !== "closed";
+  const regOpen = live && state.registration === "open";
+  const lateOpen = live && !!state.late_window;
+  const canEdit = (s: MySubmission) =>
+    multi ? s.status !== "approved" && (regOpen || (lateOpen && !!s.is_late)) : !!state.can_edit;
+  const limitReached = multi && items.length >= max && (regOpen || lateOpen);
   const selected = items.find((x) => x.id === selId) ?? null;
   const photoOf = (s: MySubmission) =>
     (s.media.find((m) => m.kind === "main_photo") ?? s.media.find((m) => m.kind === "photo"))?.url ?? null;
@@ -150,7 +154,9 @@ export function CampaignMyEntry() {
             title={s.dish_name}
             subtitle="Enviada por você"
             photoUrl={photoOf(s)}
-            badge={<StatusBadge status={s.status} />}
+            badge={s.is_late ? (
+              <span className="flex flex-col items-start gap-1"><StatusBadge status={s.status} /><LateBadge /></span>
+            ) : <StatusBadge status={s.status} />}
             onClick={() => setSelId(s.id)}
             first={i === 0}
             ariaLabel={`Abrir a receita ${s.dish_name}`}
@@ -175,41 +181,41 @@ export function CampaignMyEntry() {
         </p>
       )}
 
-      <Sheet open={!!selected} onOpenChange={(o) => { if (!o) setSelId(null); }}>
-        <SheetContent side="bottom" className="max-h-[90vh] overflow-y-auto rounded-t-3xl px-1 pb-6">
-          {selected && (
-            <>
-              <SheetHeader className="text-left">
-                <SheetTitle className="pr-8 text-lg leading-snug">{selected.dish_name}</SheetTitle>
-                <SheetDescription className="sr-only">Sua receita</SheetDescription>
-              </SheetHeader>
-              <div className="space-y-4 px-4">
-                <RecipePhotos media={selected.media} alt={selected.dish_name} />
-                <SubmissionStatus
-                  status={selected.status}
-                  submittedAt={selected.submitted_at}
-                  reviewedAt={selected.reviewed_at}
-                  reason={selected.rejection_reason}
-                  canEdit={canEdit(selected)}
-                />
-                <RecipeText story={selected.description} ingredients={selected.ingredients} preparation={selected.preparation} />
-                {canEdit(selected) && (
-                  <Button
-                    size="lg"
-                    variant={selected.status === "rejected" || selected.status === "pending_media" ? "primary" : "outline"}
-                    data-tutorial="camp-edit"
-                    onClick={() => navigate(`${base}/enviar/${selected.id}`)}
-                    className="h-14 w-full gap-2 rounded-2xl text-base font-bold"
-                  >
-                    <Pencil size={18} aria-hidden="true" />
-                    {selected.status === "pending_media" ? "Terminar o envio" : selected.status === "rejected" ? "Corrigir e reenviar" : "Editar receita"}
-                  </Button>
-                )}
-              </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
+      <RecipeSheet
+        open={!!selected}
+        onOpenChange={(o) => { if (!o) setSelId(null); }}
+        title={selected?.dish_name ?? "Sua receita"}
+        subtitle={selected ? "Enviada por você" : undefined}
+        footer={
+          selected && canEdit(selected) ? (
+            <Button
+              size="lg"
+              variant={selected.status === "rejected" || selected.status === "pending_media" ? "primary" : "outline"}
+              data-tutorial="camp-edit"
+              onClick={() => navigate(`${base}/enviar/${selected.id}`)}
+              className="h-14 w-full gap-2 rounded-2xl text-base font-bold"
+            >
+              <Pencil size={18} aria-hidden="true" />
+              {selected.status === "pending_media" ? "Terminar o envio" : selected.status === "rejected" ? "Corrigir e reenviar" : "Editar receita"}
+            </Button>
+          ) : undefined
+        }
+      >
+        {selected && (
+          <>
+            <RecipePhotos media={selected.media} alt={selected.dish_name} />
+            {selected.is_late && <LateNote />}
+            <SubmissionStatus
+              status={selected.status}
+              submittedAt={selected.submitted_at}
+              reviewedAt={selected.reviewed_at}
+              reason={selected.rejection_reason}
+              canEdit={canEdit(selected)}
+            />
+            <RecipeText story={selected.description} ingredients={selected.ingredients} preparation={selected.preparation} />
+          </>
+        )}
+      </RecipeSheet>
 
       <CampaignTour steps={MYENTRY_TOUR} tour={tour} />
     </motion.div>

@@ -5,6 +5,22 @@ import type { TourController } from "../../../../components/campaigns/CampaignTo
 export type PanelTabKey = "summary" | "submissions" | "participants" | "results" | "reports" | "settings";
 
 /**
+ * Versão da tour de cada aba. Subir o número de uma aba faz a tour dela abrir UMA vez de novo para quem já a viu
+ * (a chave de "vista" muda); depois volta a abrir só por "Ver tour". Suba SÓ a da aba cujo conteúdo ou alvos mudaram.
+ *  - rodada 5 (v2): summary (sem card Status; atividades no fim), submissions e participants ("Fora do prazo"),
+ *    results (ranking ao vivo e chave "Mostrar aos colaboradores"), reports (dashboard ao vivo e período do download),
+ *    settings (três datas em sequência).
+ */
+export const TAB_TOUR_VERSION: Record<PanelTabKey, number> = {
+  summary: 2,
+  submissions: 2,
+  participants: 2,
+  results: 2,
+  reports: 2,
+  settings: 2,
+};
+
+/**
  * Tour de UMA aba do painel, igual para qualquer perfil:
  *  - abre sozinha na primeira vez que a pessoa entra na aba (e só depois de os dados da aba carregarem,
  *    para os alvos existirem) e nunca mais abre sozinha — `useTour` grava "vista" ao abrir;
@@ -16,7 +32,7 @@ export function useTabTour(
   p: { tourUserId?: string; tourSignal?: number; ready: boolean },
 ): TourController {
   const tour = useTour({
-    storageKey: tourKey("admin", p.tourUserId, `panel-${tab}`),
+    storageKey: tourKey("admin", p.tourUserId, `panel-${tab}`, undefined, TAB_TOUR_VERSION[tab]),
     enabled: p.ready && !!p.tourUserId,
   });
   const seen = useRef(p.tourSignal ?? 0);

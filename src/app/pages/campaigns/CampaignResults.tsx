@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
-import { Lock, Medal, Trophy, User, UtensilsCrossed } from "lucide-react";
+import { Lock, Medal, Trophy, User } from "lucide-react";
 import { motion } from "motion/react";
 import { Card } from "../../components/ui/Card";
 import { Skeleton } from "../../components/ui/skeleton";
 import { EmptyState } from "../../components/campaigns/EmptyState";
+import { RecipePhoto } from "../../components/campaigns/RecipePhoto";
 import { ErrorState } from "../../components/campaigns/ErrorState";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
 import { useCampaignCtx } from "./CampaignLayout";
@@ -98,18 +99,11 @@ export function CampaignResults() {
         <EmptyState icon={<Trophy size={22} aria-hidden="true" />} title="Não houve receita vencedora nesta campanha" />
       ) : (
         <Card data-tutorial="camp-winner" className="overflow-hidden rounded-3xl border-amber-300 shadow-lg shadow-amber-500/10 hover:shadow-lg dark:border-amber-700">
-          <div className="relative">
-            {w.photo_url ? (
-              <img src={w.photo_url} alt={`Foto da receita vencedora ${w.dish_name}`} className="aspect-[4/3] w-full object-cover" />
-            ) : (
-              <div className="flex aspect-[4/3] w-full items-center justify-center bg-gradient-to-br from-amber-300 via-orange-400 to-orange-500 text-white/90">
-                <UtensilsCrossed size={54} strokeWidth={1.5} aria-hidden="true" />
-              </div>
-            )}
+          <RecipePhoto src={w.photo_url} alt={`Foto da receita vencedora ${w.dish_name}`} variant="tile" eager>
             <span className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1.5 text-xs font-extrabold uppercase tracking-wider text-white shadow-md">
               <Trophy size={14} aria-hidden="true" /> Receita vencedora
             </span>
-          </div>
+          </RecipePhoto>
           <div className="space-y-2 p-5">
             <h3 className="text-2xl font-bold leading-tight text-foreground">{w.dish_name}</h3>
             <p className="flex items-center gap-1.5 text-sm text-muted-foreground"><User size={14} aria-hidden="true" /> {w.author}</p>

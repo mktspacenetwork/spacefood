@@ -68,8 +68,13 @@ function phaseBadge(
     if (rs === "tie_pending") return { label: "Empate a decidir", className: RESULT_STAGE.tie_pending.className };
     if (rs === "preliminary") return { label: "Resultado em apuração", className: RESULT_STAGE.preliminary.className };
     if (votState === "closed") return { label: "Votação encerrada", className: PHASE_STATE.closed.className };
-    if (votState === "open") return { label: "Votação aberta", className: PHASE_STATE.open.className };
+    if (votState === "open") {
+      // Janela única (campanha antiga): participação e votação abertas ao mesmo tempo.
+      if (regState === "open") return { label: "Participação e votação abertas", className: PHASE_STATE.open.className };
+      return { label: "Votação aberta", className: PHASE_STATE.open.className };
+    }
     if (votState === "paused") return { label: "Votação pausada", className: PHASE_STATE.paused.className };
+    if (votState === "upcoming" && regState === "closed") return { label: "Votação em breve", className: PHASE_STATE.upcoming.className };
   }
   if (regState === "open") return { label: "Participação aberta", className: PHASE_STATE.open.className };
   if (regState === "paused") return { label: "Participação pausada", className: PHASE_STATE.paused.className };
@@ -111,6 +116,9 @@ function buildNext(x: {
   if (display === "draft") {
     if (regState === "unset" && perms.campaigns_schedule) {
       return { tone: "warn", title: "Defina o período", text: "Sem datas, a campanha não pode ser publicada.", actions: [{ label: "Definir período", onClick: () => goTab("settings", "period"), primary: true }] };
+    }
+    if (f.voting && votState === "unset" && perms.campaigns_schedule) {
+      return { tone: "warn", title: "Defina a votação", text: "Sem as datas da votação, a campanha não pode ser publicada.", actions: [{ label: "Definir datas", onClick: () => goTab("settings", "period"), primary: true }] };
     }
     if (check?.ok && perms.campaigns_publish) {
       return {

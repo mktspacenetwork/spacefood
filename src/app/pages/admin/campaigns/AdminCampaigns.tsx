@@ -23,6 +23,7 @@ import { PublishDialog } from "./PublishDialog";
 import { CampaignListCard, LIST_ROW_GRID } from "./CampaignListCard";
 import type { ListView } from "./CampaignListCard";
 import { ErrorBox, LoadingBox, ReasonDialog, RestrictedBox, stageState, useBusy, useLoader } from "./shared";
+import { SectionNav } from "./SectionNav";
 
 // ───────────────────────────── Filtros por situação ─────────────────────────────
 
@@ -191,6 +192,7 @@ export function AdminCampaigns() {
 
   return (
     <div className="space-y-6">
+      <SectionNav active="campaigns" showBook={!!(perms.campaigns_review || perms.campaigns_publish)} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
           <Megaphone size={24} className="text-primary" />

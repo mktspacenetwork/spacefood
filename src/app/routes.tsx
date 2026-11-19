@@ -182,7 +182,10 @@ export const router = createBrowserRouter([
 
           // Campanhas (acesso decidido pela lista própria do módulo, no servidor)
           { path: "campaigns", element: <WithBoundary name="Campanhas"><LazyAdminPage><AdminCampaigns /></LazyAdminPage></WithBoundary> },
-          { path: "recipe-book", element: <WithBoundary name="Livro de Receitas"><LazyAdminPage><AdminRecipeBook /></LazyAdminPage></WithBoundary> },
+          // O Livro agora é uma aba de Campanhas; a rota antiga redireciona (favoritos e links continuam valendo).
+          { path: "recipe-book", element: <Navigate to="/admin/campaigns/livro" replace /> },
+          // Precisa vir ANTES de "campaigns/:id", senão "livro" seria lido como o id de uma campanha.
+          { path: "campaigns/livro", element: <WithBoundary name="Livro de Receitas"><LazyAdminPage><AdminRecipeBook /></LazyAdminPage></WithBoundary> },
           { path: "campaigns/new", element: <WithBoundary name="Nova campanha"><LazyAdminPage><AdminCampaignWizard /></LazyAdminPage></WithBoundary> },
           { path: "campaigns/:id/edit", element: <WithBoundary name="Editar campanha"><LazyAdminPage><AdminCampaignWizard /></LazyAdminPage></WithBoundary> },
           { path: "campaigns/:id", element: <WithBoundary name="Painel da campanha"><LazyAdminPage><AdminCampaignPanel /></LazyAdminPage></WithBoundary> },

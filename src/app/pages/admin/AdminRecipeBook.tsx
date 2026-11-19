@@ -6,6 +6,7 @@ import { plural } from "../../lib/campaigns/format";
 import type { AdminBookItem } from "../../lib/campaigns/types";
 import { ErrorBox, LoadingBox, RestrictedBox, useBusy, useLoader } from "./campaigns/shared";
 import { useCampaignPerms } from "./campaigns/useCampaignPerms";
+import { SectionNav } from "./campaigns/SectionNav";
 import { AddRecipeDialog } from "./recipebook/AddRecipeDialog";
 import { BookItemDialog } from "./recipebook/BookItemDialog";
 import { BookRows, matchesBookFilter } from "./recipebook/BookRows";
@@ -98,6 +99,7 @@ export function AdminRecipeBook() {
 
   return (
     <div className="space-y-6">
+      <SectionNav active="book" showBook={canManage || canPublish} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">

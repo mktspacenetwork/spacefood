@@ -5,16 +5,16 @@ import { Button } from "../../../../components/ui/Button";
 import { Card, CardContent } from "../../../../components/ui/Card";
 import { ConfirmDialog } from "../../../../components/ui/ConfirmDialog";
 import { Progress } from "../../../../components/ui/progress";
-import { Switch } from "../../../../components/ui/switch";
 import { cn } from "../../../../lib/utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
+import { useVisibleInterval } from "../../../../lib/campaigns/ranking";
 import { PHASE_STATE, RESULT_STAGE, fmtDate, fmtDayTime, fmtRange, plural } from "../../../../lib/campaigns/format";
 import type { AdminDashboard, AdminResults } from "../../../../lib/campaigns/types";
 import { CampaignTour } from "../../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_TABS } from "../../../../lib/campaigns/tours-admin";
 import { ErrorBox, LoadingBox, Notice, SectionLabel, stageState, useBusy, useLoader } from "../shared";
 import { ResultView } from "./VoteFlow";
-import { RankingCard, VotesList } from "./LiveRanking";
+import { PartialRankingSwitch, RankingCard, VotesList } from "./LiveRanking";
 import type { TabProps } from "./types";
 import { useTabTour } from "./useTabTour";
 
@@ -58,20 +58,15 @@ export function ResultsTab(props: TabProps) {
   // null = automático (mostra o resultado quando já existe apuração); depois que a pessoa pede, vale a escolha dela.
   const [shown, setShown] = useState<boolean | null>(null);
   const [endNowOpen, setEndNowOpen] = useState(false);
-  const [partialOpen, setPartialOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
-  // Atualização automática enquanto a votação está aberta (e a aba visível): a gestão vê o ranking mudar.
-  const votingNow = dash.data ? ["open", "paused"].includes(stageState(dash.data.stages.find((s) => s.stage_key === "voting"))) : false;
+  // Ao vivo = votação aberta/pausada (e, quando o servidor informa, `voting_live`): o ranking é PARCIAL e se atualiza
+  // sozinho a cada 20 s, só com a aba visível. Fora disso (encerrada) o ranking não muda mais e não há recarga.
+  const votingStage = dash.data ? stageState(dash.data.stages.find((s) => s.stage_key === "voting")) : "unset";
+  const votingNow = ["open", "paused"].includes(votingStage) && (dash.data?.voting_live ?? true);
   const { reload: reloadDash } = dash;
-  useEffect(() => {
-    if (!votingNow) return;
-    const t = setInterval(() => {
-      if (document.visibilityState === "visible") { reloadDash(); setRefreshKey((k) => k + 1); }
-    }, 20_000);
-    return () => clearInterval(t);
-  }, [votingNow, reloadDash]);
+  useVisibleInterval(() => { void reloadDash(); setRefreshKey((k) => k + 1); }, 20_000, votingNow, 0);
   useEffect(() => { if (dash.data) setUpdatedAt(new Date()); }, [dash.data]);
 
   if (dash.loading && !dash.data) return <LoadingBox />;
@@ -125,15 +120,6 @@ export function ResultsTab(props: TabProps) {
       refresh();
     }
     setShown(true);
-  };
-
-  const setPartial = async (enabled: boolean) => {
-    setPartialOpen(false);
-    const r = await run(
-      "partial", () => campaignsApi.put(`${base}/partial-ranking`, { enabled }),
-      enabled ? "Os colaboradores agora veem o ranking parcial." : "Ranking parcial escondido dos colaboradores.",
-    );
-    if (r.ok) onChanged();
   };
 
   return (
@@ -191,25 +177,7 @@ export function ResultsTab(props: TabProps) {
         <RankingCard tally={d.tally} live={votingNow} official={finalized} winnerId={res.winner_submission_id} updatedAt={updatedAt} />
       )}
       {!announced && (
-        <Card className="rounded-3xl border hover:shadow-none" data-tutorial="camp-results-partial">
-          <CardContent className="flex items-center justify-between gap-4 p-4 sm:p-5">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground">Mostrar ranking parcial aos colaboradores</p>
-              <p className="mt-0.5 text-[12px] text-muted-foreground">
-                {partialOn
-                  ? "Ligado: os colaboradores veem as posições e os votos enquanto a votação acontece."
-                  : "Desligado: só a gestão vê. O resultado oficial só aparece depois da divulgação."}
-              </p>
-              {!perms.campaigns_announce && <p className="mt-1 text-[11px] text-muted-foreground">Só quem pode divulgar resultados altera esta opção.</p>}
-            </div>
-            <Switch
-              checked={partialOn}
-              onCheckedChange={(v) => (v ? setPartialOpen(true) : void setPartial(false))}
-              disabled={!perms.campaigns_announce || isBusy}
-              aria-label="Mostrar ranking parcial aos colaboradores"
-            />
-          </CardContent>
-        </Card>
+        <PartialRankingSwitch campaignId={campaignId} enabled={partialOn} canEdit={!!perms.campaigns_announce && !isBusy} onChanged={onChanged} />
       )}
 
       {/* 3 · Apuração → 4 Confirmar → 5 Divulgar */}
@@ -230,7 +198,7 @@ export function ResultsTab(props: TabProps) {
                   <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => setEndNowOpen(true)} disabled={isBusy}>
                     {busy === "end" ? <Loader2 size={13} className="animate-spin" /> : <Square size={13} />} Encerrar votação agora
                   </Button>
-                  <p className="text-[11px] text-muted-foreground">Só se quiser antecipar o fim: ninguém mais vota nem envia receitas.</p>
+                  <p className="text-[11px] text-muted-foreground">Só se quiser antecipar o fim: a participação e a votação terminam agora. Receitas enviadas depois ficam “fora do prazo” e não entram na votação nem no ranking.</p>
                 </div>
               )}
             </div>
@@ -265,18 +233,10 @@ export function ResultsTab(props: TabProps) {
         open={endNowOpen}
         onOpenChange={setEndNowOpen}
         title="Encerrar a votação agora?"
-        description="A votação e as participações terminam agora: ninguém mais vota nem envia receitas. Depois você poderá ver o ganhador, confirmar e divulgar."
+        description="A participação e a votação terminam agora: ninguém mais vota. Receitas enviadas depois ficam “fora do prazo”: são aceitas, mas não entram na votação nem no ranking. Depois você poderá ver o ganhador, confirmar e divulgar."
         confirmLabel="Encerrar agora"
         variant="destructive"
         onConfirm={endNow}
-      />
-      <ConfirmDialog
-        open={partialOpen}
-        onOpenChange={setPartialOpen}
-        title="Mostrar o ranking parcial?"
-        description="Os colaboradores passam a ver a posição e os votos de cada receita enquanto a votação acontece. Você pode desligar quando quiser."
-        confirmLabel="Mostrar aos colaboradores"
-        onConfirm={() => void setPartial(true)}
       />
 
       <CampaignTour steps={ADMIN_TOUR_TABS.results} tour={tour} />

@@ -1,0 +1,117 @@
+{
+  "generated_by": "supabase/rollback (harness da rodada 5, test-rodada5-a.mjs)",
+  "hash": "md5(replace(prosrc, chr(13), ''))  -- neutraliza CRLF/LF",
+  "before": {
+    "campaign_cast_vote": "5d5d78c103e5abc723425b0796f2e79e",
+    "campaign_collab_state": "85c5ddddfbee12cfb5c575f5f1a02563",
+    "campaign_finalize_submission": "8ff04220060252498aa907f19df32b40",
+    "campaign_publish_check": "1df3b6d29b7b7ff360ba6674fb0b22c1",
+    "campaign_review": "586224c13cd90484e1edaa4cd1f6ae18",
+    "campaign_submit": "f6bfc682bf4edfb4847b57eb77b7fa7e",
+    "campaign_tally": "093df0c872a6803ed2b614fa107b3127",
+    "campaign_update_submission": "6d873fe00a0a2ef7565b0eb2c9a4b87c"
+  },
+  "after_14a": {
+    "campaign_late_window": "bd3beb2e7dfacf0ee4c481213beb7e4b",
+    "campaign_set_schedule": "69697e969e62cf85901ef42c5a49a568",
+    "campaign_analytics": "e76641c058d3bcf7052793e3e33c32ce",
+    "campaign_tally_period": "d61aad2a9394b67afbb9f46397dadcd5",
+    "campaign_publish_check": "55c918175c90220c629f6ab5131f435c"
+  },
+  "after_14b": {
+    "campaign_collab_state": "dfedf2875b8d0d65163d30f0dbac12a7",
+    "campaign_submit": "646dbffe919e5ffa74fe5051e0c56353",
+    "campaign_finalize_submission": "a7df65f755f683b62305d483bfd7a226",
+    "campaign_update_submission": "b78447032ffd99142b646b5d6ccec9ae",
+    "campaign_review": "e9407384ad569b5a162e29ffe4319c77",
+    "campaign_cast_vote": "496818710827a6237fec7319a84c2083",
+    "campaign_tally": "ff167c7de7a2abfa22cc775d3287eb43"
+  },
+  "pieces": [
+    {
+      "file": "20261118100014_campaigns_14a1_late_core.sql",
+      "name": "campaigns_14a1_late_core",
+      "functions": {
+        "campaign_late_window": "bd3beb2e7dfacf0ee4c481213beb7e4b"
+      }
+    },
+    {
+      "file": "20261118100015_campaigns_14a2_set_schedule.sql",
+      "name": "campaigns_14a2_set_schedule",
+      "functions": {
+        "campaign_set_schedule": "69697e969e62cf85901ef42c5a49a568"
+      }
+    },
+    {
+      "file": "20261118100016_campaigns_14a3_analytics.sql",
+      "name": "campaigns_14a3_analytics",
+      "functions": {
+        "campaign_analytics": "e76641c058d3bcf7052793e3e33c32ce",
+        "campaign_tally_period": "d61aad2a9394b67afbb9f46397dadcd5"
+      }
+    },
+    {
+      "file": "20261118100017_campaigns_14a4_publish_check.sql",
+      "name": "campaigns_14a4_publish_check",
+      "functions": {
+        "campaign_publish_check": "55c918175c90220c629f6ab5131f435c"
+      }
+    },
+    {
+      "file": "20261118100018_campaigns_14b1_tally.sql",
+      "name": "campaigns_14b1_tally",
+      "functions": {
+        "campaign_tally": "ff167c7de7a2abfa22cc775d3287eb43"
+      }
+    },
+    {
+      "file": "20261118100019_campaigns_14b2_cast_vote.sql",
+      "name": "campaigns_14b2_cast_vote",
+      "functions": {
+        "campaign_cast_vote": "496818710827a6237fec7319a84c2083"
+      }
+    },
+    {
+      "file": "20261118100020_campaigns_14b3_review.sql",
+      "name": "campaigns_14b3_review",
+      "functions": {
+        "campaign_review": "e9407384ad569b5a162e29ffe4319c77"
+      }
+    },
+    {
+      "file": "20261118100021_campaigns_14b4_update_submission.sql",
+      "name": "campaigns_14b4_update_submission",
+      "functions": {
+        "campaign_update_submission": "b78447032ffd99142b646b5d6ccec9ae"
+      }
+    },
+    {
+      "file": "20261118100022_campaigns_14b5_finalize_submission.sql",
+      "name": "campaigns_14b5_finalize_submission",
+      "functions": {
+        "campaign_finalize_submission": "a7df65f755f683b62305d483bfd7a226"
+      }
+    },
+    {
+      "file": "20261118100023_campaigns_14b6_submit.sql",
+      "name": "campaigns_14b6_submit",
+      "functions": {
+        "campaign_submit": "646dbffe919e5ffa74fe5051e0c56353"
+      }
+    },
+    {
+      "file": "20261118100024_campaigns_14b7_collab_state.sql",
+      "name": "campaigns_14b7_collab_state",
+      "functions": {
+        "campaign_collab_state": "dfedf2875b8d0d65163d30f0dbac12a7"
+      }
+    }
+  ],
+  "rollback_ordem_porteiras": [
+    "campaign_collab_state",
+    "campaign_submit",
+    "campaign_finalize_submission",
+    "campaign_update_submission",
+    "campaign_review"
+  ]
+}

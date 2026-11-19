@@ -86,6 +86,28 @@ Volte para a tela inicial do iPhone e procure pelo app **SpaceFood**.
 
 ---
 
+## 📄 Teste do PDF do Livro de Receitas (app instalado)
+
+**Não foi possível validar sem um iPhone real.** No app instalado (tela cheia) o download automático depois de uma
+espera longa costuma ser ignorado pelo iOS; por isso o PDF tem **dois toques**: monta, mostra "PDF pronto" e o segundo
+toque abre a folha de compartilhamento (ou, sem ela, um link "Abrir PDF").
+
+Pré-requisito: o administrador precisa ter **publicado** o Livro (ou usar um ambiente de teste com o livro publicado).
+
+1. Abra o app instalado → **Campanhas** → **Livro de Receitas**.
+2. Toque em **Baixar PDF** (na lista) e aguarde a barra de progresso. **Cancelar** deve interromper e liberar o botão.
+3. Deve aparecer o aviso **"PDF pronto"** (nada é baixado sozinho).
+4. Toque em **Salvar ou compartilhar** → a folha do iOS abre com `livro-de-receitas-spacefood-AAAA-MM-DD.pdf`.
+   Escolha **Salvar em Arquivos**; confira se o arquivo abre com capa, sumário e fotos.
+5. Se aparecer **Abrir PDF** em vez do compartilhar: toque, o PDF abre; salve pelo botão de compartilhar do visualizador.
+   Confirme que dá para **voltar ao app** (sem ficar preso na tela do PDF).
+6. Repita dentro da **leitura** (Ler o livro → "Baixar PDF" no topo).
+7. No Safari comum (sem instalar) o PDF deve baixar direto, sem o segundo toque.
+
+Se algo falhar, anote: modelo, versão do iOS, em qual passo e a mensagem na tela.
+
+---
+
 ## 🐛 Troubleshooting
 
 ### Problema: Ícone genérico aparece (azul do Safari)

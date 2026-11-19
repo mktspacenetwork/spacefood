@@ -140,7 +140,7 @@ export function SettingsTab(props: SettingsTabProps) {
       </Fold>
 
       {perms.campaigns_schedule && (
-        <Fold {...foldProps("period")} icon={<CalendarClock size={18} />} title="Período" hint={c.features.voting ? "Início e encerramento das participações e data de anúncio do resultado." : "Início e encerramento das participações."}>
+        <Fold {...foldProps("period")} icon={<CalendarClock size={18} />} title="Período" hint={c.features.voting ? "Participação, votação e divulgação do resultado." : "Início e encerramento das participações."}>
           <PeriodSection {...tabProps} />
         </Fold>
       )}

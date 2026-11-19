@@ -1,11 +1,14 @@
+import { useState } from "react";
 import { FileDown, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../../../../components/ui/Button";
 import { Card, CardContent } from "../../../../components/ui/Card";
 import { campaignsApi } from "../../../../lib/campaigns/api";
-import { downloadCsv } from "../../../../lib/campaigns/export";
+import { DEFAULT_PERIOD, REPORT_DATE_BASIS, downloadCsv, exportFileName, periodQuery } from "../../../../lib/campaigns/export";
+import type { PeriodChoice, ResolvedPeriod } from "../../../../lib/campaigns/export";
 import type { ExportPayload } from "../../../../lib/campaigns/types";
-import { Notice, stageState, useBusy } from "../shared";
+import { Notice, useBusy } from "../shared";
+import { ExportDialog } from "./ExportDialog";
 import type { TabProps } from "./types";
 
 type Report = { kind: string; title: string; hint: string; show: (p: Record<string, boolean>, c: TabProps["campaign"]) => boolean };
@@ -22,17 +25,30 @@ const REPORTS: Report[] = [
   { kind: "votes", title: "Votos individuais", hint: "Quem votou em qual receita. Dado sensível.", show: (p, c) => c.features.voting && !!p.campaigns_export_votes && !!p.campaigns_votes_view },
 ];
 
+/** O relatório de resultado é sempre o oficial da campanha inteira: não usa período. */
+const usesPeriod = (kind: string) => kind !== "result";
+
 export function ReportsTab({ campaignId, campaign, perms }: TabProps) {
   const { busy, run } = useBusy();
+  const [dialog, setDialog] = useState<Report | null>(null);
+  // A escolha fica guardada entre um download e outro (quem baixa vários relatórios do mesmo período não refaz).
+  const [choice, setChoice] = useState<PeriodChoice>(DEFAULT_PERIOD);
 
-  const download = async (kind: string) => {
+  const download = async (kind: string, p: Extract<ResolvedPeriod, { ok: true }> | null) => {
+    const q = p ? periodQuery(p) : "";
     const r = await run(kind, async () => {
-      const p = await campaignsApi.get<ExportPayload>(`/admin/campaigns/${campaignId}/export/${kind}`);
-      downloadCsv(`${campaign.slug}-${kind}`, p.columns, p.rows);
-      return p.rows.length;
+      const payload = await campaignsApi.get<ExportPayload>(`/admin/campaigns/${campaignId}/export/${kind}${q}`);
+      downloadCsv(exportFileName(campaign.slug, kind, p?.tag ?? ""), payload.columns, payload.rows);
+      return payload;
     });
-    if (r.ok) {
-      toast.success(r.value === 0 ? "Relatório gerado (sem linhas ainda)." : `Relatório gerado com ${r.value} linha(s).`);
+    if (!r.ok) return;
+    setDialog(null);
+    const n = r.value.rows.length;
+    const where = p && (p.from || p.to) ? ` (${p.label})` : "";
+    toast.success(n === 0 ? `Relatório gerado${where}, sem linhas.` : `Relatório gerado com ${n} linha(s)${where}.`);
+    // O servidor devolve o período que aplicou; se pedimos um e ele não confirmou, avisamos em vez de enganar.
+    if (p && (p.from || p.to) && r.value.range === undefined) {
+      toast.warning("O servidor não confirmou o período: o arquivo pode trazer todo o período.");
     }
   };
 
@@ -44,22 +60,51 @@ export function ReportsTab({ campaignId, campaign, perms }: TabProps) {
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">Planilhas CSV que abrem no Excel (separador ponto e vírgula). Cada download fica no histórico.</p>
+      <p className="text-xs text-muted-foreground">
+        Planilhas CSV que abrem no Excel (separador ponto e vírgula). Você escolhe o período ao baixar. Cada download fica no histórico.
+      </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {visible.map((r) => (
-          <Card key={r.kind} className="rounded-3xl border">
-            <CardContent className="p-5 flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="font-semibold text-sm">{r.title}</p>
-                <p className="text-[12px] text-muted-foreground mt-0.5">{r.hint}</p>
-              </div>
-              <Button size="sm" variant="outline" className="gap-2 rounded-xl shrink-0" disabled={busy !== null} onClick={() => download(r.kind)}>
-                {busy === r.kind ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />} Baixar
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
+        {visible.map((r) => {
+          const basis = REPORT_DATE_BASIS[r.kind];
+          return (
+            <Card key={r.kind} className="rounded-3xl border">
+              <CardContent className="p-5 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-sm">{r.title}</p>
+                  <p className="text-[12px] text-muted-foreground mt-0.5">{r.hint}</p>
+                  <p className="text-[11px] text-muted-foreground/80 mt-1">
+                    {usesPeriod(r.kind) ? (basis ? `Período pela ${basis}.` : "") : "Sempre completo: não usa período."}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-2 rounded-xl shrink-0 min-h-11 sm:min-h-9"
+                  disabled={busy !== null}
+                  aria-label={`Baixar ${r.title}`}
+                  onClick={() => (usesPeriod(r.kind) ? setDialog(r) : download(r.kind, null))}
+                >
+                  {busy === r.kind && !dialog ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />} Baixar
+                </Button>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
+
+      {dialog && (
+        <ExportDialog
+          open
+          onOpenChange={(o) => !o && setDialog(null)}
+          kind={dialog.kind}
+          title={dialog.title}
+          hint={dialog.hint}
+          choice={choice}
+          onChoiceChange={setChoice}
+          busy={busy === dialog.kind}
+          onConfirm={(p) => download(dialog.kind, p)}
+        />
+      )}
     </div>
   );
 }

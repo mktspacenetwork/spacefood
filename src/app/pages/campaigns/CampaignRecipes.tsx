@@ -5,6 +5,7 @@ import { Button } from "../../components/ui/Button";
 import { Skeleton } from "../../components/ui/skeleton";
 import { RecipeCard } from "../../components/campaigns/RecipeCard";
 import { RecipeViewToggle, useRecipeView } from "../../components/campaigns/RecipeView";
+import { GalleryRecipeSheet, useRecipeSheetParam } from "../../components/campaigns/RecipeSheet";
 import { EmptyState } from "../../components/campaigns/EmptyState";
 import { ErrorState } from "../../components/campaigns/ErrorState";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
@@ -18,7 +19,7 @@ import type { RecipeListItem } from "../../lib/campaigns/types";
 type Page = { total: number; items: RecipeListItem[] };
 
 export function CampaignRecipes() {
-  const { campaign, state, slug } = useCampaignCtx();
+  const { campaign, state, slug, refresh } = useCampaignCtx();
   const { user } = useAuth();
   const [items, setItems] = useState<RecipeListItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -27,6 +28,8 @@ export function CampaignRecipes() {
   const [error, setError] = useState<string | null>(null);
   const [locked, setLocked] = useState(false);
   const [view, setView] = useRecipeView();
+  // Receita aberta na folha (guardada na URL: o "voltar" do celular fecha a folha).
+  const [openId, setOpenId] = useRecipeSheetParam();
   const inflight = useRef(false);
   const itemsRef = useRef<RecipeListItem[]>([]);
   itemsRef.current = items;
@@ -121,9 +124,10 @@ export function CampaignRecipes() {
       </div>
       <div className={view === "cards" ? "grid grid-cols-2 gap-3 sm:grid-cols-3" : "space-y-2"} data-tutorial="camp-gallery">
         {items.map((r, i) => (
-          <RecipeCard key={r.id} recipe={r} layout={view} to={`/campanhas/${slug}/receitas/${r.id}`} first={i === 0} />
+          <RecipeCard key={r.id} recipe={r} layout={view} onOpen={() => setOpenId(r.id)} first={i === 0} />
         ))}
       </div>
+      <GalleryRecipeSheet slug={slug} id={openId} onClose={() => setOpenId(null)} onChanged={refresh} />
       {error && <p role="alert" className="text-center text-xs font-medium text-destructive">{error}</p>}
       {items.length < total && (
         <div className="flex justify-center pt-1">

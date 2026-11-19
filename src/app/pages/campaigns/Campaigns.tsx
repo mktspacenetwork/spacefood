@@ -17,6 +17,17 @@ import { useAuth } from "../../context/Store";
 import type { CollabCampaignListItem } from "../../lib/campaigns/types";
 
 /**
+ * Pode cadastrar receita agora? Com o campo do servidor (`state.can_submit`) ele decide sozinho — inclusive numa
+ * campanha já "Encerrada" que está na janela de receita fora do prazo (`late_window`). Servidor antigo, sem o campo:
+ * deduz pelas datas como antes e só vale para campanha ainda em andamento.
+ */
+const canSubmitNow = (c: CollabCampaignListItem): boolean =>
+  typeof c.state.can_submit === "boolean" ? acceptsSubmission(c) : !c.ended && acceptsSubmission(c);
+
+/** Janela de receita fora do prazo (o servidor manda `late_window`; ausente = não há). */
+const inLateWindow = (c: CollabCampaignListItem): boolean => (c.state as { late_window?: boolean }).late_window === true;
+
+/**
  * Tela inicial de Campanhas:
  *   1. "Cadastrar receita" (só quando alguma campanha aceita envio agora);
  *   2. Campanhas ativas (e, separadas, as encerradas);
@@ -52,7 +63,7 @@ export function Campaigns() {
     return {
       active: all.filter((c) => !c.ended),
       ended: all.filter((c) => c.ended),
-      submittable: all.filter((c) => !c.ended && acceptsSubmission(c)),
+      submittable: all.filter(canSubmitNow),
     };
   }, [items]);
 
@@ -138,7 +149,7 @@ export function Campaigns() {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-base font-bold leading-tight text-foreground">Livro de Receitas</span>
-                    <span className="block text-xs text-muted-foreground">As receitas da plataforma, para ler e guardar.</span>
+                    <span className="block text-xs text-muted-foreground">Leia as receitas ou baixe o livro em PDF.</span>
                   </span>
                   <ChevronRight size={18} className="shrink-0 text-muted-foreground" aria-hidden="true" />
                 </Card>
@@ -171,7 +182,11 @@ export function Campaigns() {
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-bold text-foreground">{c.name}</span>
-                    {periodText(c) && <span className="block text-xs text-muted-foreground">{periodText(c)}</span>}
+                    {inLateWindow(c) ? (
+                      <span className="block text-xs text-muted-foreground">Fora do prazo: não concorre à votação</span>
+                    ) : (
+                      periodText(c) && <span className="block text-xs text-muted-foreground">{periodText(c)}</span>
+                    )}
                   </span>
                   <ChevronRight size={16} className="shrink-0 text-muted-foreground" aria-hidden="true" />
                 </button>

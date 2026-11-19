@@ -1,7 +1,8 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { LayoutGrid, List, User, UtensilsCrossed } from "lucide-react";
+import { LayoutGrid, List, User } from "lucide-react";
 import { Card } from "../ui/Card";
+import { RecipePhoto } from "./RecipePhoto";
 import { cn } from "../../lib/utils";
 import type { SubmissionStatus } from "../../lib/campaigns/types";
 
@@ -74,22 +75,15 @@ type TileProps = {
   ariaLabel: string;
 };
 
-const noPhoto = (size: number) => (
-  <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-orange-100 to-amber-100 text-orange-400 dark:from-orange-950/40 dark:to-amber-950/30">
-    <UtensilsCrossed size={size} aria-hidden="true" />
-  </div>
-);
-
 /** Receita como cartão (2 colunas no celular) ou como linha de lista (miniatura + nome + autor). */
 export function RecipeTile({ layout, title, subtitle, photoUrl, badge, to, onClick, first, ariaLabel }: TileProps) {
   const focus = "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background";
   const inner =
     layout === "cards" ? (
       <Card className="h-full overflow-hidden rounded-2xl transition-all group-active:scale-[0.98]">
-        <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
-          {photoUrl ? <img src={photoUrl} alt="" loading="lazy" className="h-full w-full object-cover" /> : noPhoto(30)}
+        <RecipePhoto src={photoUrl} variant="tile">
           {badge && <span className="absolute left-2 top-2">{badge}</span>}
-        </div>
+        </RecipePhoto>
         <div className="space-y-1 p-3">
           <p className="line-clamp-2 text-sm font-bold leading-snug text-foreground">{title}</p>
           <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
@@ -100,9 +94,7 @@ export function RecipeTile({ layout, title, subtitle, photoUrl, badge, to, onCli
       </Card>
     ) : (
       <Card className="flex items-center gap-3 rounded-2xl p-2.5 transition-all group-active:scale-[0.99]">
-        <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-muted">
-          {photoUrl ? <img src={photoUrl} alt="" loading="lazy" className="h-full w-full object-cover" /> : noPhoto(22)}
-        </div>
+        <RecipePhoto src={photoUrl} variant="row" />
         <div className="min-w-0 flex-1 space-y-0.5">
           <p className="line-clamp-2 text-sm font-bold leading-snug text-foreground">{title}</p>
           <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">

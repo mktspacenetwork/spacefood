@@ -8,8 +8,13 @@ import type { BookRecipe, RecipeBookView } from "./types";
 
 /** Marcadores de lista que as pessoas digitam à mão: "- ", "• ", "* ", "– ". */
 const BULLET = /^\s*(?:[-•*·–—▪●◦]|•)\s+/;
-/** Numeração que a pessoa já digitou: "1.", "2)", "3 -", "Passo 4:" */
-const NUMBERING = /^\s*(?:passo\s+)?\d{1,2}\s*(?:[.):\-–—])\s+/i;
+/**
+ * Numeração que a pessoa já digitou: "1.", "2)", "3 -", "Passo 4:".
+ * Com TRAVESSÃO só vale se o que vem depois NÃO começa por número: "1 - 2 colheres de açúcar" é uma faixa de
+ * quantidade (fica inteira), enquanto "1 - Misture" é numeração. "2.5 xícaras" e "30-40 minutos" nunca casam
+ * (não há espaço depois do ponto/hífen).
+ */
+const NUMBERING = /^\s*(?:passo\s+)?\d{1,2}\s*(?:[.):]\s+|[-–—]\s+(?![\s\d]))/i;
 
 function lines(text: string): string[] {
   return String(text ?? "")
