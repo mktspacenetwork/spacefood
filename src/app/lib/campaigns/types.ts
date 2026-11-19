@@ -189,6 +189,8 @@ export type AdminCampaignListItem = {
   visible_from: string | null; authorized_at: string | null; suspended_at: string | null;
   created_at: string; source_campaign_id: string | null; version: number;
   submissions: number; stages: AdminStageRow[];
+  /** Campanha EXCLUÍDA (oculta; dados, votos e auditoria ficam guardados e dá para restaurar). Só vem em `GET /admin/campaigns?deleted=1`. */
+  deleted_at?: string | null;
 };
 
 export type AdminCampaign = {
@@ -198,6 +200,8 @@ export type AdminCampaign = {
   visible_from: string | null; authorized_at: string | null; suspended_at: string | null;
   edit_locked_at: string | null; closed_at: string | null; archived_at: string | null;
   created_at: string; version: number;
+  /** Campanha EXCLUÍDA (oculta): o painel mostra o aviso e o botão Restaurar; nada nela pode ser alterado até restaurar. */
+  deleted_at?: string | null;
 };
 
 export type AdminCampaignDetail = {

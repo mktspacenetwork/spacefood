@@ -91,6 +91,9 @@ const ERR: Record<string, [number, string]> = {
   BOOK_PHOTO_INVALID: [422, "A foto enviada não é válida. Use JPG, PNG ou WebP de até 5 MB."],
   BOOK_IMMUTABLE: [409, "Esta alteração não é permitida no livro."],
   LATE_SUBMISSION: [409, "Esta receita foi enviada fora do prazo e não concorre à votação."],
+  CAMPAIGN_LIVE: [409, "Despublique ou encerre a campanha antes de excluir."],
+  CONFIRM_MISMATCH: [422, "Digite o nome da campanha para confirmar a exclusão."],
+  CAMPAIGN_DELETED: [409, "Esta campanha está excluída. Restaure-a para alterar."],
   LATE_IMMUTABLE: [409, "A marca de receita fora do prazo não pode ser alterada."],
   INVALID_RANGE: [422, "Período inválido: a data inicial deve ser anterior à data final."],
 };
@@ -184,11 +187,23 @@ async function getPerms(userId: string): Promise<Record<string, boolean>> {
   return out;
 }
 type Admin = { user: AuthUser; perms: Record<string, boolean>; actor: Record<string, unknown> };
+// Campanha EXCLUÍDA (oculta) não aceita nenhuma escrita pela API, só a restauração (o gatilho do banco só protege a linha de
+// `campaigns`; período, divulgação, público, receitas e resultado moram em outras tabelas). Leituras (GET) seguem liberadas, e
+// restaurar e duplicar passam (duplicar não altera a original).
 // deno-lint-ignore no-explicit-any
+async function assertCampaignNotDeleted(c: any) {
+  const method = c.req.method;
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return;
+  const id = c.req.param("id");
+  if (!id || !/^[0-9a-f-]{36}$/i.test(id) || /\/(restore|duplicate)\/?$/.test(c.req.path)) return;
+  const { data } = await sb.from("campaigns").select("deleted_at").eq("id", id).maybeSingle();
+  if (data?.deleted_at) throw new AppError(409, "CAMPAIGN_DELETED", ERR.CAMPAIGN_DELETED[1]);
+}
 async function requireAdmin(c: any, key: string): Promise<Admin> {
   const user = await requireUser(c);
   const perms = await getPerms(user.id);
   if (!perms.campaigns || !perms[key]) throw new AppError(403, "FORBIDDEN", "Você não tem permissão para esta ação.");
+  await assertCampaignNotDeleted(c);
   const ip = (c.req.header("x-forwarded-for") ?? "").split(",")[0].trim();
   return { user, perms, actor: { id: user.id, name: user.name, role: "admin", ip } };
 }
@@ -310,7 +325,7 @@ async function uploadTokens(uploads: { id: string; kind: string; path: string; m
 // deno-lint-ignore no-explicit-any
 type Row = Record<string, any>;
 async function getCampaignBySlug(slug: string): Promise<Row> {
-  const { data } = await sb.from("campaigns").select("*").eq("slug", slug).maybeSingle();
+  const { data } = await sb.from("campaigns").select("*").eq("slug", slug).is("deleted_at", null).maybeSingle();
   if (!data) throw new AppError(404, "CAMPAIGN_UNAVAILABLE", "Campanha indisponível.");
   return data;
 }
@@ -454,7 +469,7 @@ app.get("/campaigns/availability", async (c) => {
   runDueAnnouncements();
   const enabled = await rpc<boolean>("campaign_module_enabled", {});
   if (!enabled) return c.json({ enabled: false, hasVisible: false, book: false, campaigns: [] });
-  const { data: list } = await sb.from("campaigns").select("id,slug,features").eq("status", "authorized");
+  const { data: list } = await sb.from("campaigns").select("id,slug,features").eq("status", "authorized").is("deleted_at", null);
   const out: Row[] = [];
   for (const camp of list ?? []) {
     const st = await rpc<Row>("campaign_collab_state", { p_campaign: camp.id, p_user: user.id });
@@ -470,7 +485,7 @@ app.get("/campaigns", async (c) => {
   runDueAnnouncements();
   const enabled = await rpc<boolean>("campaign_module_enabled", {});
   if (!enabled) return c.json([]);
-  const { data: list } = await sb.from("campaigns").select("*").eq("status", "authorized").order("authorized_at", { ascending: false });
+  const { data: list } = await sb.from("campaigns").select("*").eq("status", "authorized").is("deleted_at", null).order("authorized_at", { ascending: false });
   const rows: Row[] = [];
   for (const camp of list ?? []) {
     const st = await rpc<Row>("campaign_collab_state", { p_campaign: camp.id, p_user: user.id });
@@ -706,7 +721,7 @@ app.put("/admin/module", async (c) => {
 app.get("/admin/overview", async (c) => {
   await requireAdmin(c, "campaigns");
   runDueAnnouncements();
-  const { data } = await sb.from("campaigns").select("id,status,authorized_at,visible_from,suspended_at");
+  const { data } = await sb.from("campaigns").select("id,status,authorized_at,visible_from,suspended_at").is("deleted_at", null);
   const rows = data ?? [];
   const now = Date.now();
   const counts = { total: rows.length, draft: 0, scheduled: 0, active: 0, closed: 0, with_results: 0 };
@@ -715,8 +730,9 @@ app.get("/admin/overview", async (c) => {
     else if (r.status === "authorized") { if (r.visible_from && new Date(r.visible_from).getTime() > now) counts.scheduled++; else counts.active++; }
     else if (r.status === "closed" || r.status === "archived") counts.closed++;
   }
-  const { data: res } = await sb.from("campaign_results").select("status").in("status", ["confirmed", "announced"]);
-  counts.with_results = res?.length ?? 0;
+  const liveIds = new Set(rows.map((r) => r.id));
+  const { data: res } = await sb.from("campaign_results").select("campaign_id,status").in("status", ["confirmed", "announced"]);
+  counts.with_results = (res ?? []).filter((r) => liveIds.has(r.campaign_id)).length;
   const { data: recent } = await sb.from("campaign_audit_log").select("occurred_at,actor_name,action,entity_type,campaign_id")
     .neq("entity_type", "vote").order("occurred_at", { ascending: false }).limit(10);
   return c.json({ counts, enabled: await rpc<boolean>("campaign_module_enabled", {}), recent: recent ?? [] });
@@ -724,7 +740,10 @@ app.get("/admin/overview", async (c) => {
 
 app.get("/admin/campaigns", async (c) => {
   await requireAdmin(c, "campaigns");
-  const { data } = await sb.from("campaigns").select("id,slug,name,status,visible_from,authorized_at,suspended_at,created_at,source_campaign_id,version").order("created_at", { ascending: false });
+  const onlyDeleted = c.req.query("deleted") === "1";
+  let lq = sb.from("campaigns").select("id,slug,name,status,visible_from,authorized_at,suspended_at,created_at,source_campaign_id,version,deleted_at").order("created_at", { ascending: false });
+  lq = onlyDeleted ? lq.not("deleted_at", "is", null) : lq.is("deleted_at", null);
+  const { data } = await lq;
   const rows = data ?? [];
   const ids = rows.map((r) => r.id);
   const { data: subs } = ids.length ? await sb.from("campaign_submissions").select("campaign_id,status").in("campaign_id", ids) : { data: [] };
@@ -879,6 +898,18 @@ for (const [route, fnName, key] of [
 app.delete("/admin/campaigns/:id", async (c) => {
   const a = await requireAdmin(c, "campaigns_edit");
   await rpc("campaign_delete_empty_draft", { p_actor: a.actor, p_campaign: c.req.param("id") });
+  return c.json({ ok: true });
+});
+// "Excluir campanha" = OCULTAR: nada é apagado (receitas, votos e auditoria ficam); só campanha fora do ar; confirma-se digitando o nome.
+app.post("/admin/campaigns/:id/soft-delete", async (c) => {
+  const a = await requireAdmin(c, "campaigns_edit");
+  const b = await body(c);
+  await rpc("campaign_soft_delete", { p_actor: a.actor, p_campaign: c.req.param("id"), p_confirm: typeof b.confirm === "string" ? b.confirm : "" });
+  return c.json({ ok: true });
+});
+app.post("/admin/campaigns/:id/restore", async (c) => {
+  const a = await requireAdmin(c, "campaigns_edit");
+  await rpc("campaign_restore", { p_actor: a.actor, p_campaign: c.req.param("id") });
   return c.json({ ok: true });
 });
 app.post("/admin/campaigns/:id/duplicate", async (c) => {

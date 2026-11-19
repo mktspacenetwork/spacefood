@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import {
-  ChevronDown, ChevronUp, LayoutGrid, List as ListIcon, Loader2, Megaphone, MoreHorizontal, Plus, Power, Search,
+  ChevronDown, ChevronUp, LayoutGrid, List as ListIcon, Loader2, Megaphone, MoreHorizontal, Plus, Power, Search, Trash2,
 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card, CardContent } from "../../../components/ui/Card";
@@ -19,6 +19,7 @@ import { CampaignTour, TourButton, tourKey, useTour } from "../../../components/
 import { ADMIN_TOUR_OVERVIEW } from "../../../lib/campaigns/tours-admin";
 import { useCampaignPerms } from "./useCampaignPerms";
 import { DuplicateDialog } from "./DuplicateDialog";
+import { DeletedCampaigns } from "./DeletedCampaigns";
 import { PublishDialog } from "./PublishDialog";
 import { CampaignListCard, LIST_ROW_GRID } from "./CampaignListCard";
 import type { ListView } from "./CampaignListCard";
@@ -103,6 +104,8 @@ export function AdminCampaigns() {
 
   const [view, setView] = useListView();
   const [filter, setFilter] = useState<FilterKey>("all");
+  // "Excluídas" (campanhas ocultas): só carrega a lista quando a pessoa abre o filtro.
+  const [showDeleted, setShowDeleted] = useState(false);
   const [search, setSearch] = useState("");
   const [showActivity, setShowActivity] = useState(false);
   const [moduleTarget, setModuleTarget] = useState<boolean | null>(null);
@@ -246,13 +249,13 @@ export function AdminCampaigns() {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div data-tutorial="camp-kpis" className="flex flex-wrap gap-2" role="group" aria-label="Filtrar campanhas por situação">
             {FILTERS.map((f) => {
-              const active = filter === f.key;
+              const active = !showDeleted && filter === f.key;
               return (
                 <button
                   key={f.key}
                   type="button"
                   aria-pressed={active}
-                  onClick={() => setFilter(f.key)}
+                  onClick={() => { setFilter(f.key); setShowDeleted(false); }}
                   className={cn(
                     "inline-flex h-10 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
                     active
@@ -272,6 +275,21 @@ export function AdminCampaigns() {
                 </button>
               );
             })}
+            {canEdit && (
+              <button
+                type="button"
+                aria-pressed={showDeleted}
+                onClick={() => setShowDeleted((v) => !v)}
+                className={cn(
+                  "inline-flex h-10 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
+                  showDeleted
+                    ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                    : "border-dashed border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
+                )}
+              >
+                <Trash2 size={14} aria-hidden="true" /> Excluídas
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <div className="relative min-w-0 flex-1 lg:w-64 lg:flex-none">
@@ -305,7 +323,9 @@ export function AdminCampaigns() {
 
         {/* Lista */}
         <div data-tutorial="camp-list" className="space-y-3">
-          {list.loading && !list.data ? (
+          {showDeleted ? (
+            <DeletedCampaigns search={search} canRestore={canEdit} onRestored={reloadAll} />
+          ) : list.loading && !list.data ? (
             <LoadingBox />
           ) : list.error && !list.data ? (
             <ErrorBox message={list.error} onRetry={list.reload} />

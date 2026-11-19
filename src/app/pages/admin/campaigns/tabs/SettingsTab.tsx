@@ -13,7 +13,7 @@ import type { TabProps } from "./types";
 import { Fold } from "./ui";
 import { useTabTour } from "./useTabTour";
 
-export type RiskKind = "draft" | "close" | "archive" | "delete";
+export type RiskKind = "draft" | "close" | "archive" | "delete" | "softdelete";
 
 export type SettingsTabProps = TabProps & {
   /** Seção a abrir (e rolar até ela) — info | period | danger ("schedule" também vale, como atalho antigo). */
@@ -57,6 +57,7 @@ export function SettingsTab(props: SettingsTabProps) {
   // Ações de risco: só aparecem quando valem para o estado atual e para a permissão da pessoa.
   const risk = useMemo(() => {
     const items: { kind: RiskKind; title: string; text: string; label: string; icon: React.ReactNode; destructive?: boolean; disabled?: boolean; note?: string }[] = [];
+    if (c.deleted_at) return items; // excluída: nenhuma ação de risco (o servidor bloqueia com 409 CAMPAIGN_DELETED); só Restaurar, no topo do painel
     if ((c.status === "in_review" || c.status === "authorized") && perms.campaigns_edit) {
       items.push({
         kind: "draft", title: "Voltar a rascunho", icon: <Undo2 size={14} />, label: "Voltar a rascunho",
@@ -82,8 +83,19 @@ export function SettingsTab(props: SettingsTabProps) {
         text: "Exclusão definitiva. Só é possível para rascunhos que nunca receberam nenhuma receita.",
       });
     }
+    // Excluir campanha = OCULTAR (dados, votos e histórico ficam guardados; dá para restaurar). Vale para qualquer campanha que NÃO
+    // esteja no ar; rascunho que nunca recebeu receita usa o "Excluir rascunho" definitivo acima.
+    const softDeletable =
+      (display === "draft" || display === "unpublished" || display === "closed" || display === "archived") &&
+      !(c.status === "draft" && !hasSubmissions);
+    if (softDeletable && perms.campaigns_edit) {
+      items.push({
+        kind: "softdelete", title: "Excluir campanha", icon: <Trash2 size={14} />, label: "Excluir campanha", destructive: true,
+        text: "Some das listas e do site. Receitas, votos e histórico ficam guardados e você pode restaurá-la em Campanhas › Excluídas.",
+      });
+    }
     return items;
-  }, [c.status, perms.campaigns_edit, perms.campaigns_publish, hasSubmissions]);
+  }, [c.status, c.deleted_at, display, perms.campaigns_edit, perms.campaigns_publish, hasSubmissions]);
 
   const available = useMemo(() => {
     const ids = ["info"];
@@ -118,7 +130,7 @@ export function SettingsTab(props: SettingsTabProps) {
   return (
     <div className="space-y-4">
       <Fold {...foldProps("info")} icon={<IdCard size={18} />} title="Informações" hint="O que os colaboradores leem sobre a campanha.">
-        {perms.campaigns_edit && !finished && (
+        {perms.campaigns_edit && !finished && !c.deleted_at && (
           <div className="mb-1 flex justify-end">
             <Button size="sm" variant="outline" className="gap-2 rounded-xl" onClick={() => navigate(`/admin/campaigns/${campaignId}/edit`)}>
               <Pencil size={13} /> Editar informações

@@ -40,7 +40,8 @@ export function PublishDialog({
   const [moduleEnabled, setModuleEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notify, setNotify] = useState(false);
+  // Ligado por padrão: o colaborador precisa saber que a campanha abriu. O admin pode desligar para publicar sem avisar.
+  const [notify, setNotify] = useState(true);
   const { busy, run } = useBusy();
 
   const load = useCallback(async () => {
@@ -64,7 +65,7 @@ export function PublishDialog({
 
   useEffect(() => {
     if (!open) return;
-    setNotify(false);
+    setNotify(true); // padrão ligado a cada abertura (o reset antigo para false anulava o useState(true))
     load();
   }, [open, load]);
 
@@ -142,7 +143,7 @@ export function PublishDialog({
               <span className="min-w-0">
                 <span className="block text-sm font-medium">Avisar os colaboradores agora</span>
                 <span className="mt-0.5 block text-[12px] text-muted-foreground">
-                  Envia uma notificação para {plural(eligible, "pessoa elegível", "pessoas elegíveis")}. Não dá para desfazer o envio.
+                  Envia uma notificação dentro do app para {plural(eligible, "pessoa elegível", "pessoas elegíveis")}. Não dá para desfazer o envio. Desligue para publicar sem avisar.
                 </span>
               </span>
               <Switch checked={notify} onCheckedChange={setNotify} aria-label="Avisar os colaboradores agora" className="mt-0.5" />
