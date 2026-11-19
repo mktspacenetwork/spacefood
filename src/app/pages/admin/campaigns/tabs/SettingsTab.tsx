@@ -13,7 +13,7 @@ import type { TabProps } from "./types";
 import { Fold } from "./ui";
 import { useTabTour } from "./useTabTour";
 
-export type RiskKind = "draft" | "close" | "archive" | "delete" | "softdelete";
+export type RiskKind = "draft" | "close" | "archive" | "softdelete";
 
 export type SettingsTabProps = TabProps & {
   /** Seção a abrir (e rolar até ela) — info | period | danger ("schedule" também vale, como atalho antigo). */
@@ -62,7 +62,7 @@ export function SettingsTab(props: SettingsTabProps) {
       items.push({
         kind: "draft", title: "Voltar a rascunho", icon: <Undo2 size={14} />, label: "Voltar a rascunho",
         text: "A campanha sai de exibição e volta a ser só da gestão, para ser reeditada do zero.",
-        disabled: hasSubmissions, note: hasSubmissions ? "Indisponível: já existem receitas enviadas. Use Despublicar para tirar a campanha de exibição." : undefined,
+        disabled: hasSubmissions, note: hasSubmissions ? "Indisponível: já existem receitas enviadas. Use Desativar para tirar a campanha de exibição." : undefined,
       });
     }
     if (c.status === "authorized" && perms.campaigns_publish) {
@@ -77,21 +77,15 @@ export function SettingsTab(props: SettingsTabProps) {
         text: "Tira a campanha da lista principal. Dados e histórico continuam guardados.",
       });
     }
-    if (c.status === "draft" && perms.campaigns_edit) {
-      items.push({
-        kind: "delete", title: "Excluir rascunho", icon: <Trash2 size={14} />, label: "Excluir", destructive: true,
-        text: "Exclusão definitiva. Só é possível para rascunhos que nunca receberam nenhuma receita.",
-      });
-    }
-    // Excluir campanha = OCULTAR (dados, votos e histórico ficam guardados; dá para restaurar). Vale para qualquer campanha que NÃO
-    // esteja no ar; rascunho que nunca recebeu receita usa o "Excluir rascunho" definitivo acima.
-    const softDeletable =
-      (display === "draft" || display === "unpublished" || display === "closed" || display === "archived") &&
-      !(c.status === "draft" && !hasSubmissions);
+    // Excluir campanha = OCULTAR, sempre (nunca apaga registros; dá para restaurar). Vale para qualquer campanha que NÃO esteja no ar,
+    // inclusive rascunho (com ou sem receitas).
+    const softDeletable = display === "draft" || display === "unpublished" || display === "closed" || display === "archived";
     if (softDeletable && perms.campaigns_edit) {
       items.push({
         kind: "softdelete", title: "Excluir campanha", icon: <Trash2 size={14} />, label: "Excluir campanha", destructive: true,
-        text: "Some das listas e do site. Receitas, votos e histórico ficam guardados e você pode restaurá-la em Campanhas › Excluídas.",
+        text: display === "draft"
+          ? "Some das listas e do site. Nada é apagado: você a encontra em Histórico de campanhas › Excluídas e pode restaurá-la."
+          : "Some das listas e do site. Receitas, votos e histórico ficam guardados e você pode restaurá-la em Histórico de campanhas › Excluídas.",
       });
     }
     return items;
@@ -119,7 +113,7 @@ export function SettingsTab(props: SettingsTabProps) {
   const tour = useTabTour("settings", { tourUserId, tourSignal, ready: true });
 
   const lines = c.instructions.split("\n").filter((l) => l.trim()).length;
-  const visibleText = display === "published" ? "Sim" : display === "scheduled" ? `Sim, a partir de ${fmtDateTime(c.visible_from)}` : display === "unpublished" ? "Não (despublicada)" : display === "draft" ? "Não (rascunho)" : "Não (encerrada)";
+  const visibleText = display === "published" ? "Sim" : display === "scheduled" ? `Sim, a partir de ${fmtDateTime(c.visible_from)}` : display === "unpublished" ? "Não (desativada)" : display === "draft" ? "Não (rascunho)" : "Não (encerrada)";
   const foldProps = (id: string) => ({
     anchorId: `camp-sec-${id}`,
     tutorial: `camp-sec-${id}`,

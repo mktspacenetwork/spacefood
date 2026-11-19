@@ -10,14 +10,16 @@ export type PanelTabKey = "summary" | "submissions" | "participants" | "results"
  *  - rodada 5 (v2): summary (sem card Status; atividades no fim), submissions e participants ("Fora do prazo"),
  *    results (ranking ao vivo e chave "Mostrar aos colaboradores"), reports (dashboard ao vivo e período do download),
  *    settings (três datas em sequência).
+ *  - rodada 5b (v3): summary (o interruptor agora fala em desativar/reativar e Histórico) e settings (zona de risco:
+ *    exclusão sempre lógica, em Histórico › Excluídas).
  */
 export const TAB_TOUR_VERSION: Record<PanelTabKey, number> = {
-  summary: 2,
+  summary: 3,
   submissions: 2,
   participants: 2,
   results: 2,
   reports: 2,
-  settings: 2,
+  settings: 3,
 };
 
 /**

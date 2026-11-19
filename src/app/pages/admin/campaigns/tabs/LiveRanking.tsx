@@ -15,6 +15,7 @@ import { positionLabel, rankPositions, totalVotes } from "../../../../lib/campai
 import type { AdminVote, AdminVotesPayload, TallyRow } from "../../../../lib/campaigns/types";
 import { ErrorBox, LoadingBox, ReasonDialog, SectionLabel, useBusy, useLoader } from "../shared";
 import { Fold } from "./ui";
+import { SWITCH_HIT } from "../../../../lib/campaigns/touch";
 
 const TOP = 8;
 
@@ -133,6 +134,7 @@ export function PartialRankingSwitch({
             onCheckedChange={(v) => (v ? setConfirmOpen(true) : void apply(false))}
             disabled={!canEdit || busy !== null}
             aria-label="Mostrar o ranking parcial aos colaboradores"
+            className={SWITCH_HIT}
           />
         </CardContent>
       </Card>

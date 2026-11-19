@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Button } from "../../../../components/ui/Button";
 import { Card, CardContent } from "../../../../components/ui/Card";
 import { campaignsApi } from "../../../../lib/campaigns/api";
-import { DEFAULT_PERIOD, REPORT_DATE_BASIS, downloadCsv, exportFileName, periodQuery } from "../../../../lib/campaigns/export";
+import { DEFAULT_PERIOD, REPORT_DATE_BASIS, downloadCsv, exportFileName, periodQuery, resolvePeriod } from "../../../../lib/campaigns/export";
 import type { PeriodChoice, ResolvedPeriod } from "../../../../lib/campaigns/export";
 import type { ExportPayload } from "../../../../lib/campaigns/types";
 import { Notice, useBusy } from "../shared";
@@ -95,7 +95,12 @@ export function ReportsTab({ campaignId, campaign, perms }: TabProps) {
       {dialog && (
         <ExportDialog
           open
-          onOpenChange={(o) => !o && setDialog(null)}
+          onOpenChange={(o) => {
+            if (o) return;
+            setDialog(null);
+            // período inválido (ex.: início depois do fim) não fica guardado: o botão não pode reabrir desabilitado
+            if (!resolvePeriod(choice).ok) setChoice(DEFAULT_PERIOD);
+          }}
           kind={dialog.kind}
           title={dialog.title}
           hint={dialog.hint}

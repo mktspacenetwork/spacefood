@@ -1,8 +1,8 @@
 import { createElement } from "react";
 import {
-  Megaphone, Power, BarChart3, FilePlus2, ListChecks, IdCard, Users, ClipboardCheck, ChefHat, Vote, MousePointerClick,
+  Megaphone, Power, FilePlus2, ListChecks, IdCard, Users, ClipboardCheck, ChefHat, Vote, MousePointerClick,
   LayoutList, Search, Trophy, FileDown, ShieldAlert, ListFilter, Gauge, ImagePlus, CalendarDays, ThumbsUp, Compass, BadgeCheck,
-  BookOpen, Radio,
+  BookOpen, Radio, History as HistoryIcon, ArchiveRestore,
 } from "lucide-react";
 import type { TourStep } from "../../components/campaigns/CampaignTour";
 
@@ -13,14 +13,14 @@ export const ADMIN_TOUR_OVERVIEW: TourStep[] = [
   {
     title: "Bem-vindo às Campanhas",
     description:
-      "Aqui você cria e acompanha campanhas internas, como o concurso de receitas. Esta tour mostra o caminho — e pode ser reaberta a qualquer momento em \"Ver tour\".",
+      "Aqui você cria e acompanha as campanhas em andamento, como o concurso de receitas. As concluídas, desativadas e excluídas ficam no Histórico de campanhas. Esta tour mostra o caminho — e pode ser reaberta a qualquer momento em \"Ver tour\".",
     icon: icon(Megaphone),
   },
   {
     selector: "camp-section-nav",
-    title: "Campanhas e Livro de Receitas",
+    title: "Campanhas, Livro e Histórico",
     description:
-      "As duas áreas ficam lado a lado, aqui no topo. O Livro de Receitas é um só, permanente, e agora mora nesta mesma área — a aba aparece para quem tem permissão de revisar ou publicar o livro.",
+      "As áreas ficam lado a lado, aqui no topo: Campanhas (só as ativas), Livro de Receitas e Histórico de campanhas — onde estão as concluídas, desativadas e excluídas. A aba do Livro aparece para quem tem permissão de revisar ou publicar o livro.",
     icon: icon(BookOpen),
     placement: "bottom",
   },
@@ -30,13 +30,6 @@ export const ADMIN_TOUR_OVERVIEW: TourStep[] = [
     description:
       "No menu \"⋯\" fica a chave de emergência: desligada, ninguém vê nenhuma campanha. Para controlar uma campanha só, use \"Visível para colaboradores\" no painel dela.",
     icon: icon(Power),
-    placement: "bottom",
-  },
-  {
-    selector: "camp-kpis",
-    title: "Filtre por situação",
-    description: "Rascunhos, publicadas, não publicadas e encerradas, cada uma com a sua contagem. Toque para ver só aquelas.",
-    icon: icon(BarChart3),
     placement: "bottom",
   },
   {
@@ -58,8 +51,53 @@ export const ADMIN_TOUR_OVERVIEW: TourStep[] = [
     selector: "camp-list",
     title: "Suas campanhas",
     description:
-      "Toque no nome da campanha, ou no menu \"⋯\" em \"Gerenciar\", para analisar receitas, acompanhar a votação e divulgar o resultado. No mesmo menu estão Publicar/Despublicar, Editar, Duplicar e Histórico.",
+      "Aqui ficam só as campanhas ativas: rascunhos, agendadas, no ar e as que aguardam o resultado (com votação, a campanha só é concluída depois da divulgação). Toque no nome, ou no menu \"⋯\" em \"Gerenciar\", para analisar receitas, acompanhar a votação e divulgar o resultado. No mesmo menu estão Publicar/Desativar, Editar, Duplicar e Excluir. Desativada, concluída ou excluída, a campanha vai para o Histórico de campanhas.",
     icon: icon(ListChecks),
+    placement: "top",
+  },
+];
+
+/**
+ * Histórico de campanhas (/admin/campaigns/historico). Alvos: data-tutorial="camp-history-..." (o cartão e as ações
+ * são os do primeiro item da lista; sem campanhas no histórico esses passos são pulados).
+ */
+export const ADMIN_TOUR_HISTORY: TourStep[] = [
+  {
+    title: "Histórico de campanhas",
+    description:
+      "Aqui ficam as campanhas que saíram da lista principal: concluídas, desativadas e excluídas. Nada é apagado — receitas, votos, resultados e histórico continuam consultáveis.",
+    icon: icon(HistoryIcon),
+  },
+  {
+    selector: "camp-history-categories",
+    title: "Concluídas, Desativadas e Excluídas",
+    description:
+      "Cada botão mostra a contagem. Concluída: o período acabou (com votação, só depois da divulgação do resultado) ou ela foi encerrada ou arquivada. Desativada: você a tirou do ar. Excluída: está oculta e dá para restaurar.",
+    icon: icon(ListFilter),
+    placement: "bottom",
+  },
+  {
+    selector: "camp-history-filters",
+    title: "Busque e filtre",
+    description:
+      "Busque pelo nome e filtre pela data da situação (quando foi concluída, desativada ou excluída), pela votação e pelo resultado. As contagens acompanham os filtros. No celular, os filtros ficam atrás do botão \"Filtros\".",
+    icon: icon(Search),
+    placement: "bottom",
+  },
+  {
+    selector: "camp-history-card",
+    title: "Situação, data e responsável",
+    description:
+      "Cada cartão mostra a situação, o resultado (quando há votação), as datas, quantas receitas e votos, e quando e por quem a campanha mudou de situação — ou \"automático\", quando foi pelo fim do período.",
+    icon: icon(BadgeCheck),
+    placement: "top",
+  },
+  {
+    selector: "camp-history-actions",
+    title: "O que dá para fazer",
+    description:
+      "Abrir e Relatórios consultam tudo da campanha; Duplicar cria uma cópia em rascunho. Reativar (campanhas desativadas) e Restaurar (excluídas) devolvem a campanha à lista principal, sem reabrir períodos já encerrados.",
+    icon: icon(ArchiveRestore),
     placement: "top",
   },
 ];
@@ -78,7 +116,7 @@ export const ADMIN_TOUR_WIZARD: TourStep[] = [
     selector: "camp-wiz-cover",
     title: "A capa é o banner da Home",
     description:
-      "A mesma imagem vira o banner da Home quando a campanha for publicada — e sai de lá sozinha ao despublicar ou encerrar. É uma imagem só para todos os aparelhos, como no menu Banners; confira a prévia.",
+      "A mesma imagem vira o banner da Home quando a campanha for publicada — e sai de lá sozinha ao desativar ou encerrar. É uma imagem só para todos os aparelhos, como no menu Banners; confira a prévia.",
     icon: icon(ImagePlus),
     placement: "bottom",
   },
@@ -129,7 +167,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-panel-primary",
       title: "Visível para colaboradores",
       description:
-        "No rascunho, o botão Publicar libera a campanha. Depois, este interruptor mostra e esconde: Não tira de exibição sem apagar nada; Sim volta a exibir. Salvar uma edição nunca publica sozinho.",
+        "No rascunho, o botão Publicar libera a campanha. Depois, este interruptor mostra e esconde: Não desativa (a campanha sai da lista principal e vai para o Histórico, sem apagar nada); Sim reativa, sem reabrir períodos já encerrados. Salvar uma edição nunca publica sozinho.",
       icon: icon(MousePointerClick),
       placement: "bottom",
     },
@@ -347,7 +385,7 @@ export const ADMIN_TOUR_TABS: Record<PanelTourKey, TourStep[]> = {
       selector: "camp-sec-danger",
       title: "Zona de risco",
       description:
-        "Voltar a rascunho, encerrar, arquivar e excluir rascunho. Cada ação pede confirmação, e as que mudam o destino da campanha ficam separadas do dia a dia.",
+        "Voltar a rascunho, encerrar, arquivar e excluir a campanha. Excluir nunca apaga: a campanha fica oculta em Histórico de campanhas › Excluídas e dá para restaurar. Cada ação pede confirmação, e as que mudam o destino da campanha ficam separadas do dia a dia.",
       icon: icon(ShieldAlert),
       placement: "top",
     },

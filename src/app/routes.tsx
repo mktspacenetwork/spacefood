@@ -53,6 +53,7 @@ const CampaignRanking = lazy(() => import("./pages/campaigns/CampaignRanking").t
 const CampaignResults = lazy(() => import("./pages/campaigns/CampaignResults").then(m => ({ default: m.CampaignResults })));
 const RecipeBookPage = lazy(() => import("./pages/campaigns/RecipeBookPage").then(m => ({ default: m.RecipeBookPage })));
 const AdminRecipeBook = lazy(() => import("./pages/admin/AdminRecipeBook").then(m => ({ default: m.AdminRecipeBook })));
+const CampaignHistory = lazy(() => import("./pages/admin/campaigns/CampaignHistory").then(m => ({ default: m.CampaignHistory })));
 
 // Shown briefly while an admin page chunk downloads (fast on repeat visits — cached by the browser).
 function AdminPageFallback() {
@@ -186,6 +187,8 @@ export const router = createBrowserRouter([
           { path: "recipe-book", element: <Navigate to="/admin/campaigns/livro" replace /> },
           // Precisa vir ANTES de "campaigns/:id", senão "livro" seria lido como o id de uma campanha.
           { path: "campaigns/livro", element: <WithBoundary name="Livro de Receitas"><LazyAdminPage><AdminRecipeBook /></LazyAdminPage></WithBoundary> },
+          // Histórico de campanhas (concluídas, desativadas e excluídas). Também precisa vir ANTES de "campaigns/:id".
+          { path: "campaigns/historico", element: <WithBoundary name="Histórico de campanhas"><LazyAdminPage><CampaignHistory /></LazyAdminPage></WithBoundary> },
           { path: "campaigns/new", element: <WithBoundary name="Nova campanha"><LazyAdminPage><AdminCampaignWizard /></LazyAdminPage></WithBoundary> },
           { path: "campaigns/:id/edit", element: <WithBoundary name="Editar campanha"><LazyAdminPage><AdminCampaignWizard /></LazyAdminPage></WithBoundary> },
           { path: "campaigns/:id", element: <WithBoundary name="Painel da campanha"><LazyAdminPage><AdminCampaignPanel /></LazyAdminPage></WithBoundary> },

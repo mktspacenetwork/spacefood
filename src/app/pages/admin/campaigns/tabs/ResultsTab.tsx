@@ -126,7 +126,7 @@ export function ResultsTab(props: TabProps) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Badge className={cn("border px-3 py-1 text-xs", stage.className)}>{stage.label}</Badge>
-        <Button variant="ghost" size="sm" className="gap-2 rounded-xl text-muted-foreground" onClick={() => { dash.reload(); setRefreshKey((k) => k + 1); }} disabled={dash.loading}>
+        <Button variant="ghost" size="sm" className="min-h-11 gap-2 rounded-xl text-muted-foreground sm:min-h-0" onClick={() => { dash.reload(); setRefreshKey((k) => k + 1); }} disabled={dash.loading}>
           <RefreshCw size={13} className={cn(dash.loading && "animate-spin")} /> Atualizar
         </Button>
       </div>

@@ -83,12 +83,12 @@ const MAIN_ACTION = {
   unpublish: {
     menuClass: "text-amber-700 focus:text-amber-700 dark:text-amber-300 dark:focus:text-amber-300",
     Icon: EyeOff,
-    title: "Retirar a campanha de exibição, sem apagar nada.",
+    title: "Tirar a campanha da lista principal e dos colaboradores, sem apagar nada. Ela fica em Histórico de campanhas.",
   },
   republish: {
     menuClass: "text-green-700 focus:text-green-700 dark:text-green-300 dark:focus:text-green-300",
     Icon: Eye,
-    title: "Voltar a exibir a campanha aos colaboradores.",
+    title: "Voltar a exibir a campanha aos colaboradores (períodos já encerrados não são reabertos).",
   },
 };
 
@@ -142,8 +142,8 @@ export function CampaignListCard(p: CampaignListCardProps) {
   const main: { kind: keyof typeof MAIN_ACTION; label: string; onClick: () => void } | null = !p.canPublish
     ? null
     : state === "draft" ? { kind: "publish", label: "Publicar", onClick: p.onPublish }
-    : state === "published" || state === "scheduled" ? { kind: "unpublish", label: "Despublicar", onClick: p.onUnpublish }
-    : state === "unpublished" ? { kind: "republish", label: "Republicar", onClick: p.onRepublish }
+    : state === "published" || state === "scheduled" ? { kind: "unpublish", label: "Desativar", onClick: p.onUnpublish }
+    : state === "unpublished" ? { kind: "republish", label: "Reativar", onClick: p.onRepublish }
     : null;
   const ms = main ? MAIN_ACTION[main.kind] : null;
 
@@ -151,7 +151,7 @@ export function CampaignListCard(p: CampaignListCardProps) {
     <button
       type="button"
       className={cn(
-        "text-left text-base font-semibold leading-snug text-foreground transition-colors hover:text-primary",
+        "-my-3 py-3 text-left text-base font-semibold leading-snug text-foreground transition-colors hover:text-primary",
         list ? "line-clamp-2 break-words md:truncate" : "break-words",
       )}
       title={c.name}
@@ -179,7 +179,7 @@ export function CampaignListCard(p: CampaignListCardProps) {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
-          className="h-9 w-9 shrink-0 rounded-xl"
+          className="h-11 w-11 shrink-0 rounded-xl sm:h-9 sm:w-9"
           size="icon"
           variant="outline"
           aria-label={`Ações de ${c.name}`}
@@ -225,7 +225,7 @@ export function CampaignListCard(p: CampaignListCardProps) {
               disabled={p.busy}
               className="min-h-11 cursor-pointer gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
             >
-              <Trash2 size={14} /> {c.status === "draft" && c.submissions === 0 ? "Excluir rascunho" : "Excluir campanha"}
+              <Trash2 size={14} /> Excluir campanha
             </DropdownMenuItem>
           </>
         )}

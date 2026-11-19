@@ -350,6 +350,7 @@ export function AdminLayout() {
       >
         <button
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          aria-label={isSidebarOpen ? "Recolher o menu lateral" : "Expandir o menu lateral"}
           className="absolute -right-3 top-5 h-6 w-6 bg-card border border-border rounded-full flex items-center justify-center shadow-md text-muted-foreground hover:text-primary transition-colors z-[60] cursor-pointer"
         >
           {isSidebarOpen ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
@@ -523,7 +524,7 @@ export function AdminLayout() {
 
             <div className="h-6 w-[1px] bg-border mx-1"></div>
 
-            <Button variant="ghost" size="icon" onClick={toggleTheme} className="rounded-full">
+            <Button variant="ghost" size="icon" onClick={toggleTheme} className="-mx-1 h-11 w-11 shrink-0 rounded-full sm:mx-0 sm:h-10 sm:w-10" aria-label={mounted && theme === 'dark' ? "Mudar para o tema claro" : "Mudar para o tema escuro"}>
               {mounted && theme === 'dark' ? <Moon size={18} /> : <Sun size={18} />}
             </Button>
 

@@ -453,7 +453,7 @@ export function TourButton({ onClick, className }: { onClick: () => void; classN
       onClick={onClick}
       aria-label="Ver a tour guiada desta tela"
       className={cn(
-        "inline-flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-background text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
+        "inline-flex items-center gap-1.5 h-11 sm:h-9 px-3 rounded-xl border border-border bg-background text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
         className,
       )}
     >

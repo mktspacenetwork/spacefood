@@ -12,19 +12,19 @@ import type { TabProps } from "./types";
 // ── Resumo legível do antes/depois (nunca despeja JSON cru) ──
 const FIELD: Record<string, string> = {
   status: "Situação", name: "Nome", description: "Descrição", objective: "Objetivo", instructions: "Orientações",
-  visible_from: "Visível a partir de", starts_at: "Início", ends_at: "Fim", paused: "Pausada", suspended: "Não publicada",
+  visible_from: "Visível a partir de", starts_at: "Início", ends_at: "Fim", paused: "Pausada", suspended: "Desativada",
   dish_name: "Prato", ingredients: "Ingredientes", preparation: "Modo de preparo", rejection_reason: "Justificativa",
   enabled: "Ligado", invalidated: "Invalidado", votes: "Votos", total_valid_votes: "Votos válidos", top_votes: "Votos do mais votado",
   tie: "Empate", count: "Quantidade", media_changed: "Mídia alterada", media: "Mídias", rows: "Linhas", eligible_count: "Elegíveis",
   cover_path: "Capa", audience: "Público", features: "Funcionalidades", visibility: "Visibilidade", media_limits: "Limites de mídia",
   winner: "Receita vencedora", winner_submission_id: "Receita vencedora", candidates: "Receitas empatadas", slug: "Endereço",
-  authorized_at: "Publicada em", closed_at: "Encerrada em", archived_at: "Arquivada em", suspended_at: "Despublicada em",
+  authorized_at: "Publicada em", closed_at: "Encerrada em", archived_at: "Arquivada em", suspended_at: "Desativada em",
 };
-// Mesmo vocabulário da tela: "Suspender/Retomar" viraram "Despublicar/Republicar" (o registro antigo continua legível).
+// Mesmo vocabulário da tela: "Suspender/Retomar" viraram "Desativar/Reativar" (o registro antigo continua legível).
 const ACTION_LABEL: Record<string, string> = {
   ...AUDIT_ACTION,
-  SUSPEND_CAMPAIGN: "Campanha despublicada",
-  RESUME_CAMPAIGN: "Campanha republicada",
+  SUSPEND_CAMPAIGN: "Campanha desativada",
+  RESUME_CAMPAIGN: "Campanha reativada",
 };
 const IGNORE = new Set([
   "id", "version", "updated_at", "updated_by", "created_at", "created_by", "created_by_name", "type", "edit_locked_at",

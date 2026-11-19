@@ -15,6 +15,7 @@ import { campaignsApi, errMsg } from "../../../lib/campaigns/api";
 import { fmtRange, plural } from "../../../lib/campaigns/format";
 import type { AdminCampaignDetail, PublishCheck } from "../../../lib/campaigns/types";
 import { ErrorBox, LoadingBox, Notice, useBusy, visibleCheckItems } from "./shared";
+import { SWITCH_HIT } from "../../../lib/campaigns/touch";
 
 type PublishResult = { visible_from: string; module_enabled_now: boolean; eligible_count: number };
 
@@ -146,7 +147,7 @@ export function PublishDialog({
                   Envia uma notificação dentro do app para {plural(eligible, "pessoa elegível", "pessoas elegíveis")}. Não dá para desfazer o envio. Desligue para publicar sem avisar.
                 </span>
               </span>
-              <Switch checked={notify} onCheckedChange={setNotify} aria-label="Avisar os colaboradores agora" className="mt-0.5" />
+              <Switch checked={notify} onCheckedChange={setNotify} aria-label="Avisar os colaboradores agora" className={`mt-0.5 ${SWITCH_HIT}`} />
             </label>
 
             {moduleEnabled === false && (

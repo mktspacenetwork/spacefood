@@ -193,6 +193,41 @@ export type AdminCampaignListItem = {
   deleted_at?: string | null;
 };
 
+/**
+ * HISTÓRICO DE CAMPANHAS (`GET /admin/campaigns/history`). Campanhas que NÃO aparecem mais na lista principal:
+ *  - completed = Concluídas: encerradas pelo admin (`closed`), arquivadas (`archived`) ou que chegaram ao fim normalmente
+ *    (`ended`: período acabou e, havendo votação, o resultado já foi DIVULGADO);
+ *  - disabled = Desativadas (`suspended`): retiradas de exibição pelo admin (nada é apagado; dá para reativar);
+ *  - deleted = Excluídas (`deleted`): ocultas por decisão do admin (exclusão LÓGICA; dá para restaurar).
+ * A lista principal (`GET /admin/campaigns?scope=active`) traz só as que não estão aqui (rascunhos, agendadas, publicadas e
+ * as já encerradas pelo período mas com resultado ainda por divulgar).
+ */
+export type HistoryCategory = "completed" | "disabled" | "deleted";
+export type HistoryKind = "closed" | "archived" | "ended" | "suspended" | "deleted";
+export type AdminHistoryItem = {
+  id: string; slug: string; name: string; status: CampaignStatus;
+  category: HistoryCategory; kind: HistoryKind;
+  /** Só para excluídas: como a campanha estava antes de ser excluída. */
+  prior: "closed" | "archived" | "ended" | "suspended" | "draft" | "active" | null;
+  /** Quando entrou nessa situação (ISO): encerramento, arquivamento, desativação, exclusão ou fim do período. */
+  since: string | null;
+  /** Administrador responsável pela ação; null quando foi automático (fim do período). */
+  by_name: string | null;
+  /** Justificativa gravada na ação, quando houve. */
+  reason: string | null;
+  created_at: string;
+  authorized_at: string | null;
+  stages: AdminStageRow[];
+  has_voting: boolean;
+  /** Receitas enviadas (sem as que ficaram incompletas) e votos válidos: os registros ficam guardados em qualquer situação. */
+  submissions: number;
+  votes: number;
+  result_status: ResultStatus;
+  deleted_at: string | null;
+  /** reactivate = Reativar (desativada; não reabre períodos já encerrados); restore = Restaurar (excluída); null = não se aplica. */
+  restorable: "reactivate" | "restore" | null;
+};
+
 export type AdminCampaign = {
   id: string; slug: string; type: string; name: string; description: string; objective: string; instructions: string;
   cover_path: string | null; cover_url: string | null; status: CampaignStatus;
@@ -260,7 +295,7 @@ export type PublishCheck = {
 };
 
 export type AdminOverview = {
-  counts: { total: number; draft: number; scheduled: number; active: number; closed: number; with_results: number };
+  counts: { total: number; draft: number; scheduled: number; active: number; closed: number; with_results: number; /** desativadas (não contam como ativas) */ disabled?: number };
   enabled: boolean;
   recent: { occurred_at: string; actor_name: string; action: string; entity_type: string; campaign_id: string | null }[];
 };

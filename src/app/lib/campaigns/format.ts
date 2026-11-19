@@ -85,9 +85,9 @@ export const CAMPAIGN_STATUS: Record<CampaignStatus, { label: string; className:
 
 /**
  * Estado que a gestão enxerga, em linguagem simples. Junta o `status` do banco com a suspensão e o agendamento:
- *  Rascunho · Agendada · Publicada · Não publicada · Encerrada · Arquivada.
- * "Não publicada" é a campanha que já foi publicada e foi retirada de exibição (suspensa no banco): tudo fica salvo
- * e ela pode ser republicada. "Em revisão" é tratado como Rascunho (não há revisor separado).
+ *  Rascunho · Agendada · Publicada · Desativada · Encerrada · Arquivada.
+ * "Desativada" é a campanha que já foi publicada e foi retirada de exibição (suspensa no banco): tudo fica salvo
+ * e ela pode ser reativada (períodos já encerrados não são reabertos). "Em revisão" é tratado como Rascunho (não há revisor separado).
  */
 export type DisplayState = "draft" | "scheduled" | "published" | "unpublished" | "closed" | "archived";
 
@@ -95,7 +95,7 @@ export const DISPLAY_STATE: Record<DisplayState, { label: string; hint: string; 
   draft: { label: "Rascunho", hint: "Em construção. Só a gestão vê.", className: GRAY },
   scheduled: { label: "Agendada", hint: "Aparece para os colaboradores na data marcada.", className: BLUE },
   published: { label: "Publicada", hint: "Em exibição.", className: GREEN },
-  unpublished: { label: "Não publicada", hint: "Retirada de exibição. Tudo continua salvo.", className: ORANGE },
+  unpublished: { label: "Desativada", hint: "Fora da lista principal e dos colaboradores. Tudo continua salvo.", className: ORANGE },
   closed: { label: "Encerrada", hint: "Finalizada.", className: PURPLE },
   archived: { label: "Arquivada", hint: "Fora da lista principal.", className: GRAY },
 };
@@ -177,7 +177,7 @@ export const STAGE_LABEL: Record<string, string> = {
 /** Ações do histórico, em português. */
 export const AUDIT_ACTION: Record<string, string> = {
   CREATE_CAMPAIGN: "Campanha criada", UPDATE_CAMPAIGN: "Campanha editada", SUBMIT_FOR_REVIEW: "Enviada para revisão",
-  PUBLISH_CAMPAIGN: "Campanha publicada", SUSPEND_CAMPAIGN: "Campanha suspensa", RESUME_CAMPAIGN: "Campanha retomada",
+  PUBLISH_CAMPAIGN: "Campanha publicada", SUSPEND_CAMPAIGN: "Campanha desativada", RESUME_CAMPAIGN: "Campanha reativada",
   BACK_TO_DRAFT: "Voltou a rascunho", CLOSE_CAMPAIGN: "Campanha encerrada", ARCHIVE_CAMPAIGN: "Campanha arquivada",
   DELETE_EMPTY_DRAFT: "Rascunho excluído", DUPLICATE_CAMPAIGN: "Campanha duplicada",
   SET_ELIGIBLE_USERS: "Público (lista de pessoas) alterado", SET_STAGE: "Datas da etapa alteradas", SET_PERIOD: "Período alterado",

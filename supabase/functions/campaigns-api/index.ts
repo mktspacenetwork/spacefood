@@ -92,6 +92,7 @@ const ERR: Record<string, [number, string]> = {
   BOOK_IMMUTABLE: [409, "Esta alteração não é permitida no livro."],
   LATE_SUBMISSION: [409, "Esta receita foi enviada fora do prazo e não concorre à votação."],
   CAMPAIGN_LIVE: [409, "Despublique ou encerre a campanha antes de excluir."],
+  HARD_DELETE_DISABLED: [409, "A exclusão de campanhas é lógica: use \"Excluir campanha\" (ela fica oculta e dá para restaurar)."],
   CONFIRM_MISMATCH: [422, "Digite o nome da campanha para confirmar a exclusão."],
   CAMPAIGN_DELETED: [409, "Esta campanha está excluída. Restaure-a para alterar."],
   LATE_IMMUTABLE: [409, "A marca de receita fora do prazo não pode ser alterada."],
@@ -724,9 +725,10 @@ app.get("/admin/overview", async (c) => {
   const { data } = await sb.from("campaigns").select("id,status,authorized_at,visible_from,suspended_at").is("deleted_at", null);
   const rows = data ?? [];
   const now = Date.now();
-  const counts = { total: rows.length, draft: 0, scheduled: 0, active: 0, closed: 0, with_results: 0 };
+  const counts = { total: rows.length, draft: 0, scheduled: 0, active: 0, closed: 0, with_results: 0, disabled: 0 };
   for (const r of rows) {
     if (r.status === "draft" || r.status === "in_review") counts.draft++;
+    else if (r.status === "authorized" && r.suspended_at) counts.disabled++; // desativada: não conta como ativa
     else if (r.status === "authorized") { if (r.visible_from && new Date(r.visible_from).getTime() > now) counts.scheduled++; else counts.active++; }
     else if (r.status === "closed" || r.status === "archived") counts.closed++;
   }
@@ -738,21 +740,97 @@ app.get("/admin/overview", async (c) => {
   return c.json({ counts, enabled: await rpc<boolean>("campaign_module_enabled", {}), recent: recent ?? [] });
 });
 
+// ------------------------------------------------------- histórico de campanhas ---
+// Situação da campanha para o admin, ANTES de considerar a exclusão (a exclusão é lógica e guarda "o que ela era").
+type PriorKind = "closed" | "archived" | "ended" | "suspended" | "draft" | "active";
+function priorKind(camp: Row, stages: Row[], resultStatus: string | null): PriorKind {
+  if (camp.status === "closed") return "closed";
+  if (camp.status === "archived") return "archived";
+  if (camp.status === "authorized" && camp.suspended_at) return "suspended";
+  // chegou ao fim normalmente: o período acabou e, havendo votação, o resultado já foi DIVULGADO (antes disso ela segue "ativa", em apuração)
+  if (camp.status === "authorized" && campaignEnded(camp, stages) && (!camp.features?.voting || resultStatus === "announced")) return "ended";
+  return camp.status === "draft" || camp.status === "in_review" ? "draft" : "active";
+}
+type HistoryClass = { category: "completed" | "disabled" | "deleted"; kind: PriorKind | "deleted"; prior: PriorKind | null };
+/** null = campanha ATIVA (fica na lista principal); senão, a categoria do Histórico. */
+function historyClass(camp: Row, stages: Row[], resultStatus: string | null): HistoryClass | null {
+  const prior = priorKind(camp, stages, resultStatus);
+  if (camp.deleted_at) return { category: "deleted", kind: "deleted", prior };
+  if (prior === "closed" || prior === "archived" || prior === "ended") return { category: "completed", kind: prior, prior: null };
+  if (prior === "suspended") return { category: "disabled", kind: "suspended", prior: null };
+  return null;
+}
+
 app.get("/admin/campaigns", async (c) => {
   await requireAdmin(c, "campaigns");
   const onlyDeleted = c.req.query("deleted") === "1";
-  let lq = sb.from("campaigns").select("id,slug,name,status,visible_from,authorized_at,suspended_at,created_at,source_campaign_id,version,deleted_at").order("created_at", { ascending: false });
+  const onlyActive = c.req.query("scope") === "active"; // lista principal: só as ativas (concluídas, desativadas e excluídas vão para o Histórico)
+  let lq = sb.from("campaigns").select("id,slug,name,status,features,visible_from,authorized_at,suspended_at,created_at,source_campaign_id,version,deleted_at").order("created_at", { ascending: false });
   lq = onlyDeleted ? lq.not("deleted_at", "is", null) : lq.is("deleted_at", null);
   const { data } = await lq;
-  const rows = data ?? [];
-  const ids = rows.map((r) => r.id);
-  const { data: subs } = ids.length ? await sb.from("campaign_submissions").select("campaign_id,status").in("campaign_id", ids) : { data: [] };
+  let rows = data ?? [];
+  let ids = rows.map((r) => r.id);
   const { data: stages } = ids.length ? await sb.from("campaign_stages").select("campaign_id,stage_key,starts_at,ends_at,paused").in("campaign_id", ids) : { data: [] };
-  return c.json(rows.map((r) => ({
+  if (onlyActive && ids.length) {
+    const { data: res } = await sb.from("campaign_results").select("campaign_id,status").in("campaign_id", ids);
+    rows = rows.filter((r) => !historyClass(r, (stages ?? []).filter((s) => s.campaign_id === r.id), (res ?? []).find((x) => x.campaign_id === r.id)?.status ?? null));
+    ids = rows.map((r) => r.id);
+  }
+  const { data: subs } = ids.length ? await sb.from("campaign_submissions").select("campaign_id,status").in("campaign_id", ids) : { data: [] };
+  return c.json(rows.map(({ features: _f, ...r }) => ({
     ...r,
     submissions: (subs ?? []).filter((s) => s.campaign_id === r.id && s.status !== "pending_media").length,
     stages: (stages ?? []).filter((s) => s.campaign_id === r.id),
   })));
+});
+
+// Histórico: tudo o que saiu da lista principal. NADA é apagado: receitas, votos, resultados e auditoria seguem consultáveis.
+app.get("/admin/campaigns/history", async (c) => {
+  await requireAdmin(c, "campaigns");
+  const { data } = await sb.from("campaigns").select("id,slug,name,status,features,authorized_at,suspended_at,closed_at,archived_at,created_at,deleted_at").order("created_at", { ascending: false });
+  const rows = data ?? [];
+  const ids = rows.map((r) => r.id);
+  if (!ids.length) return c.json([]);
+  const [{ data: stages }, { data: results }, { data: subs }] = await Promise.all([
+    sb.from("campaign_stages").select("campaign_id,stage_key,starts_at,ends_at,paused").in("campaign_id", ids),
+    sb.from("campaign_results").select("campaign_id,status").in("campaign_id", ids),
+    sb.from("campaign_submissions").select("campaign_id,status").in("campaign_id", ids),
+  ]);
+  const hist: { r: Row; st: Row[]; rs: string | null; cls: HistoryClass }[] = [];
+  for (const r of rows) {
+    const st = (stages ?? []).filter((s) => s.campaign_id === r.id);
+    const rs = (results ?? []).find((x) => x.campaign_id === r.id)?.status ?? null;
+    const cls = historyClass(r, st, rs);
+    if (cls) hist.push({ r, st, rs, cls });
+  }
+  const hids = hist.map((h) => h.r.id);
+  const { data: audit } = hids.length
+    ? await sb.from("campaign_audit_log").select("campaign_id,action,actor_name,occurred_at,reason")
+        .in("campaign_id", hids).in("action", ["CLOSE_CAMPAIGN", "ARCHIVE_CAMPAIGN", "SUSPEND_CAMPAIGN", "DELETE_CAMPAIGN"]).order("occurred_at", { ascending: false })
+    : { data: [] };
+  const votes: Record<string, number> = {};
+  await Promise.all(hist.filter((h) => h.r.features?.voting).map(async (h) => {
+    const { count } = await sb.from("campaign_votes").select("id", { count: "exact", head: true }).eq("campaign_id", h.r.id).is("invalidated_at", null);
+    votes[h.r.id] = count ?? 0;
+  }));
+  const ACTION: Record<string, string> = { closed: "CLOSE_CAMPAIGN", archived: "ARCHIVE_CAMPAIGN", suspended: "SUSPEND_CAMPAIGN", deleted: "DELETE_CAMPAIGN" };
+  const items = hist.map(({ r, st, rs, cls }) => {
+    const a = (audit ?? []).find((x) => x.campaign_id === r.id && x.action === ACTION[cls.kind]);
+    const keys = r.features?.voting ? ["registration", "voting"] : ["registration"];
+    const endMs = keys.map((k) => st.find((s) => s.stage_key === k)?.ends_at).filter(Boolean).map((e) => new Date(String(e)).getTime());
+    const since = cls.kind === "deleted" ? r.deleted_at : cls.kind === "closed" ? r.closed_at : cls.kind === "archived" ? r.archived_at
+      : cls.kind === "suspended" ? r.suspended_at : endMs.length ? new Date(Math.max(...endMs)).toISOString() : null;
+    return {
+      id: r.id, slug: r.slug, name: r.name, status: r.status, category: cls.category, kind: cls.kind, prior: cls.prior,
+      since: since ?? a?.occurred_at ?? null, by_name: a?.actor_name || null, reason: a?.reason ?? null,
+      created_at: r.created_at, authorized_at: r.authorized_at, stages: st, has_voting: !!r.features?.voting,
+      submissions: (subs ?? []).filter((s) => s.campaign_id === r.id && s.status !== "pending_media").length,
+      votes: votes[r.id] ?? 0, result_status: rs ?? "none", deleted_at: r.deleted_at ?? null,
+      restorable: cls.kind === "deleted" ? "restore" : cls.kind === "suspended" ? "reactivate" : null,
+    };
+  });
+  items.sort((x, y) => new Date(y.since ?? 0).getTime() - new Date(x.since ?? 0).getTime());
+  return c.json(items);
 });
 
 app.post("/admin/campaigns", async (c) => {
@@ -895,10 +973,11 @@ for (const [route, fnName, key] of [
     return c.json({ ok: true });
   });
 }
+// Exclusão DEFINITIVA desativada (decisão do usuário: a exclusão de campanha é sempre LÓGICA, nunca apaga registros).
+// Use POST /admin/campaigns/:id/soft-delete (oculta; dá para restaurar). A função do banco `campaign_delete_empty_draft` fica sem uso.
 app.delete("/admin/campaigns/:id", async (c) => {
-  const a = await requireAdmin(c, "campaigns_edit");
-  await rpc("campaign_delete_empty_draft", { p_actor: a.actor, p_campaign: c.req.param("id") });
-  return c.json({ ok: true });
+  await requireAdmin(c, "campaigns_edit");
+  throw new AppError(409, "HARD_DELETE_DISABLED", ERR.HARD_DELETE_DISABLED[1]);
 });
 // "Excluir campanha" = OCULTAR: nada é apagado (receitas, votos e auditoria ficam); só campanha fora do ar; confirma-se digitando o nome.
 app.post("/admin/campaigns/:id/soft-delete", async (c) => {

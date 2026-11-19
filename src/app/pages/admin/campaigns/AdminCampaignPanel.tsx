@@ -35,8 +35,9 @@ import { ReportsPanel } from "./tabs/ReportsPanel";
 import { SettingsTab } from "./tabs/SettingsTab";
 import type { RiskKind } from "./tabs/SettingsTab";
 import type { TabProps } from "./tabs/types";
+import { SWITCH_HIT } from "../../../lib/campaigns/touch";
 
-type Confirm = "resume" | "archive" | "draft" | "delete" | "review" | "restore" | null;
+type Confirm = "resume" | "archive" | "draft" | "review" | "restore" | null;
 type Reasoned = "suspend" | "close" | null;
 type Phase = ReturnType<typeof stageState>;
 
@@ -261,7 +262,6 @@ export function AdminCampaignPanel() {
   const phase = phaseBadge(c, display, results, regState, votState);
   const base = `/admin/campaigns/${c.id}`;
   const refreshAll = () => { detail.reload(); dashboard.reload(); };
-  const live = regState === "open" || regState === "paused" || votState === "open" || votState === "paused";
 
   const doAction = async (key: string, fn: () => Promise<unknown>, ok: string, after?: () => void) => {
     const r = await run(key, fn, ok);
@@ -272,38 +272,32 @@ export function AdminCampaignPanel() {
   const onConfirm = async () => {
     const kind = confirm;
     setConfirm(null);
-    if (kind === "resume") await doAction("resume", () => campaignsApi.post(`${base}/resume`), "Campanha republicada: voltou a aparecer para os colaboradores.");
+    if (kind === "resume") await doAction("resume", () => campaignsApi.post(`${base}/resume`), "Campanha reativada: voltou a aparecer para os colaboradores.");
     if (kind === "archive") await doAction("archive", () => campaignsApi.post(`${base}/archive`), "Campanha arquivada.");
     if (kind === "draft") await doAction("draft", () => campaignsApi.post(`${base}/return-to-draft`), "A campanha voltou a rascunho e está oculta dos colaboradores.");
     if (kind === "review") await doAction("review", () => campaignsApi.post(`${base}/submit-for-review`), "Enviada para revisão.");
-    if (kind === "restore") await doAction("restore", () => campaignsApi.post(`${base}/restore`), "Campanha restaurada: ela voltou à lista de campanhas.");
-    if (kind === "delete") {
-      const r = await run("delete", () => campaignsApi.del(`${base}`), "Rascunho excluído.");
-      if (r.ok) navigate("/admin/campaigns");
-    }
+    if (kind === "restore") await doAction("restore", () => campaignsApi.post(`${base}/restore`), "Campanha restaurada: ela voltou para a situação em que estava.");
   };
 
   const onReason = async (reason: string) => {
     const kind = reasoned;
     if (!kind) return;
     const ok = await doAction(kind, () => campaignsApi.post(`${base}/${kind}`, { reason: reason || null }),
-      kind === "suspend" ? "Campanha despublicada: saiu de exibição e continua salva." : "Campanha encerrada.");
+      kind === "suspend" ? "Campanha desativada. Ela está em Histórico de campanhas › Desativadas." : "Campanha encerrada.");
     if (ok) setReasoned(null);
   };
 
   // "Excluir campanha" = ocultar: some das listas e do site; receitas, votos e histórico ficam guardados e dá para restaurar.
   const doSoftDelete = async (confirmName: string) => {
     const r = await run("softdelete", () => campaignsApi.post(`${base}/soft-delete`, { confirm: confirmName }),
-      "Campanha excluída. Dá para restaurá-la em Campanhas › Excluídas.");
+      "Campanha excluída. Ela está em Histórico de campanhas › Excluídas.");
     if (r.ok) { setDeleteOpen(false); navigate("/admin/campaigns"); }
   };
 
-  // Menu "⋯" › Excluir: no ar → aviso para despublicar antes; rascunho sem receitas → exclusão definitiva; demais → ocultar.
+  // Menu "⋯" › Excluir é SEMPRE lógico (nunca apaga registros): no ar → aviso para desativar antes; demais, inclusive rascunho → ocultar.
   const isLive = display === "published" || display === "scheduled";
-  const emptyDraft = c.status === "draft" && !!dashboard.data && dashboard.data.submissions === 0;
   const askDelete = () => {
     if (isLive) setLiveDeleteOpen(true);
-    else if (emptyDraft) setConfirm("delete");
     else setDeleteOpen(true);
   };
   const canDeleteHere = !!perms.campaigns_edit && !isDeleted;
@@ -324,8 +318,8 @@ export function AdminCampaignPanel() {
     else if (perms.campaigns_edit && c.status === "draft") primary = { label: "Enviar para revisão", icon: <Send size={14} />, onClick: () => setConfirm("review") };
   }
 
-  // Depois de publicada, "Visível para colaboradores" (Sim/Não) é o único controle: Sim = publicada, Não = despublicada.
-  // Mesmas ações de sempre (Despublicar / Republicar); nada de segunda configuração.
+  // Depois de publicada, "Visível para colaboradores" (Sim/Não) é o único controle: Sim = publicada, Não = desativada.
+  // Mesmas ações de sempre (Desativar / Reativar); nada de segunda configuração.
   const visibilityOn = display === "published" || display === "scheduled";
   const showVisibility = !isDeleted && !!perms.campaigns_publish && (visibilityOn || display === "unpublished");
   const onVisibility = (v: boolean) => {
@@ -342,7 +336,7 @@ export function AdminCampaignPanel() {
   const summaryTop = (
     <div className="space-y-4">
       {display === "unpublished" && (
-        <Notice tone="warn">Fora de exibição: os colaboradores não veem a campanha. Receitas, votos e histórico continuam salvos.</Notice>
+        <Notice tone="warn">Campanha desativada: os colaboradores não a veem e ninguém participa ou vota. Receitas, votos e histórico continuam salvos.</Notice>
       )}
       {display === "scheduled" && (
         <Notice tone="info">Os colaboradores passam a ver esta campanha em {fmtDateTime(c.visible_from)}.</Notice>
@@ -352,12 +346,11 @@ export function AdminCampaignPanel() {
   );
 
   const CONFIRM_COPY: Record<Exclude<Confirm, null>, { title: string; description: string; label: string; destructive?: boolean }> = {
-    resume: { title: "Republicar a campanha?", description: "Ela volta a aparecer para os colaboradores elegíveis, com tudo o que já estava salvo.", label: "Republicar" },
+    resume: { title: "Reativar a campanha?", description: "A campanha volta a ficar visível. Períodos já encerrados NÃO são reabertos.", label: "Reativar" },
     archive: { title: "Arquivar a campanha?", description: "Ela sai da lista principal. Os dados e o histórico são preservados.", label: "Arquivar" },
     draft: { title: "Voltar a rascunho?", description: "A campanha deixa de ser visível para os colaboradores. Só é possível se ainda não houver receitas enviadas.", label: "Voltar a rascunho" },
     review: { title: "Enviar para revisão?", description: "Quem tem permissão de publicar poderá revisar e publicar a campanha.", label: "Enviar para revisão" },
     restore: { title: "Restaurar a campanha?", description: "Ela volta para a lista de campanhas, na mesma situação em que estava. Nada foi perdido.", label: "Restaurar" },
-    delete: { title: "Excluir este rascunho?", description: "A exclusão é definitiva. Só é possível para rascunhos sem nenhuma receita enviada.", label: "Excluir rascunho", destructive: true },
   };
 
   return (
@@ -366,10 +359,10 @@ export function AdminCampaignPanel() {
       <div className="space-y-2.5 sm:space-y-3">
         {/* Linha 1: voltar (esquerda) + Ver tour (direita, pequeno) */}
         <div className="flex items-center justify-between gap-2">
-          <button type="button" onClick={() => navigate("/admin/campaigns")} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+          <button type="button" onClick={() => navigate("/admin/campaigns")} className="inline-flex min-h-11 items-center gap-1 text-xs text-muted-foreground hover:text-foreground sm:min-h-0">
             <ArrowLeft size={12} /> Todas as campanhas
           </button>
-          <TourButton className="h-8 px-2.5 text-[11px]" onClick={() => setTourSignal((n) => n + 1)} />
+          <TourButton className="h-11 px-2.5 text-[11px] sm:h-8" onClick={() => setTourSignal((n) => n + 1)} />
         </div>
         {isDeleted && (
           <div role="status" className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950/30">
@@ -397,7 +390,7 @@ export function AdminCampaignPanel() {
             </div>
             {showVisibility && (
               <label data-tutorial="camp-panel-primary" className="flex w-fit cursor-pointer items-center gap-2.5 pt-0.5 text-sm">
-                <Switch checked={visibilityOn} onCheckedChange={onVisibility} disabled={busy !== null} aria-label="Visível para colaboradores" />
+                <Switch checked={visibilityOn} onCheckedChange={onVisibility} disabled={busy !== null} aria-label="Visível para colaboradores" className={SWITCH_HIT} />
                 <span className="font-medium text-foreground">Visível para colaboradores</span>
               </label>
             )}
@@ -408,7 +401,7 @@ export function AdminCampaignPanel() {
             {(perms.campaigns_duplicate || canDeleteHere) && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon" className="order-3 shrink-0 rounded-xl sm:order-1" aria-label="Mais ações" disabled={busy !== null}>
+                  <Button variant="outline" size="icon" className="order-3 h-11 w-11 shrink-0 rounded-xl sm:order-1 sm:h-10 sm:w-10" aria-label="Mais ações" disabled={busy !== null}>
                     {busy !== null ? <Loader2 size={16} className="animate-spin" /> : <MoreHorizontal size={16} />}
                   </Button>
                 </DropdownMenuTrigger>
@@ -423,7 +416,7 @@ export function AdminCampaignPanel() {
                         onSelect={askDelete}
                         className="min-h-11 cursor-pointer gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
                       >
-                        <Trash2 size={14} /> {emptyDraft ? "Excluir rascunho" : "Excluir campanha"}
+                        <Trash2 size={14} /> Excluir campanha
                       </DropdownMenuItem>
                     </>
                   )}
@@ -543,18 +536,19 @@ export function AdminCampaignPanel() {
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         campaignName={c.name}
+        isDraft={isDraft}
         pending={busy === "softdelete"}
         onConfirm={doSoftDelete}
       />
       <ReasonDialog
         open={reasoned !== null}
         onOpenChange={(o) => !o && setReasoned(null)}
-        title={reasoned === "close" ? "Encerrar a campanha?" : "Despublicar a campanha?"}
+        title={reasoned === "close" ? "Encerrar a campanha?" : "Desativar a campanha?"}
         description={reasoned === "close"
           ? "A campanha deixa de receber receitas e votos para todos e não pode ser reaberta (você pode duplicá-la depois). Dados e histórico são preservados."
-          : `A campanha some para os colaboradores até você republicá-la. Nada é apagado: receitas, votos e histórico continuam salvos.${live ? " Enquanto estiver não publicada, ninguém consegue enviar receitas nem votar." : ""}`}
+          : "Ela sai da lista principal e some para os colaboradores: ninguém mais participa, vota ou vê. Receitas, votos e histórico ficam guardados. Você a encontra em Histórico de campanhas › Desativadas e pode reativá-la (isso não reabre períodos já encerrados)."}
         placeholder="Motivo (opcional)"
-        confirmLabel={reasoned === "close" ? "Encerrar campanha" : "Despublicar"}
+        confirmLabel={reasoned === "close" ? "Encerrar campanha" : "Desativar"}
         destructive={reasoned === "close"}
         pending={busy === "suspend" || busy === "close"}
         onConfirm={onReason}

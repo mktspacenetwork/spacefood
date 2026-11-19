@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import {
-  ChevronDown, ChevronUp, LayoutGrid, List as ListIcon, Loader2, Megaphone, MoreHorizontal, Plus, Power, Search, Trash2,
+  ChevronDown, ChevronUp, History, LayoutGrid, List as ListIcon, Loader2, Megaphone, MoreHorizontal, Plus, Power, Search,
 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card, CardContent } from "../../../components/ui/Card";
@@ -13,42 +13,17 @@ import { cn } from "../../../lib/utils";
 import { useAuth } from "../../../context/auth-context";
 import { campaignsApi } from "../../../lib/campaigns/api";
 import { AUDIT_ACTION, campaignDisplayState, fmtDateTime } from "../../../lib/campaigns/format";
-import type { DisplayState } from "../../../lib/campaigns/format";
 import type { AdminCampaignListItem, AdminOverview, PublishCheck } from "../../../lib/campaigns/types";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../../components/campaigns/CampaignTour";
 import { ADMIN_TOUR_OVERVIEW } from "../../../lib/campaigns/tours-admin";
 import { useCampaignPerms } from "./useCampaignPerms";
 import { DuplicateDialog } from "./DuplicateDialog";
-import { DeletedCampaigns } from "./DeletedCampaigns";
 import { DeleteCampaignDialog, LiveCampaignDeleteNotice } from "./DeleteCampaignDialog";
 import { PublishDialog } from "./PublishDialog";
 import { CampaignListCard, LIST_ROW_GRID } from "./CampaignListCard";
 import type { ListView } from "./CampaignListCard";
-import { ErrorBox, LoadingBox, ReasonDialog, RestrictedBox, stageState, useBusy, useLoader } from "./shared";
+import { ErrorBox, LoadingBox, ReasonDialog, RestrictedBox, useBusy, useLoader } from "./shared";
 import { SectionNav } from "./SectionNav";
-
-// ───────────────────────────── Filtros por situação ─────────────────────────────
-
-type FilterKey = "all" | "draft" | "published" | "unpublished" | "closed";
-
-const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: "all", label: "Todas" },
-  { key: "draft", label: "Rascunhos" },
-  { key: "published", label: "Publicadas" },
-  { key: "unpublished", label: "Não publicadas" },
-  { key: "closed", label: "Encerradas" },
-];
-
-/** Cada situação pertence a um filtro; "Todas" esconde as arquivadas (só aparecem em "Encerradas"). */
-function matchesFilter(f: FilterKey, s: DisplayState): boolean {
-  switch (f) {
-    case "all": return s !== "archived";
-    case "draft": return s === "draft";
-    case "published": return s === "published" || s === "scheduled";
-    case "unpublished": return s === "unpublished";
-    case "closed": return s === "closed" || s === "archived";
-  }
-}
 
 // ───────────────────────────── Cartões ou Lista ─────────────────────────────
 
@@ -95,18 +70,17 @@ export function AdminCampaigns() {
   const { perms, loading: permsLoading, isAdmin } = useCampaignPerms();
 
   const overview = useLoader<AdminOverview>(() => campaignsApi.get("/admin/overview"), []);
-  const list = useLoader<AdminCampaignListItem[]>(() => campaignsApi.get("/admin/campaigns"), []);
+  // A tela principal mostra SÓ campanhas ATIVAS; concluídas, desativadas e excluídas ficam em "Histórico de campanhas".
+  const list = useLoader<AdminCampaignListItem[]>(() => campaignsApi.get("/admin/campaigns?scope=active"), []);
   // A tour só começa quando os alvos já estão na tela (senão os passos seriam pulados).
   const tour = useTour({
-    storageKey: tourKey("admin", user?.id, "overview"),
+    // v2 (rodada 5b): a lista mostra só campanhas ativas e há o Histórico; a tour reabre UMA vez para quem já viu a antiga.
+    storageKey: tourKey("admin", user?.id, "overview", undefined, 2),
     enabled: !permsLoading && isAdmin && !!overview.data && !!list.data,
   });
   const { busy, run } = useBusy();
 
   const [view, setView] = useListView();
-  const [filter, setFilter] = useState<FilterKey>("all");
-  // "Excluídas" (campanhas ocultas): só carrega a lista quando a pessoa abre o filtro.
-  const [showDeleted, setShowDeleted] = useState(false);
   const [search, setSearch] = useState("");
   const [showActivity, setShowActivity] = useState(false);
   const [moduleTarget, setModuleTarget] = useState<boolean | null>(null);
@@ -114,9 +88,8 @@ export function AdminCampaigns() {
   const [publishTarget, setPublishTarget] = useState<AdminCampaignListItem | null>(null);
   const [unpublishTarget, setUnpublishTarget] = useState<AdminCampaignListItem | null>(null);
   const [republishTarget, setRepublishTarget] = useState<AdminCampaignListItem | null>(null);
-  // Excluir (menu "⋯" do cartão): no ar → aviso para despublicar; rascunho sem receitas → exclusão definitiva; demais → ocultar (digitar o nome).
+  // Excluir (menu "⋯" do cartão) é SEMPRE lógico (nunca apaga registros): no ar → aviso para desativar; demais, inclusive rascunho → ocultar (digitar o nome).
   const [liveDeleteTarget, setLiveDeleteTarget] = useState<AdminCampaignListItem | null>(null);
-  const [draftDeleteTarget, setDraftDeleteTarget] = useState<AdminCampaignListItem | null>(null);
   const [softDeleteTarget, setSoftDeleteTarget] = useState<AdminCampaignListItem | null>(null);
 
   // "O que falta": mesmo checklist do diálogo Publicar, buscado só para rascunhos, uma vez a cada carga.
@@ -140,21 +113,10 @@ export function AdminCampaigns() {
     return () => { cancelled = true; };
   }, [list.data, canEdit]);
 
-  const counts = useMemo(() => {
-    const out: Record<FilterKey, number> = { all: 0, draft: 0, published: 0, unpublished: 0, closed: 0 };
-    for (const c of list.data ?? []) {
-      const s = campaignDisplayState(c);
-      (Object.keys(out) as FilterKey[]).forEach((k) => { if (matchesFilter(k, s)) out[k]++; });
-    }
-    return out;
-  }, [list.data]);
-
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return (list.data ?? []).filter(
-      (c) => matchesFilter(filter, campaignDisplayState(c)) && (!q || c.name.toLowerCase().includes(q)),
-    );
-  }, [list.data, filter, search]);
+    return (list.data ?? []).filter((c) => !q || c.name.toLowerCase().includes(q));
+  }, [list.data, search]);
 
   const reloadAll = () => { list.reload(); overview.reload(); };
 
@@ -171,30 +133,21 @@ export function AdminCampaigns() {
     const target = unpublishTarget;
     if (!target) return;
     const r = await run("unpublish", () => campaignsApi.post(`/admin/campaigns/${target.id}/suspend`, { reason: reason || null }),
-      "Campanha despublicada: os colaboradores não a veem mais. Nada foi apagado.");
+      "Campanha desativada. Ela está em Histórico de campanhas › Desativadas.");
     if (r.ok) { setUnpublishTarget(null); reloadAll(); }
   };
 
   const askDelete = (c: AdminCampaignListItem) => {
     const st = campaignDisplayState(c);
     if (st === "published" || st === "scheduled") setLiveDeleteTarget(c);
-    else if (c.status === "draft" && c.submissions === 0) setDraftDeleteTarget(c);
     else setSoftDeleteTarget(c);
-  };
-
-  const doDraftDelete = async () => {
-    const target = draftDeleteTarget;
-    setDraftDeleteTarget(null);
-    if (!target) return;
-    const r = await run("deldraft", () => campaignsApi.del(`/admin/campaigns/${target.id}`), "Rascunho excluído.");
-    if (r.ok) reloadAll();
   };
 
   const doSoftDelete = async (confirmName: string) => {
     const target = softDeleteTarget;
     if (!target) return;
     const r = await run("softdelete", () => campaignsApi.post(`/admin/campaigns/${target.id}/soft-delete`, { confirm: confirmName }),
-      "Campanha excluída. Dá para restaurá-la em Campanhas › Excluídas.");
+      "Campanha excluída. Ela está em Histórico de campanhas › Excluídas.");
     if (r.ok) { setSoftDeleteTarget(null); reloadAll(); }
   };
 
@@ -203,7 +156,7 @@ export function AdminCampaigns() {
     setRepublishTarget(null);
     if (!target) return;
     const r = await run("republish", () => campaignsApi.post(`/admin/campaigns/${target.id}/resume`),
-      "Campanha republicada: voltou a aparecer para os colaboradores.");
+      "Campanha reativada: voltou a aparecer para os colaboradores.");
     if (r.ok) reloadAll();
   };
 
@@ -216,9 +169,6 @@ export function AdminCampaigns() {
     const st = campaignDisplayState(c);
     return st === "published" || st === "scheduled";
   });
-  const unpublishOpenStages =
-    unpublishTarget &&
-    ["registration", "voting"].some((k) => stageState(unpublishTarget.stages.find((s) => s.stage_key === k)) === "open");
   const recent = overview.data?.recent.slice(0, 5) ?? [];
 
   return (
@@ -234,7 +184,7 @@ export function AdminCampaigns() {
           {perms.campaigns_publish && moduleEnabled !== null && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button data-tutorial="camp-module-menu" variant="outline" size="icon" className="rounded-xl" aria-label="Mais opções" disabled={busy !== null}>
+                <Button data-tutorial="camp-module-menu" variant="outline" size="icon" className="h-11 w-11 rounded-xl sm:h-10 sm:w-10" aria-label="Mais opções" disabled={busy !== null}>
                   {busy === "module" ? <Loader2 size={16} className="animate-spin" /> : <MoreHorizontal size={16} />}
                 </Button>
               </DropdownMenuTrigger>
@@ -273,64 +223,19 @@ export function AdminCampaigns() {
           </div>
         )}
 
-        {/* Filtros por situação (com contagem) e busca, na mesma linha em telas largas */}
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div data-tutorial="camp-kpis" className="flex flex-wrap gap-2" role="group" aria-label="Filtrar campanhas por situação">
-            {FILTERS.map((f) => {
-              const active = !showDeleted && filter === f.key;
-              return (
-                <button
-                  key={f.key}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => { setFilter(f.key); setShowDeleted(false); }}
-                  className={cn(
-                    "inline-flex h-10 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
-                    active
-                      ? "border-primary bg-primary text-primary-foreground shadow-sm"
-                      : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )}
-                >
-                  {f.label}
-                  <span
-                    className={cn(
-                      "min-w-[1.5rem] rounded-full px-1.5 py-0.5 text-center text-[11px] font-bold tabular-nums",
-                      active ? "bg-primary-foreground/20 text-primary-foreground" : counts[f.key] > 0 ? "bg-muted text-foreground" : "bg-muted text-muted-foreground/60",
-                    )}
-                  >
-                    {list.data ? counts[f.key] : "–"}
-                  </span>
-                </button>
-              );
-            })}
-            {canEdit && (
-              <button
-                type="button"
-                aria-pressed={showDeleted}
-                onClick={() => setShowDeleted((v) => !v)}
-                className={cn(
-                  "inline-flex h-10 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
-                  showDeleted
-                    ? "border-primary bg-primary text-primary-foreground shadow-sm"
-                    : "border-dashed border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-              >
-                <Trash2 size={14} aria-hidden="true" /> Excluídas
-              </button>
-            )}
+        {/* Busca e forma de exibição (cartões ou lista). A tela mostra só campanhas ativas: o resto está no Histórico. */}
+        <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1 lg:max-w-xs lg:flex-none lg:basis-72">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por nome"
+              className="pl-9 rounded-xl h-11 sm:h-10"
+              aria-label="Buscar campanha"
+            />
           </div>
-          <div className="flex items-center gap-2">
-            <div className="relative min-w-0 flex-1 lg:w-64 lg:flex-none">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar por nome"
-                className="pl-9 rounded-xl h-10"
-                aria-label="Buscar campanha"
-              />
-            </div>
-            <div data-tutorial="camp-view-toggle" className="inline-flex h-10 shrink-0 items-center rounded-xl border bg-card p-0.5" role="group" aria-label="Forma de exibição da lista">
+          <div data-tutorial="camp-view-toggle" className="inline-flex h-12 shrink-0 items-center rounded-xl border bg-card p-0.5 sm:h-10" role="group" aria-label="Forma de exibição da lista">
               {([["cards", "Cartões", LayoutGrid], ["list", "Lista", ListIcon]] as const).map(([key, label, Icon]) => (
                 <button
                   key={key}
@@ -338,7 +243,7 @@ export function AdminCampaigns() {
                   aria-pressed={view === key}
                   onClick={() => setView(key)}
                   className={cn(
-                    "inline-flex h-9 items-center gap-1.5 rounded-[10px] px-2.5 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    "inline-flex h-11 items-center gap-1.5 rounded-[10px] px-3 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-9 sm:px-2.5",
                     view === key ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-accent hover:text-foreground",
                   )}
                 >
@@ -346,14 +251,11 @@ export function AdminCampaigns() {
                 </button>
               ))}
             </div>
-          </div>
         </div>
 
         {/* Lista */}
         <div data-tutorial="camp-list" className="space-y-3">
-          {showDeleted ? (
-            <DeletedCampaigns search={search} canRestore={canEdit} onRestored={reloadAll} />
-          ) : list.loading && !list.data ? (
+          {list.loading && !list.data ? (
             <LoadingBox />
           ) : list.error && !list.data ? (
             <ErrorBox message={list.error} onRetry={list.reload} />
@@ -361,30 +263,33 @@ export function AdminCampaigns() {
             <Card className="rounded-3xl border-dashed">
               <CardContent className="p-10 text-center">
                 <Megaphone size={36} className="mx-auto mb-3 text-muted-foreground opacity-40" />
-                <p className="font-medium text-foreground">Ainda não há campanhas.</p>
+                <p className="font-medium text-foreground">Nenhuma campanha ativa no momento.</p>
                 <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
-                  O assistente leva você passo a passo (identidade, público, funcionalidades e datas) e salva como
-                  rascunho: ninguém além da gestão vê a campanha até você publicar.
+                  Campanhas concluídas, desativadas e excluídas ficam em Histórico de campanhas.
                 </p>
-                {perms.campaigns_create && (
-                  <Button className="mt-5 gap-2 rounded-xl" onClick={() => navigate("/admin/campaigns/new")}>
-                    <Plus size={16} /> Nova campanha
+                <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+                  {perms.campaigns_create && (
+                    <Button className="h-11 gap-2 rounded-xl" onClick={() => navigate("/admin/campaigns/new")}>
+                      <Plus size={16} /> Nova campanha
+                    </Button>
+                  )}
+                  <Button variant="outline" className="h-11 gap-2 rounded-xl" onClick={() => navigate("/admin/campaigns/historico")}>
+                    <History size={16} /> Ver histórico
                   </Button>
-                )}
+                </div>
               </CardContent>
             </Card>
           ) : rows.length === 0 ? (
             <Card className="rounded-3xl border-dashed">
               <CardContent className="p-10 text-center">
                 <Search size={32} className="mx-auto mb-3 text-muted-foreground opacity-40" />
-                <p className="font-medium text-muted-foreground">Nenhuma campanha encontrada com esses filtros.</p>
+                <p className="font-medium text-muted-foreground">Nenhuma campanha ativa encontrada com essa busca.</p>
                 <Button
                   variant="outline"
-                  size="sm"
-                  className="mt-4 rounded-xl"
-                  onClick={() => { setFilter("all"); setSearch(""); }}
+                  className="mt-4 h-11 rounded-xl"
+                  onClick={() => setSearch("")}
                 >
-                  Limpar filtros
+                  Limpar busca
                 </Button>
               </CardContent>
             </Card>
@@ -508,13 +413,10 @@ export function AdminCampaigns() {
       <ReasonDialog
         open={unpublishTarget !== null}
         onOpenChange={(o) => !o && setUnpublishTarget(null)}
-        title="Despublicar a campanha?"
-        description={
-          "A campanha some para os colaboradores até você republicá-la. Nada é apagado: receitas, votos e histórico continuam salvos." +
-          (unpublishOpenStages ? " Enquanto estiver não publicada, ninguém consegue enviar receitas nem votar." : "")
-        }
+        title="Desativar a campanha?"
+        description="Ela sai da lista principal e some para os colaboradores: ninguém mais participa, vota ou vê. Receitas, votos e histórico ficam guardados. Você a encontra em Histórico de campanhas › Desativadas e pode reativá-la (isso não reabre períodos já encerrados)."
         placeholder="Motivo (opcional)"
-        confirmLabel="Despublicar"
+        confirmLabel="Desativar"
         pending={busy === "unpublish"}
         onConfirm={doUnpublish}
       />
@@ -522,9 +424,9 @@ export function AdminCampaigns() {
       <ConfirmDialog
         open={republishTarget !== null}
         onOpenChange={(o) => !o && setRepublishTarget(null)}
-        title="Republicar a campanha?"
-        description="Ela volta a aparecer para os colaboradores elegíveis, com tudo o que já estava salvo."
-        confirmLabel="Republicar"
+        title="Reativar a campanha?"
+        description="A campanha volta a ficar visível. Períodos já encerrados NÃO são reabertos."
+        confirmLabel="Reativar"
         onConfirm={doRepublish}
       />
 
@@ -535,20 +437,11 @@ export function AdminCampaigns() {
         onUnpublish={() => { const t = liveDeleteTarget; setLiveDeleteTarget(null); if (t) setUnpublishTarget(t); }}
       />
 
-      <ConfirmDialog
-        open={draftDeleteTarget !== null}
-        onOpenChange={(o) => !o && setDraftDeleteTarget(null)}
-        title="Excluir este rascunho?"
-        description="A exclusão é definitiva. Só é possível para rascunhos sem nenhuma receita enviada."
-        confirmLabel="Excluir rascunho"
-        variant="destructive"
-        onConfirm={doDraftDelete}
-      />
-
       <DeleteCampaignDialog
         open={softDeleteTarget !== null}
         onOpenChange={(o) => !o && setSoftDeleteTarget(null)}
         campaignName={softDeleteTarget?.name ?? ""}
+        isDraft={!!softDeleteTarget && campaignDisplayState(softDeleteTarget) === "draft"}
         pending={busy === "softdelete"}
         onConfirm={doSoftDelete}
       />

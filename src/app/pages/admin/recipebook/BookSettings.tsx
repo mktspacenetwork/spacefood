@@ -2,6 +2,7 @@ import { Card, CardContent } from "../../../components/ui/Card";
 import { Switch } from "../../../components/ui/switch";
 import { Stat } from "../campaigns/shared";
 import type { AdminRecipeBook } from "../../../lib/campaigns/types";
+import { SWITCH_HIT } from "../../../lib/campaigns/touch";
 
 type Props = {
   data: AdminRecipeBook;
@@ -43,6 +44,7 @@ export function BookSettings({ data, canPublish, busy, onToggle }: Props) {
                 disabled={!canPublish || busy !== null}
                 onCheckedChange={(v) => onToggle(r.key, v)}
                 aria-label={r.label}
+                className={SWITCH_HIT}
               />
             </div>
           ))}

@@ -13,11 +13,13 @@ const norm = (s: string) => s.normalize("NFC").replace(/\s+/g, " ").trim().toLow
  * Só habilita o botão depois de a pessoa digitar o nome da campanha. Ao confirmar, envia o nome salvo (o servidor confere de novo).
  */
 export function DeleteCampaignDialog({
-  open, onOpenChange, campaignName, pending = false, onConfirm,
+  open, onOpenChange, campaignName, isDraft = false, pending = false, onConfirm,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   campaignName: string;
+  /** Rascunho: o texto não cita receitas, votos nem o Livro. */
+  isDraft?: boolean;
   pending?: boolean;
   onConfirm: (confirm: string) => void | Promise<void>;
 }) {
@@ -37,8 +39,9 @@ export function DeleteCampaignDialog({
         <DialogHeader>
           <DialogTitle>Excluir a campanha?</DialogTitle>
           <DialogDescription>
-            A campanha some das listas e do site. Receitas, votos e histórico ficam guardados e você pode restaurá-la. As receitas
-            aprovadas continuam no Livro de Receitas, se ele estiver publicado: remova-as por lá se quiser.
+            {isDraft
+              ? "A campanha some das listas e do site. Nada é apagado: você a encontra em Histórico de campanhas › Excluídas e pode restaurá-la."
+              : "A campanha some das listas e do site. Receitas, votos e histórico ficam guardados e você pode restaurá-la em Histórico de campanhas › Excluídas. As receitas aprovadas continuam no Livro de Receitas, se ele estiver publicado: remova-as por lá se quiser."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
@@ -74,8 +77,8 @@ export function DeleteCampaignDialog({
 }
 
 /**
- * Aviso curto ao tentar excluir uma campanha NO AR (publicada ou agendada): não dá para excluir antes de despublicar.
- * Quem pode publicar vê o botão "Despublicar" (reaproveita o fluxo existente); quem não pode só lê a explicação.
+ * Aviso curto ao tentar excluir uma campanha NO AR (publicada ou agendada): não dá para excluir antes de desativar.
+ * Quem pode publicar vê o botão "Desativar" (reaproveita o fluxo existente); quem não pode só lê a explicação.
  */
 export function LiveCampaignDeleteNotice({
   open, onOpenChange, canUnpublish, onUnpublish,
@@ -91,8 +94,8 @@ export function LiveCampaignDeleteNotice({
         <DialogHeader>
           <DialogTitle>Excluir campanha</DialogTitle>
           <DialogDescription>
-            Esta campanha está no ar. Para excluir, despublique antes.
-            {canUnpublish ? " Depois de despublicada, toque de novo em Excluir." : " Peça a quem pode publicar para despublicá-la."}
+            Esta campanha está no ar. Para excluir, desative antes.
+            {canUnpublish ? " Depois de desativada, toque de novo em Excluir." : " Peça a quem pode publicar para desativá-la."}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -101,7 +104,7 @@ export function LiveCampaignDeleteNotice({
           </Button>
           {canUnpublish && (
             <Button onClick={onUnpublish} className="h-11 rounded-xl">
-              Despublicar
+              Desativar
             </Button>
           )}
         </DialogFooter>

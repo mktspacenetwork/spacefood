@@ -27,6 +27,7 @@ import {
   EMPTY_SCHEDULE, periodPayload, sameSchedule, scheduleFromServer, validateSchedule,
 } from "../../../lib/campaigns/schedule";
 import type { SavedSchedule, ScheduleValues } from "../../../lib/campaigns/schedule";
+import { SWITCH_HIT } from "../../../lib/campaigns/touch";
 
 // ─────────────────────────────── Modelo simples ───────────────────────────────
 // O formulário só pergunta o essencial. O resto vai com valores fixos (o colaborador envia 1 foto, sem vídeo;
@@ -108,14 +109,14 @@ function BannerPreview({ url, title }: { url: string | null; title: string }) {
   const [size, setSize] = useState<"mobile" | "desktop">(() => (typeof window !== "undefined" && window.innerWidth < 768 ? "mobile" : "desktop"));
   return (
     <div className="space-y-2" aria-label="Como a capa aparece no banner da Home">
-      <div className="inline-flex h-8 items-center rounded-lg border bg-card p-0.5" role="group" aria-label="Tamanho da prévia">
+      <div className="inline-flex h-11 items-center rounded-lg border bg-card p-0.5 sm:h-8" role="group" aria-label="Tamanho da prévia">
         {([["mobile", "Celular"], ["desktop", "Computador"]] as const).map(([k, label]) => (
           <button
             key={k}
             type="button"
             aria-pressed={size === k}
             onClick={() => setSize(k)}
-            className={cn("h-7 rounded-md px-2.5 text-[11px] font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            className={cn("h-10 rounded-md px-3 text-[11px] font-semibold transition-colors sm:h-7 sm:px-2.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               size === k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent")}
           >
             {label}
@@ -154,7 +155,7 @@ function Option({
           <span className="mt-0.5 block text-[12px] text-muted-foreground">{hint}</span>
           {note && <span className="mt-1 block text-[11px] text-muted-foreground">{note}</span>}
         </span>
-        <Switch checked={checked} onCheckedChange={onChange} disabled={disabled} aria-label={title} />
+        <Switch checked={checked} onCheckedChange={onChange} disabled={disabled} aria-label={title} className={SWITCH_HIT} />
       </label>
       {children}
     </div>
@@ -417,11 +418,11 @@ export function AdminCampaignWizard() {
           <button
             type="button"
             onClick={() => navigate(isEdit ? `/admin/campaigns/${id}` : "/admin/campaigns")}
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            className="inline-flex min-h-11 items-center gap-1 text-xs text-muted-foreground hover:text-foreground sm:min-h-0"
           >
             <ArrowLeft size={12} /> Voltar
           </button>
-          <TourButton className="h-8 px-2.5 text-[11px]" onClick={tour.start} />
+          <TourButton className="h-11 px-2.5 text-[11px] sm:h-8" onClick={tour.start} />
         </div>
         <h1 className="flex items-center gap-2 text-xl font-bold text-foreground sm:text-2xl">
           <Megaphone className="h-5 w-5 shrink-0 text-primary sm:h-6 sm:w-6" />
@@ -466,7 +467,7 @@ export function AdminCampaignWizard() {
           </Field>
 
           <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen}>
-            <CollapsibleTrigger className="group inline-flex items-center gap-1.5 text-sm font-semibold text-primary focus:outline-none focus-visible:underline">
+            <CollapsibleTrigger className="group inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-primary focus:outline-none focus-visible:underline sm:min-h-0">
               Mais detalhes (opcional)
               <ChevronDown size={15} aria-hidden="true" className="transition-transform duration-200 group-data-[state=open]:rotate-180" />
             </CollapsibleTrigger>

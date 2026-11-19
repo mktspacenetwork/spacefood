@@ -169,7 +169,7 @@ export function SummaryTab(props: SummaryTabProps) {
   return (
     <div className="space-y-5">
       <div className="flex justify-end">
-        <Button variant="ghost" size="sm" className="gap-2 rounded-xl text-muted-foreground" onClick={refresh} disabled={dashboardLoading}>
+        <Button variant="ghost" size="sm" className="min-h-11 gap-2 rounded-xl text-muted-foreground sm:min-h-0" onClick={refresh} disabled={dashboardLoading}>
           <RefreshCw size={13} className={cn(dashboardLoading && "animate-spin")} /> Atualizar
         </Button>
       </div>
