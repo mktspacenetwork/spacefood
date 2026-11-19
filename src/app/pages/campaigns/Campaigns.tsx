@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { BookOpen, ChevronLeft, ChevronRight, Megaphone, PlusCircle } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, Megaphone, PlusCircle } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "../../components/ui/Button";
 import { Skeleton } from "../../components/ui/skeleton";
@@ -14,6 +14,7 @@ import { CampaignTour, TourButton, tourKey, useTour } from "../../components/cam
 import { campaignsApi, errMsg, fetchCampaignAvailability } from "../../lib/campaigns/api";
 import { LIST_TOUR } from "../../lib/campaigns/tours-collab";
 import { useAuth } from "../../context/Store";
+import { cn } from "../../lib/utils";
 import type { CollabCampaignListItem } from "../../lib/campaigns/types";
 
 /**
@@ -28,10 +29,51 @@ const canSubmitNow = (c: CollabCampaignListItem): boolean =>
 const inLateWindow = (c: CollabCampaignListItem): boolean => (c.state as { late_window?: boolean }).late_window === true;
 
 /**
+ * Campanhas encerradas: um controle discreto e recolhido (sem cartão em volta). Toque abre/fecha a lista; o conteúdo
+ * fechado fica invisível (fora da ordem de foco e do leitor de tela). Animação leve, desligada em "reduzir movimento".
+ */
+function EndedCampaigns({ items }: { items: CollabCampaignListItem[] }) {
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  return (
+    <section aria-label="Campanhas encerradas">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((o) => !o)}
+        className="flex min-h-11 w-full items-center gap-1.5 rounded-xl px-1 text-left text-sm text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      >
+        <span>Campanhas encerradas ({items.length})</span>
+        <ChevronDown
+          size={16}
+          aria-hidden="true"
+          className={cn("shrink-0 transition-transform duration-200 motion-reduce:transition-none", open && "rotate-180")}
+        />
+      </button>
+      <div
+        id={panelId}
+        className={cn(
+          "grid transition-[grid-template-rows,opacity,visibility] duration-300 ease-out motion-reduce:transition-none",
+          open ? "visible grid-rows-[1fr] opacity-100" : "invisible grid-rows-[0fr] opacity-0",
+        )}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="space-y-3 pb-1 pt-2">
+            {items.map((c) => <CampaignCard key={c.id} campaign={c} />)}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
  * Tela inicial de Campanhas:
  *   1. "Cadastrar receita" (só quando alguma campanha aceita envio agora);
- *   2. Campanhas ativas (e, separadas, as encerradas);
- *   3. Livro de Receitas (só quando o administrador publicou).
+ *   2. Campanhas ativas;
+ *   3. Livro de Receitas (só quando o administrador publicou);
+ *   4. "Campanhas encerradas (n)": controle recolhido, só se houver encerradas.
  */
 export function Campaigns() {
   const navigate = useNavigate();
@@ -134,7 +176,10 @@ export function Campaigns() {
             {noCampaigns && !book && (
               <EmptyState icon={<Megaphone size={24} aria-hidden="true" />} title="Nenhuma campanha por enquanto" description="Quando houver uma para você, ela aparece aqui." />
             )}
-            {noCampaigns && book && <p className="px-1 text-sm text-muted-foreground">Nenhuma campanha ativa agora.</p>}
+            {/* Sem campanha ativa, mas há Livro e/ou encerradas: aviso curto no lugar da lista de ativas */}
+            {active.length === 0 && !(noCampaigns && !book) && (
+              <p className="px-1 text-sm text-muted-foreground">Nenhuma campanha ativa no momento.</p>
+            )}
 
             {book && (
               <Link
@@ -156,12 +201,7 @@ export function Campaigns() {
               </Link>
             )}
 
-            {ended.length > 0 && (
-              <section className="space-y-3" aria-label="Campanhas encerradas">
-                <h2 className="px-1 text-xs font-bold uppercase tracking-wider text-muted-foreground">Encerradas</h2>
-                {ended.map((c) => <CampaignCard key={c.id} campaign={c} />)}
-              </section>
-            )}
+            {ended.length > 0 && <EndedCampaigns items={ended} />}
           </>
         )}
       </motion.div>

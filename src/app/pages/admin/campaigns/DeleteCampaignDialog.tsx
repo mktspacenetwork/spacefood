@@ -72,3 +72,40 @@ export function DeleteCampaignDialog({
     </Dialog>
   );
 }
+
+/**
+ * Aviso curto ao tentar excluir uma campanha NO AR (publicada ou agendada): não dá para excluir antes de despublicar.
+ * Quem pode publicar vê o botão "Despublicar" (reaproveita o fluxo existente); quem não pode só lê a explicação.
+ */
+export function LiveCampaignDeleteNotice({
+  open, onOpenChange, canUnpublish, onUnpublish,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  canUnpublish: boolean;
+  onUnpublish: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Excluir campanha</DialogTitle>
+          <DialogDescription>
+            Esta campanha está no ar. Para excluir, despublique antes.
+            {canUnpublish ? " Depois de despublicada, toque de novo em Excluir." : " Peça a quem pode publicar para despublicá-la."}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="h-11 rounded-xl">
+            Fechar
+          </Button>
+          {canUnpublish && (
+            <Button onClick={onUnpublish} className="h-11 rounded-xl">
+              Despublicar
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

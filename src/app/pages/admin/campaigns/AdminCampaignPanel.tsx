@@ -11,7 +11,7 @@ import { Card } from "../../../components/ui/Card";
 import { Switch } from "../../../components/ui/switch";
 import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../../components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../../../components/ui/dropdown-menu";
 import { cn } from "../../../lib/utils";
 import { useAuth } from "../../../context/auth-context";
 import { campaignsApi } from "../../../lib/campaigns/api";
@@ -26,7 +26,7 @@ import { TourButton } from "../../../components/campaigns/CampaignTour";
 import { useCampaignPerms } from "./useCampaignPerms";
 import { PublishDialog } from "./PublishDialog";
 import { DuplicateDialog } from "./DuplicateDialog";
-import { DeleteCampaignDialog } from "./DeleteCampaignDialog";
+import { DeleteCampaignDialog, LiveCampaignDeleteNotice } from "./DeleteCampaignDialog";
 import { ErrorBox, LoadingBox, Notice, ReasonDialog, RestrictedBox, stageState, useBusy, useLoader } from "./shared";
 import { SummaryTab } from "./tabs/SummaryTab";
 import { RecipesTab, recipesViews } from "./tabs/RecipesTab";
@@ -202,6 +202,7 @@ export function AdminCampaignPanel() {
   const [publishOpen, setPublishOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [liveDeleteOpen, setLiveDeleteOpen] = useState(false);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [reasoned, setReasoned] = useState<Reasoned>(null);
   // "Ver tour" (sempre visível, para qualquer perfil) sobe este contador: a aba aberta reabre a própria tour.
@@ -296,6 +297,16 @@ export function AdminCampaignPanel() {
       "Campanha excluída. Dá para restaurá-la em Campanhas › Excluídas.");
     if (r.ok) { setDeleteOpen(false); navigate("/admin/campaigns"); }
   };
+
+  // Menu "⋯" › Excluir: no ar → aviso para despublicar antes; rascunho sem receitas → exclusão definitiva; demais → ocultar.
+  const isLive = display === "published" || display === "scheduled";
+  const emptyDraft = c.status === "draft" && !!dashboard.data && dashboard.data.submissions === 0;
+  const askDelete = () => {
+    if (isLive) setLiveDeleteOpen(true);
+    else if (emptyDraft) setConfirm("delete");
+    else setDeleteOpen(true);
+  };
+  const canDeleteHere = !!perms.campaigns_edit && !isDeleted;
 
   const onRisk = (kind: RiskKind) => {
     if (kind === "close") setReasoned("close");
@@ -394,7 +405,7 @@ export function AdminCampaignPanel() {
 
           {/* Ações numa linha só: principal (ocupa o espaço) + Editar (só ícone no celular) + ⋯ */}
           <div className="flex w-full items-center gap-2 sm:w-auto">
-            {perms.campaigns_duplicate && (
+            {(perms.campaigns_duplicate || canDeleteHere) && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="icon" className="order-3 shrink-0 rounded-xl sm:order-1" aria-label="Mais ações" disabled={busy !== null}>
@@ -402,7 +413,20 @@ export function AdminCampaignPanel() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-52">
-                  <DropdownMenuItem onSelect={() => setDupOpen(true)} className="cursor-pointer gap-2"><Copy size={14} /> Duplicar campanha</DropdownMenuItem>
+                  {perms.campaigns_duplicate && (
+                    <DropdownMenuItem onSelect={() => setDupOpen(true)} className="cursor-pointer gap-2"><Copy size={14} /> Duplicar campanha</DropdownMenuItem>
+                  )}
+                  {canDeleteHere && (
+                    <>
+                      {perms.campaigns_duplicate && <DropdownMenuSeparator />}
+                      <DropdownMenuItem
+                        onSelect={askDelete}
+                        className="min-h-11 cursor-pointer gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
+                      >
+                        <Trash2 size={14} /> {emptyDraft ? "Excluir rascunho" : "Excluir campanha"}
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -508,6 +532,12 @@ export function AdminCampaignPanel() {
         confirmLabel={confirm ? CONFIRM_COPY[confirm].label : "Confirmar"}
         variant={confirm && CONFIRM_COPY[confirm].destructive ? "destructive" : "default"}
         onConfirm={onConfirm}
+      />
+      <LiveCampaignDeleteNotice
+        open={liveDeleteOpen}
+        onOpenChange={setLiveDeleteOpen}
+        canUnpublish={!!perms.campaigns_publish}
+        onUnpublish={() => { setLiveDeleteOpen(false); setReasoned("suspend"); }}
       />
       <DeleteCampaignDialog
         open={deleteOpen}

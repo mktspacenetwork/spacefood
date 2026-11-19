@@ -20,6 +20,7 @@ import { ADMIN_TOUR_OVERVIEW } from "../../../lib/campaigns/tours-admin";
 import { useCampaignPerms } from "./useCampaignPerms";
 import { DuplicateDialog } from "./DuplicateDialog";
 import { DeletedCampaigns } from "./DeletedCampaigns";
+import { DeleteCampaignDialog, LiveCampaignDeleteNotice } from "./DeleteCampaignDialog";
 import { PublishDialog } from "./PublishDialog";
 import { CampaignListCard, LIST_ROW_GRID } from "./CampaignListCard";
 import type { ListView } from "./CampaignListCard";
@@ -113,6 +114,10 @@ export function AdminCampaigns() {
   const [publishTarget, setPublishTarget] = useState<AdminCampaignListItem | null>(null);
   const [unpublishTarget, setUnpublishTarget] = useState<AdminCampaignListItem | null>(null);
   const [republishTarget, setRepublishTarget] = useState<AdminCampaignListItem | null>(null);
+  // Excluir (menu "⋯" do cartão): no ar → aviso para despublicar; rascunho sem receitas → exclusão definitiva; demais → ocultar (digitar o nome).
+  const [liveDeleteTarget, setLiveDeleteTarget] = useState<AdminCampaignListItem | null>(null);
+  const [draftDeleteTarget, setDraftDeleteTarget] = useState<AdminCampaignListItem | null>(null);
+  const [softDeleteTarget, setSoftDeleteTarget] = useState<AdminCampaignListItem | null>(null);
 
   // "O que falta": mesmo checklist do diálogo Publicar, buscado só para rascunhos, uma vez a cada carga.
   const [checks, setChecks] = useState<Record<string, PublishCheck | null>>({});
@@ -168,6 +173,29 @@ export function AdminCampaigns() {
     const r = await run("unpublish", () => campaignsApi.post(`/admin/campaigns/${target.id}/suspend`, { reason: reason || null }),
       "Campanha despublicada: os colaboradores não a veem mais. Nada foi apagado.");
     if (r.ok) { setUnpublishTarget(null); reloadAll(); }
+  };
+
+  const askDelete = (c: AdminCampaignListItem) => {
+    const st = campaignDisplayState(c);
+    if (st === "published" || st === "scheduled") setLiveDeleteTarget(c);
+    else if (c.status === "draft" && c.submissions === 0) setDraftDeleteTarget(c);
+    else setSoftDeleteTarget(c);
+  };
+
+  const doDraftDelete = async () => {
+    const target = draftDeleteTarget;
+    setDraftDeleteTarget(null);
+    if (!target) return;
+    const r = await run("deldraft", () => campaignsApi.del(`/admin/campaigns/${target.id}`), "Rascunho excluído.");
+    if (r.ok) reloadAll();
+  };
+
+  const doSoftDelete = async (confirmName: string) => {
+    const target = softDeleteTarget;
+    if (!target) return;
+    const r = await run("softdelete", () => campaignsApi.post(`/admin/campaigns/${target.id}/soft-delete`, { confirm: confirmName }),
+      "Campanha excluída. Dá para restaurá-la em Campanhas › Excluídas.");
+    if (r.ok) { setSoftDeleteTarget(null); reloadAll(); }
   };
 
   const doRepublish = async () => {
@@ -384,6 +412,7 @@ export function AdminCampaigns() {
                   canEdit={canEdit}
                   canPublish={!!perms.campaigns_publish}
                   canDuplicate={!!perms.campaigns_duplicate}
+                  canDelete={canEdit}
                   busy={busy !== null}
                   onOpen={() => navigate(`/admin/campaigns/${c.id}`)}
                   onEdit={() => navigate(`/admin/campaigns/${c.id}/edit`)}
@@ -392,6 +421,7 @@ export function AdminCampaigns() {
                   onUnpublish={() => setUnpublishTarget(c)}
                   onRepublish={() => setRepublishTarget(c)}
                   onDuplicate={() => setDupTarget(c)}
+                  onDelete={() => askDelete(c)}
                 />
               ))}
             </div>
@@ -496,6 +526,31 @@ export function AdminCampaigns() {
         description="Ela volta a aparecer para os colaboradores elegíveis, com tudo o que já estava salvo."
         confirmLabel="Republicar"
         onConfirm={doRepublish}
+      />
+
+      <LiveCampaignDeleteNotice
+        open={liveDeleteTarget !== null}
+        onOpenChange={(o) => !o && setLiveDeleteTarget(null)}
+        canUnpublish={!!perms.campaigns_publish}
+        onUnpublish={() => { const t = liveDeleteTarget; setLiveDeleteTarget(null); if (t) setUnpublishTarget(t); }}
+      />
+
+      <ConfirmDialog
+        open={draftDeleteTarget !== null}
+        onOpenChange={(o) => !o && setDraftDeleteTarget(null)}
+        title="Excluir este rascunho?"
+        description="A exclusão é definitiva. Só é possível para rascunhos sem nenhuma receita enviada."
+        confirmLabel="Excluir rascunho"
+        variant="destructive"
+        onConfirm={doDraftDelete}
+      />
+
+      <DeleteCampaignDialog
+        open={softDeleteTarget !== null}
+        onOpenChange={(o) => !o && setSoftDeleteTarget(null)}
+        campaignName={softDeleteTarget?.name ?? ""}
+        pending={busy === "softdelete"}
+        onConfirm={doSoftDelete}
       />
 
       {dupTarget && (

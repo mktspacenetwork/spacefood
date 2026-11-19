@@ -1,5 +1,5 @@
 import {
-  CheckCircle2, Copy, Eye, EyeOff, History as HistoryIcon, MoreHorizontal, Pencil, Rocket, Settings2,
+  CheckCircle2, Copy, Eye, EyeOff, History as HistoryIcon, MoreHorizontal, Pencil, Rocket, Settings2, Trash2,
 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card, CardContent } from "../../../components/ui/Card";
@@ -104,6 +104,8 @@ export type CampaignListCardProps = {
   canEdit: boolean;
   canPublish: boolean;
   canDuplicate: boolean;
+  /** Pode excluir (permissão `campaigns_edit`). O que acontece ao tocar depende da situação (ver AdminCampaigns). */
+  canDelete: boolean;
   busy: boolean;
   onOpen: () => void;
   onEdit: () => void;
@@ -112,6 +114,7 @@ export type CampaignListCardProps = {
   onUnpublish: () => void;
   onRepublish: () => void;
   onDuplicate: () => void;
+  onDelete: () => void;
 };
 
 export function CampaignListCard(p: CampaignListCardProps) {
@@ -214,6 +217,18 @@ export function CampaignListCard(p: CampaignListCardProps) {
         <DropdownMenuItem onSelect={p.onHistory} className="cursor-pointer gap-2">
           <HistoryIcon size={14} /> Histórico
         </DropdownMenuItem>
+        {p.canDelete && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={p.onDelete}
+              disabled={p.busy}
+              className="min-h-11 cursor-pointer gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
+            >
+              <Trash2 size={14} /> {c.status === "draft" && c.submissions === 0 ? "Excluir rascunho" : "Excluir campanha"}
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
