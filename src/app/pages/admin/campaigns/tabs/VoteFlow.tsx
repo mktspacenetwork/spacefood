@@ -11,7 +11,7 @@ import { Textarea } from "../../../../components/ui/textarea";
 import { cn } from "../../../../lib/utils";
 import { campaignsApi } from "../../../../lib/campaigns/api";
 import { RESULT_STAGE, fmtDateTime, fmtDayTime, plural } from "../../../../lib/campaigns/format";
-import type { AdminResultsPayload, AdminSubmissionDetail, TallyRow } from "../../../../lib/campaigns/types";
+import type { AdminResultsPayload, AdminSubmissionDetail, AdminSubmissionRow, TallyRow } from "../../../../lib/campaigns/types";
 import { ErrorBox, LoadingBox, Notice, SectionLabel, useBusy, useLoader } from "../shared";
 import type { TabProps } from "./types";
 
@@ -40,6 +40,15 @@ export function ResultView({
   const tally: TallyRow[] = res.data?.tally ?? [];
   const status = r?.status ?? "none";
   const winnerId = r?.winner_submission_id ?? null;
+
+  // Receitas FORA DO PRAZO ainda sem análise: depois da divulgação ninguém analisa mais; o diálogo "Divulgar" avisa quantas há.
+  const latePending = useLoader<number>(
+    () => (announceOpen && perms.campaigns_review
+      ? campaignsApi.get<AdminSubmissionRow[]>(`${base}/submissions?status=pending`).then((rows) => rows.filter((s) => s.is_late).length)
+      : Promise.resolve(0)),
+    [campaignId, announceOpen, perms.campaigns_review],
+  );
+  const latePendingCount = latePending.data ?? 0;
 
   // Foto do vencedor (só para quem pode analisar receitas; sem a permissão, o cartão fica sem foto).
   const winnerSub = useLoader<AdminSubmissionDetail | null>(
@@ -263,7 +272,7 @@ export function ResultView({
         open={announceOpen}
         onOpenChange={setAnnounceOpen}
         title="Divulgar o resultado agora?"
-        description={`Os colaboradores passam a ver o ganhador e quem participou recebe um aviso.${autoFuture ? " A divulgação automática deixa de ser necessária." : ""} A divulgação não pode ser desfeita.`}
+        description={`Os colaboradores passam a ver o ganhador e quem participou recebe um aviso.${autoFuture ? " A divulgação automática deixa de ser necessária." : ""}${latePendingCount > 0 ? ` Há ${plural(latePendingCount, "receita fora do prazo ainda sem análise", "receitas fora do prazo ainda sem análise")}: depois da divulgação não será mais possível analisá-las.` : ""} A divulgação não pode ser desfeita.`}
         confirmLabel="Divulgar agora"
         variant="destructive"
         onConfirm={announce}

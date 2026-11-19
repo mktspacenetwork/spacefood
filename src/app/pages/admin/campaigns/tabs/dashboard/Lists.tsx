@@ -32,7 +32,8 @@ export function Funnel({ data, campaign }: { data: AdminAnalytics; campaign: Adm
                 <span className="min-w-0 truncate font-medium">{s.label}</span>
                 <span className="shrink-0 tabular-nums text-muted-foreground">
                   <b className="text-foreground">{s.value}</b>
-                  {s.key !== "eligible" && t.eligible > 0 && <> · {pct}%</>}
+                  {/* receitas podem passar de elegíveis (várias por pessoa): nesse caso só a contagem, sem % acima de 100 */}
+                  {s.key !== "eligible" && t.eligible > 0 && s.value <= t.eligible && <> · {pct}%</>}
                 </span>
               </div>
               <div className="h-3 w-full overflow-hidden rounded-full bg-muted" aria-hidden="true">

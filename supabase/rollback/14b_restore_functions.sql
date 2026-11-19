@@ -372,8 +372,6 @@ begin
   if not found then perform public.campaign_raise('SUBMISSION_NOT_FOUND'); end if;
   if s.status = 'pending_media' then perform public.campaign_raise('SUBMISSION_INCOMPLETE'); end if;
 
-  -- Receita aprovada que já recebeu votos válidos não pode ser reprovada: os votos sumiriam da
-  -- contagem e quem votou não teria como votar de novo. (Para isso, invalide os votos antes.)
   if p_decision = 'reject' and s.status = 'approved' then
     perform 1 from public.campaign_votes where submission_id = p_submission and invalidated_at is null;
     if found then perform public.campaign_raise('HAS_VOTES'); end if;

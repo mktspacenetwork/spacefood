@@ -85,6 +85,11 @@ export function PublishDialog({
 
   const eligible = check?.eligible_count ?? 0;
   const reg = detail?.stages.find((s) => s.stage_key === "registration");
+  const vot = detail?.stages.find((s) => s.stage_key === "voting");
+  const hasVoting = !!detail?.campaign.features.voting;
+  // Campanha antiga (votação na mesma janela da participação) fica numa linha só; com datas próprias, uma linha por etapa.
+  const t = (v: string | null | undefined) => (v ? new Date(v).getTime() : null);
+  const sameWindow = hasVoting && t(vot?.starts_at) === t(reg?.starts_at) && t(vot?.ends_at) === t(reg?.ends_at);
 
   return (
     <Dialog open={open} onOpenChange={(v) => busy !== "publish" && onOpenChange(v)}>
@@ -108,8 +113,9 @@ export function PublishDialog({
               <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] text-muted-foreground">
                 <span className="inline-flex items-center gap-1.5">
                   <CalendarDays size={13} aria-hidden="true" />
-                  {detail?.campaign.features.voting ? "Participação e votação " : ""}{fmtRange(reg?.starts_at, reg?.ends_at)}
+                  {hasVoting ? (sameWindow ? "Participação e votação " : "Participação ") : ""}{fmtRange(reg?.starts_at, reg?.ends_at)}
                 </span>
+                {hasVoting && !sameWindow && <span>Votação {fmtRange(vot?.starts_at, vot?.ends_at)}</span>}
                 <span>{plural(eligible, "pessoa elegível", "pessoas elegíveis")}</span>
               </p>
             </div>
