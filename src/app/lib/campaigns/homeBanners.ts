@@ -21,7 +21,19 @@ export type HomeCampaignBanner = {
   buttonText?: string;
   alt?: string;
   objectPosition?: string;
+  /**
+   * Marca o slide de campanha: o carrossel o desenha na MESMA caixa e com a MESMA regra de imagem dos banners comuns
+   * (`object-cover`, posição padrão) e acrescenta o botão de envio (`cta`).
+   */
+  campaign: true;
+  /**
+   * Botão "Envie sua receita": só existe enquanto a campanha aceita envio NO PRAZO (servidor: `can_submit` verdadeiro e
+   * fora da janela de atraso). Quando a votação começa, o prazo acaba ou o limite de receitas é atingido, some sozinho.
+   */
+  cta?: { label: string; link: string };
 };
+
+const CTA_LABEL = "Envie sua receita";
 
 const TTL_MS = 60_000;
 const TIMEOUT_MS = 3_000;
@@ -48,22 +60,40 @@ function shorten(text: string, max: number): string {
   return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
 }
 
+/**
+ * Chamada "Envie sua receita" do slide. Segue o servidor: `state.can_submit === true` e fora da janela de atraso
+ * (`late_window`, que NÃO conta). Como a lista fica em cache por 60 s, confere também as datas da participação para
+ * nunca mostrar o botão depois do prazo. Limite de receitas atingido ou votação aberta → o servidor manda `can_submit`
+ * falso e o botão não aparece.
+ */
+function submitCta(c: CollabCampaignListItem): HomeCampaignBanner["cta"] {
+  const s = c.state as CollabCampaignListItem["state"] & { late_window?: boolean };
+  if (s.can_submit !== true || s.late_window === true) return undefined;
+  const reg = (c.stages ?? []).find((st) => st.key === "registration");
+  const now = Date.now();
+  if (reg?.starts_at && new Date(reg.starts_at).getTime() > now) return undefined;
+  if (reg?.ends_at && new Date(reg.ends_at).getTime() <= now) return undefined;
+  return { label: CTA_LABEL, link: `/campanhas/${c.slug}/enviar` };
+}
+
 function toBanner(c: CollabCampaignListItem, i: number): HomeCampaignBanner {
+  const cta = submitCta(c);
   const base: HomeCampaignBanner = {
     id: `campaign-${c.id}`,
     link: `/campanhas/${c.slug}`,
     active: true,
     order: -100 + i, // campanhas na frente dos banners comuns
     alt: c.name,
-    // sem `objectPosition`: o slide usa o recorte padrão dos banners ("center right"), igual ao menu Banners
+    campaign: true, // mesma caixa e regra de imagem dos banners comuns; só acrescenta o botão de envio
+    cta,
   };
-  if (c.cover_url) return { ...base, imageUrl: c.cover_url }; // imagem pura, como os banners só de imagem
-  // Sem capa: texto sobre o laranja do site (mesmo padrão do banner padrão).
+  if (c.cover_url) return { ...base, imageUrl: c.cover_url };
+  // Sem capa: texto sobre o laranja do site (mesmo padrão do banner padrão). Com o botão de envio, o "Ver campanha" some.
   return {
     ...base,
     title: c.name,
     description: shorten(c.description, 90) || undefined,
-    buttonText: "Ver campanha",
+    buttonText: cta ? undefined : "Ver campanha",
     backgroundColor: "#FF5A1F",
     textColor: "#FFFFFF",
   };

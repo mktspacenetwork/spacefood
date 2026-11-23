@@ -11,6 +11,7 @@ import { Skeleton } from "../../components/ui/skeleton";
 import type { PhotoDraft } from "../../components/campaigns/PhotoPicker";
 import { PhotoSet, newPhotoUid } from "../../components/campaigns/PhotoSet";
 import { ErrorState } from "../../components/campaigns/ErrorState";
+import { VOTING_LOCKED_MSG, votingLocked } from "../../components/campaigns/RecipeSheet";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
 import { submissionsCount, submissionsMax } from "../../components/campaigns/campaignInfo";
 import { useCampaignCtx } from "./CampaignLayout";
@@ -27,7 +28,7 @@ type CreateResp = { submission_id: string; status: string; uploads: UploadTicket
 type UpdateResp = { changed: boolean; status: string; uploads: UploadTicket[] };
 type MediaKind = "main_photo" | "photo";
 
-const BLOCKING_CODES = ["EDIT_LOCKED", "REGISTRATION_CLOSED", "REGISTRATION_PAUSED", "CAMPAIGN_UNAVAILABLE", "NOT_ELIGIBLE", "SUBMISSION_LIMIT"];
+const BLOCKING_CODES = ["EDIT_LOCKED", "REGISTRATION_CLOSED", "REGISTRATION_PAUSED", "CAMPAIGN_UNAVAILABLE", "NOT_ELIGIBLE", "SUBMISSION_LIMIT", "VOTING_LOCKED"];
 const TITLE_MIN = 3;
 const TITLE_MAX = 120;
 const STORY_MAX = MAX_STORY_TEXT; // "História e memória afetiva" (um único campo de texto, opcional)
@@ -159,6 +160,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
         .sort((a, b) => (a.kind === "main_photo" ? 0 : 1) - (b.kind === "main_photo" ? 0 : 1));
       const drafts: PhotoDraft[] = rows.map((m) => ({
         uid: newPhotoUid(), previewUrl: m.url, mime: m.mime, size: m.size, serverId: m.id, serverStatus: "ready", progress: 0, kind: m.kind as MediaKind,
+        web: m.web ?? undefined,
       }));
       const ids = rows.map((m) => m.id);
       if (s.status === "pending_media") {
@@ -194,6 +196,8 @@ function SubmitForm({ editId }: { editId: string | null }) {
   // Janela de "fora do prazo": participação encerrada, mas o servidor ainda aceita envios (a receita não concorre à votação).
   // Servidor antigo não manda `late_window`: fica falso e a tela se comporta como sempre.
   const lateWindow = !!state.late_window;
+  // A votação já começou e a participação não está aberta (nem em janela de atraso): nada de enviar nem editar.
+  const lockedByVoting = votingLocked(state);
 
   const blockReason = (): string | null => {
     if (blockedMsg) return blockedMsg;
@@ -204,12 +208,14 @@ function SubmitForm({ editId }: { editId: string | null }) {
       // Na janela de atraso, só a receita enviada fora do prazo (e ainda não aprovada) pode ser editada.
       const allowed = lateWindow
         ? recipeLate && recipeStatus !== "approved"
-        : multi ? regOpen && recipeStatus !== "approved" : !!state.can_edit;
+        : multi ? regOpen && state.can_edit !== false && recipeStatus !== "approved" : !!state.can_edit;
       if (allowed) return null;
       if (recipeStatus === "approved") return "Esta receita já foi aprovada e não pode mais ser alterada.";
+      if (lockedByVoting) return VOTING_LOCKED_MSG;
       if (lateWindow) return "O prazo de participação terminou e esta receita não pode mais ser alterada.";
       return "Não dá para editar a receita agora.";
     }
+    if (lockedByVoting) return VOTING_LOCKED_MSG;
     if (multi && count >= max) return `Você chegou ao limite de ${max} receitas nesta campanha.`;
     if (state.can_submit ?? state.registration === "open") return null;
     switch (state.registration) {
@@ -251,7 +257,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
     const errs = validate(fields);
     const hasErr = Object.keys(errs).length > 0;
     // Só conta a foto que já tem arquivo ou já está no servidor (a "pendente" sem arquivo precisa ser escolhida de novo).
-    const usable = cur.filter((p) => p.file || p.serverStatus === "ready");
+    const usable = cur.filter((p) => p.file || p.webImport || p.serverStatus === "ready");
     const photoMissing = needPhoto && usable.length === 0;
     const needRepick = needPhoto && cur.some((p) => p.serverStatus === "pending" && !p.file);
     if (hasErr || photoMissing || needRepick) {
@@ -277,13 +283,17 @@ function SubmitForm({ editId }: { editId: string | null }) {
       const photoList = needPhoto ? cur : [];
       const keepIds = new Set(photoList.filter((p) => p.serverId).map((p) => p.serverId as string));
       const remove = needPhoto ? serverPhotoIds.filter((id) => !keepIds.has(id)) : [];
-      const newOnes = photoList.filter((p) => p.file && !p.serverId);
+      // Novas: do aparelho (precisam de upload) e da internet (a mídia já está guardada no servidor, vai na lista como foi devolvida).
+      const newOnes = photoList.filter((p) => (p.file || p.webImport) && !p.serverId);
+      const fileNew = newOnes.filter((p) => !p.webImport);
       let mainTaken = photoList.some((p) => p.kind === "main_photo");
       const addMeta = newOnes.map((p) => {
+        if (p.webImport) return { ...p.webImport };
         const kind: MediaKind = p.kind ?? (mainTaken ? "photo" : "main_photo");
         if (kind === "main_photo") mainTaken = true;
         return { kind, mime: p.mime, size: p.size };
       });
+      let respStatus: string | undefined;
       let tickets: UploadTicket[] = [];
       let changed = false;
 
@@ -293,6 +303,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
         createdNow = true;
         changed = true;
         tickets = r.uploads ?? [];
+        respStatus = r.status;
         setSubmissionId(sid);
       } else {
         const textChanged = !original || (Object.keys(f) as (keyof Fields)[]).some((k) => f[k] !== original[k]);
@@ -300,20 +311,32 @@ function SubmitForm({ editId }: { editId: string | null }) {
           const r = await campaignsApi.put<UpdateResp>(`${api}/submission/${sid}`, { ...f, remove, add: addMeta });
           tickets = r.uploads ?? [];
           changed = r.changed;
+          respStatus = r.status;
         }
       }
-      if (addMeta.length > 0 && tickets.length !== addMeta.length) {
+      // Um ticket por foto DO APARELHO (a da internet não precisa de upload). Se o servidor mandar um por foto nova, aceita também.
+      const ticketOwners = tickets.length === fileNew.length ? fileNew : newOnes;
+      if (tickets.length !== ticketOwners.length) {
         throw new Error("O servidor não preparou o envio das fotos. Tente de novo.");
       }
       setOriginal(f);
-      // Cada foto nova recebe o seu ticket (mesma ordem em que foram pedidos).
+      // Cada foto nova recebe o seu ticket (mesma ordem em que foram pedidos). A da internet fica pronta (sem upload).
       const ticketOf = new Map<string, UploadTicket>();
+      const webIds: string[] = [];
       newOnes.forEach((p, i) => {
-        const t = tickets[i];
-        ticketOf.set(p.uid as string, t);
-        patchPhoto(p.uid, { serverId: t.id, serverStatus: "pending", kind: addMeta[i].kind });
+        const at = ticketOwners.indexOf(p);
+        const t = at >= 0 ? tickets[at] : undefined;
+        const kind = addMeta[i].kind as MediaKind;
+        if (p.webImport) {
+          const wid = t?.id ?? p.webImport.id;
+          webIds.push(wid);
+          patchPhoto(p.uid, { serverId: wid, serverStatus: "ready", kind });
+          return;
+        }
+        ticketOf.set(p.uid as string, t as UploadTicket);
+        patchPhoto(p.uid, { serverId: (t as UploadTicket).id, serverStatus: "pending", kind });
       });
-      setServerPhotoIds([...keepIds, ...tickets.map((t) => t.id)]);
+      setServerPhotoIds([...keepIds, ...tickets.map((t) => t.id).filter((id) => !webIds.includes(id)), ...webIds]);
 
       // Quais fotos ainda precisam subir? (novas agora, ou falha de uma tentativa anterior)
       const toUpload = photoList.filter((p) => p.file && !p.uploaded && (!p.serverId || p.serverStatus === "pending"));
@@ -354,7 +377,8 @@ function SubmitForm({ editId }: { editId: string | null }) {
         }
       }
 
-      const needsFinalize = toUpload.length > 0 || addMeta.length > 0 || photoList.some((p) => p.serverStatus === "pending");
+      // Finaliza quando há foto do aparelho, foto pendente ou o servidor deixou a receita aguardando mídia (só da internet: depende dele).
+      const needsFinalize = toUpload.length > 0 || fileNew.length > 0 || photoList.some((p) => p.serverStatus === "pending") || respStatus === "pending_media";
       if (needsFinalize) {
         setPhase("finalizing");
         try {
@@ -412,7 +436,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
         setSrvErrs(marked);
         setShowErrors(true);
       }
-      const msg = code === "SUBMISSION_LIMIT" ? `Você chegou ao limite de ${max} receitas nesta campanha.` : errMsg(e);
+      const msg = code === "SUBMISSION_LIMIT" ? `Você chegou ao limite de ${max} receitas nesta campanha.` : code === "VOTING_LOCKED" ? VOTING_LOCKED_MSG : errMsg(e);
       if (BLOCKING_CODES.includes(code)) {
         setBlockedMsg(msg); // a tela já mostra o aviso de bloqueio; não repete em outra caixa
         void refresh();
@@ -621,7 +645,9 @@ function SubmitForm({ editId }: { editId: string | null }) {
       </Card>
 
       {needPhoto && (
-        <div data-tutorial="camp-photo" className="space-y-2">
+        // No celular a barra de envio (abaixo) sobe 4,75rem sobre o fim deste bloco (o <main> da página é um contêiner de rolagem e o
+        // "sticky" não prende na tela): a folga evita que ela cubra "Pesquisar na internet" e os botões das fotos.
+        <div data-tutorial="camp-photo" className="space-y-2 max-md:pb-16">
           <p className={LABEL}>Fotos da receita <span className="font-medium normal-case tracking-normal">(1 a {MAX_PHOTOS_PER_RECIPE})</span></p>
           <PhotoSet
             photos={photos}
@@ -630,6 +656,7 @@ function SubmitForm({ editId }: { editId: string | null }) {
             maxMb={maxMb}
             disabled={disabled}
             showError={showErrors}
+            searchSlug={slug}
           />
         </div>
       )}

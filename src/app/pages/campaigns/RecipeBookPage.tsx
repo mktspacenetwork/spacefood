@@ -47,7 +47,7 @@ export function RecipeBookPage() {
       setBook(await campaignsApi.get<RecipeBookView>("/recipe-book"));
     } catch (e) {
       if (e instanceof CampaignApiError && (e.code === "BOOK_UNAVAILABLE" || e.status === 404 || e.status === 403)) setUnavailable(true);
-      else setError(errMsg(e, "Não foi possível carregar o livro."));
+      else setError(errMsg(e, "Não foi possível carregar o Livro de Receitas."));
     }
   }, []);
 
@@ -93,7 +93,7 @@ export function RecipeBookPage() {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-4 pt-1">
         {header}
-        <EmptyState icon={<BookOpen size={22} aria-hidden="true" />} title="O livro ainda não está disponível" description="Quando for publicado, ele aparece aqui." />
+        <EmptyState icon={<BookOpen size={22} aria-hidden="true" />} title="O Livro de Receitas ainda não está disponível" description="Quando for publicado, ele aparece aqui." />
       </div>
     );
   }
@@ -113,7 +113,7 @@ export function RecipeBookPage() {
         <div className="grid grid-cols-2 gap-3">
           {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="aspect-[4/5] w-full rounded-2xl" />)}
         </div>
-        <span className="sr-only">Carregando o livro…</span>
+        <span className="sr-only">Carregando o Livro de Receitas…</span>
       </div>
     );
   }
@@ -123,7 +123,7 @@ export function RecipeBookPage() {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-4 pt-1">
         {header}
-        <EmptyState icon={<BookOpen size={22} aria-hidden="true" />} title="O livro ainda não tem receitas" description="As receitas aprovadas aparecem aqui." />
+        <EmptyState icon={<BookOpen size={22} aria-hidden="true" />} title="O Livro de Receitas ainda não tem receitas" description="As receitas aprovadas aparecem aqui." />
       </div>
     );
   }
@@ -133,7 +133,7 @@ export function RecipeBookPage() {
       <div className="mx-auto w-full max-w-2xl space-y-4 pt-1">
         {header}
         <div className="flex items-center justify-between gap-2">
-          <p className="min-w-0 flex-1 text-xs text-muted-foreground">Quer guardar? Baixe o livro inteiro em PDF.</p>
+          <p className="min-w-0 flex-1 text-xs text-muted-foreground">Quer guardar? Baixe o Livro de Receitas inteiro em PDF.</p>
           <BookPdfButton pdf={pdf} className="shrink-0" />
         </div>
         <BookPdfStatus pdf={pdf} />
@@ -146,23 +146,23 @@ export function RecipeBookPage() {
     <div className="mx-auto w-full max-w-2xl space-y-4 pt-1">
       {header}
 
-      <p className="px-1 text-sm text-muted-foreground">Leia as receitas aqui ou baixe o livro inteiro em PDF, com as fotos.</p>
+      <p className="px-1 text-sm text-muted-foreground">Leia as receitas aqui ou baixe o Livro de Receitas inteiro em PDF, com as fotos.</p>
 
       <div className="flex flex-wrap items-center gap-2">
         <Button className="h-11 flex-1 gap-2 rounded-xl sm:flex-none" onClick={() => setMode({ kind: "read", page: 0 })}>
-          <BookOpen size={16} aria-hidden="true" /> Ler o livro
+          <BookOpen size={16} aria-hidden="true" /> Ler o Livro de Receitas
         </Button>
         <BookPdfButton pdf={pdf} className="flex-1 sm:flex-none" />
         <p className="w-full text-xs text-muted-foreground sm:ml-auto sm:w-auto">{plural(total, "receita", "receitas")}</p>
       </div>
 
       <BookPdfStatus pdf={pdf} />
-      {pdf.state.kind === "idle" && total > BIG_BOOK && <p className="text-xs text-muted-foreground">Livro grande: o PDF é montado no seu aparelho e pode levar alguns minutos.</p>}
+      {pdf.state.kind === "idle" && total > BIG_BOOK && <p className="text-xs text-muted-foreground">Livro de Receitas grande: o PDF é montado no seu aparelho e pode levar alguns minutos.</p>}
 
       <div className="flex items-center gap-2">
         <div className="relative min-w-0 flex-1">
           <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar receita" aria-label="Buscar receita no livro" className="h-11 rounded-xl pl-9" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar receita" aria-label="Buscar receita no Livro de Receitas" className="h-11 rounded-xl pl-9" />
         </div>
         <div className="flex shrink-0 overflow-hidden rounded-xl border border-border" role="group" aria-label="Forma de exibir">
           {([["cards", LayoutGrid, "Cartões"], ["list", ListIcon, "Lista"]] as const).map(([k, Icon, label]) => (

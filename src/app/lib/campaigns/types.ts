@@ -133,7 +133,40 @@ export type CollabCampaignListItem = PublicCampaign & {
   ended: boolean;
 };
 
-export type MediaItem = { id: string; kind: "main_photo" | "photo" | "video"; mime: string; size: number; url: string };
+/**
+ * Crédito de uma foto que veio da INTERNET (busca no cadastro da receita). Hoje só Wikimedia Commons (licenças livres: o crédito é a
+ * condição de uso). Aparece como "Foto da internet" discreta, com autor, licença e link da fonte.
+ */
+export type WebPhotoCredit = {
+  provider: "wikimedia";
+  title: string;
+  creator: string;
+  /** Nome curto da licença (ex.: "CC BY-SA 4.0", "CC0", "Public domain"). */
+  license: string;
+  license_url: string | null;
+  /** Página da imagem na fonte (para o crédito). */
+  source_url: string;
+};
+export type MediaItem = {
+  id: string; kind: "main_photo" | "photo" | "video"; mime: string; size: number; url: string;
+  /** Presente só quando a foto veio da internet. */
+  web?: WebPhotoCredit | null;
+};
+
+/** `GET /campaigns/:slug/image-search?q=` — resultados da busca (miniaturas); nada é copiado até o colaborador escolher uma. */
+export type WebImageResult = {
+  id: string; thumb_url: string; width: number; height: number;
+  title: string; creator: string; license: string; license_url: string | null; source_url: string;
+};
+export type WebImageSearch = { provider: "wikimedia"; query: string; items: WebImageResult[]; note: string };
+/**
+ * `POST /campaigns/:slug/media/from-web { id, kind }` — o servidor busca a imagem escolhida na fonte, confere o formato e o tamanho,
+ * guarda uma cópia no armazenamento da campanha e devolve o mesmo formato de mídia já enviada, com o crédito. O front inclui esse item
+ * na lista `media` do envio/edição da receita, exatamente como uma foto enviada do aparelho.
+ */
+export type WebImportedMedia = {
+  id: string; kind: "main_photo" | "photo"; path: string; mime: string; size: number; web: WebPhotoCredit;
+};
 
 export type RecipeListItem = {
   id: string; dish_name: string; author: string; description: string; photo_url: string | null;
@@ -384,7 +417,7 @@ export type AdminResultsPayload = { results: AdminResults | null; tally: TallyRo
 
 // ───────────────────────── Livro de Receitas ─────────────────────────
 
-export type BookPhoto = { url: string; kind: "main_photo" | "photo" };
+export type BookPhoto = { url: string; kind: "main_photo" | "photo"; /** Foto da internet: crédito obrigatório (Livro e PDF). */ web?: WebPhotoCredit | null };
 
 export type BookRecipe = {
   id: string;
@@ -402,7 +435,12 @@ export type BookRecipe = {
 
 // ─────────────── Livro de Receitas: UM acervo único e permanente ───────────────
 
-export type RecipeBookSettings = { published: boolean; auto_include: boolean };
+/**
+ * Público do Livro de Receitas (rodada 6): todos os colaboradores OU só pessoas específicas. Padrão = todos. Quem não está no público
+ * não vê o livro (nem o card nem a rota: resposta idêntica a "livro não publicado").
+ */
+export type BookAudience = { mode: "all" | "users"; user_ids: string[] };
+export type RecipeBookSettings = { published: boolean; auto_include: boolean; audience?: BookAudience };
 
 /** Linha da lista do administrador. `ref` é opaco ("s:<receita>" ou "e:<entrada>") e identifica a receita em todas as ações. */
 export type AdminBookItem = {

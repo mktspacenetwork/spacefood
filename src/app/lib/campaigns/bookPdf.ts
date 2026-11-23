@@ -1,7 +1,7 @@
 import type { PDFDocument, PDFFont, PDFImage, PDFPage } from "pdf-lib";
 import { describeBook, ingredientItems, preparationSteps, recipeCampaign, storyParagraphs } from "./bookText";
 import type { AnyBook } from "./bookText";
-import type { BookRecipe } from "./types";
+import type { BookRecipe, WebPhotoCredit } from "./types";
 
 /**
  * Gerador do PDF do Livro de Receitas — roda no NAVEGADOR de quem baixa (nada é guardado no servidor e o PDF
@@ -32,6 +32,8 @@ const TOP = 46;
 const BOTTOM = 56;
 const CW = W - MX * 2;
 const MAX_PHOTO_SIDE = 1400;
+const CAPTION_SIZE = 6.5;
+const CAPTION_LH = 9.5;
 
 const C = {
   orange: [0.918, 0.345, 0.047] as const,
@@ -183,13 +185,19 @@ class Flow {
     this.y -= 11;
   }
 
-  image(img: PDFImage, maxW: number, maxH: number, x = MX): void {
+  /** Foto centralizada; `caption` (linhas já limpas) vai logo abaixo, em letra miúda (crédito de foto da internet). */
+  image(img: PDFImage, maxW: number, maxH: number, x = MX, caption?: string[]): void {
     const r = Math.min(maxW / img.width, maxH / img.height);
     const w = img.width * r;
     const h = img.height * r;
-    this.ensure(h + 8);
+    const capH = caption && caption.length ? caption.length * CAPTION_LH + 3 : 0;
+    this.ensure(h + 8 + capH);
     this.page.drawImage(img, { x: x + (maxW - w) / 2, y: this.y - h, width: w, height: h });
-    this.y -= h + 10;
+    this.y -= h + (capH ? 3 : 10);
+    if (capH) {
+      this.lines(caption as string[], { font: this.ctx.f.sans, size: CAPTION_SIZE, lh: CAPTION_LH, color: C.muted });
+      this.y -= 7;
+    }
   }
 }
 
@@ -268,8 +276,19 @@ function drawToc(ctx: Ctx, pages: PDFPage[], recipes: BookRecipe[], startPages: 
   });
 }
 
+/** Foto já embutida no PDF, com o crédito quando veio da internet (a legenda sai sob a foto). */
+type PdfPhoto = { img: PDFImage; web?: WebPhotoCredit | null };
+
+/** "Foto: autor · licença · Wikimedia Commons" (a fonte tem de aparecer: é a condição de uso das licenças livres). */
+function creditText(ctx: Ctx, web: WebPhotoCredit, prefix = "Foto"): string {
+  const author = ctx.clean(web.creator ?? "").trim();
+  const license = ctx.clean(web.license ?? "").trim();
+  const parts = [author, license, "Wikimedia Commons"].filter(Boolean);
+  return `${prefix}: ${parts.join(" · ")}`;
+}
+
 /** Desenha a receita (sempre abrindo página nova) e devolve o número da página em que ela começa. */
-async function drawRecipe(ctx: Ctx, flow: Flow, r: BookRecipe, index: number, total: number, photos: PDFImage[]): Promise<number> {
+async function drawRecipe(ctx: Ctx, flow: Flow, r: BookRecipe, index: number, total: number, photos: PdfPhoto[]): Promise<number> {
   const { lib, f, clean } = ctx;
   flow.newPage();
   const startPage = ctx.doc.getPageCount();
@@ -289,8 +308,12 @@ async function drawRecipe(ctx: Ctx, flow: Flow, r: BookRecipe, index: number, to
   }
   flow.gap(12);
 
-  if (photos[0]) flow.image(photos[0], CW, 225);
-  const extra = photos.slice(1, 3);
+  if (photos[0]) {
+    const w0 = photos[0].web;
+    flow.image(photos[0].img, CW, 225, MX, w0 ? wrap(creditText(ctx, w0), f.sans, CAPTION_SIZE, CW) : undefined);
+  }
+  const extraPhotos = photos.slice(1, 3);
+  const extra = extraPhotos.map((p) => p.img);
   if (extra.length) {
     const gap = 8;
     const cellW = (CW - gap * (extra.length - 1)) / extra.length;
@@ -305,7 +328,14 @@ async function drawRecipe(ctx: Ctx, flow: Flow, r: BookRecipe, index: number, to
       rowH = Math.max(rowH, h);
       flow.page.drawImage(img, { x: MX + i * (cellW + gap) + (cellW - w) / 2, y: startY - h, width: w, height: h });
     });
-    flow.y = startY - rowH - 12;
+    const credits = extraPhotos.map((p, i) => (p.web ? creditText(ctx, p.web, `Foto ${i + 2}`) : "")).filter(Boolean);
+    if (credits.length) {
+      flow.y = startY - rowH - 3;
+      flow.lines(credits.flatMap((t) => wrap(t, f.sans, CAPTION_SIZE, CW)), { font: f.sans, size: CAPTION_SIZE, lh: CAPTION_LH, color: C.muted });
+      flow.gap(9);
+    } else {
+      flow.y = startY - rowH - 12;
+    }
   }
 
   const story = storyParagraphs(r.story);
@@ -403,10 +433,10 @@ export async function generateBookPdf(book: AnyBook, opts: BookPdfOptions = {}):
     const r = book.recipes[i];
     // as até 3 fotos da receita carregam juntas (a ordem é mantida)
     const loaded = await Promise.all(r.photos.slice(0, 3).map((ph) => loadImage(ph.url)));
-    const photos: PDFImage[] = [];
-    for (const img of loaded) {
-      const e = await embed(doc, img);
-      if (e) photos.push(e);
+    const photos: PdfPhoto[] = [];
+    for (let k = 0; k < loaded.length; k++) {
+      const e = await embed(doc, loaded[k]);
+      if (e) photos.push({ img: e, web: r.photos[k]?.web ?? null });
     }
     checkAbort();
     startPages.push(await drawRecipe(ctx, flow, r, i, book.recipes.length, photos));

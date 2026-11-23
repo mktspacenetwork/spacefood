@@ -197,14 +197,21 @@ function getRect(selector: string): Rect | null {
   return { top: r.top, left: r.left, width: r.width, height: r.height, bottom: r.bottom, right: r.right };
 }
 
-function tooltipPosition(rect: Rect, placement: "top" | "bottom" | undefined, vw: number, vh: number): React.CSSProperties {
+/** `cardH` é a altura REAL do cartão (medida depois de renderizar): textos longos fazem o cartão passar de 220 px. */
+function tooltipPosition(rect: Rect, placement: "top" | "bottom" | undefined, vw: number, vh: number, cardH = 220): React.CSSProperties {
   const W = Math.min(320, vw - 32);
   const GAP = 16;
+  const need = cardH + GAP + 8;
   const below = vh - rect.bottom - PAD;
   const above = rect.top - PAD;
-  const where = placement === "top" && above > 220 ? "top" : below > 220 ? "bottom" : above > below ? "top" : "bottom";
+  const fitsAbove = above >= need;
+  const fitsBelow = below >= need;
   let left = Math.max(16, rect.left - PAD);
   if (left + W > vw - 16) left = Math.max(16, vw - 16 - W);
+  // Não cabe cartão acima nem abaixo (alvo mais alto que a tela, ex.: formulário comprido, ou texto longo): fixa o cartão no pé
+  // da tela, por cima do destaque, para os botões "Próximo"/"Pular" nunca ficarem fora da área visível.
+  if (!fitsAbove && !fitsBelow) return { position: "fixed", bottom: 16, left, width: W, zIndex: 10002 };
+  const where = placement === "top" ? (fitsAbove ? "top" : "bottom") : (fitsBelow ? "bottom" : "top");
   return where === "top"
     ? { position: "fixed", bottom: vh - (rect.top - PAD - GAP), left, width: W, zIndex: 10002 }
     : { position: "fixed", top: rect.bottom + PAD + GAP, left, width: W, zIndex: 10002 };
@@ -219,6 +226,22 @@ export function CampaignTour({ steps, tour }: { steps: TourStep[]; tour: TourCon
   const [view, setView] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
   const touchX = useRef<number | null>(null);
   const nextRef = useRef<HTMLButtonElement>(null);
+  const [cardH, setCardH] = useState(220);
+  const cardObserver = useRef<ResizeObserver | null>(null);
+  // Mede a altura real do cartão assim que ele entra na tela (cada passo tem um texto de tamanho diferente) para escolher o
+  // lado que cabe. Ref de função num <div> interno (não no filho direto do AnimatePresence, que não aceita `ref`): o cartão do
+  // passo novo só monta depois que o anterior sai (AnimatePresence "wait").
+  const cardRef = useCallback((el: HTMLDivElement | null) => {
+    cardObserver.current?.disconnect();
+    cardObserver.current = null;
+    if (!el) return;
+    const measure = () => setCardH((prev) => (Math.abs(el.offsetHeight - prev) > 1 ? el.offsetHeight : prev));
+    measure();
+    if (typeof ResizeObserver !== "undefined") {
+      cardObserver.current = new ResizeObserver(measure);
+      cardObserver.current.observe(el);
+    }
+  }, []);
   const reduce = useMemo(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false, []);
 
   // Ao abrir: mantém só os passos cujo alvo existe (ou que são centralizados).
@@ -296,8 +319,8 @@ export function CampaignTour({ steps, tour }: { steps: TourStep[]; tour: TourCon
     if (!rect) {
       return { position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: Math.min(320, view.w - 32), zIndex: 10002 };
     }
-    return tooltipPosition(rect, step.placement, view.w, view.h);
-  }, [rect, step, view]);
+    return tooltipPosition(rect, step.placement, view.w, view.h, cardH);
+  }, [rect, step, view, cardH]);
 
   if (!open || !step) return null;
 
@@ -370,7 +393,7 @@ export function CampaignTour({ steps, tour }: { steps: TourStep[]; tour: TourCon
               touchX.current = null;
             }}
           >
-            <div className="relative bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
+            <div ref={cardRef} className="relative bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
               <div className="h-1 bg-border/30">
                 <motion.div
                   className="h-full bg-gradient-to-r from-orange-500 to-amber-600"

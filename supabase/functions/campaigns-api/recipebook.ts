@@ -24,6 +24,8 @@ export type RecipeBookDeps = {
   body: (c: any) => Promise<Record<string, any>>;
   signPaths: (paths: string[], ttl?: number) => Promise<Record<string, string>>;
   verifyObject: (path: string, declaredMime: string) => Promise<{ size: number; mime: string } | null>;
+  /** Crédito das fotos que vieram da internet, por caminho do arquivo (rodada 6). Opcional: sem ele nenhuma foto leva crédito. */
+  webByPath?: (paths: string[]) => Promise<Record<string, any>>;
 };
 
 const PHOTO_URL_TTL = 3600;
@@ -36,6 +38,7 @@ const MIME_BY_EXT: Record<string, string> = { jpg: "image/jpeg", png: "image/png
 
 export function registerRecipeBookRoutes(app: any, deps: RecipeBookDeps): void {
   const { sb, BUCKET, AppError, rpc, requireUser, requireAdmin, body, signPaths, verifyObject } = deps;
+  const webOf = async (paths: string[]): Promise<Record<string, any>> => (deps.webByPath ? await deps.webByPath(paths) : {});
 
   const invalid = (details?: string) => new AppError(422, "INVALID_FIELDS", "Há campos inválidos.", details);
   const ref = (v: unknown): string => {
@@ -72,12 +75,30 @@ export function registerRecipeBookRoutes(app: any, deps: RecipeBookDeps): void {
     const it = await rpc<Row>("recipe_book_get", { p_ref: ref(c.req.query("ref")) });
     const photos: Row[] = Array.isArray(it.photos) ? it.photos : [];
     const urls = await signPaths(photos.map((p) => String(p.path)).filter(Boolean), PHOTO_URL_TTL);
+    const webs = await webOf(photos.map((p) => String(p.path)).filter(Boolean));
     const { photos: _p, photo_path, ...rest } = it;
     return c.json({
       ...rest,
       photo_url: photo_path ? urls[photo_path] ?? null : null,
-      photos: photos.filter((p) => p?.path && urls[String(p.path)]).map((p) => ({ url: urls[String(p.path)], kind: p.kind === "main_photo" ? "main_photo" : "photo" })),
+      photos: photos.filter((p) => p?.path && urls[String(p.path)]).map((p) => ({
+        url: urls[String(p.path)], kind: p.kind === "main_photo" ? "main_photo" : "photo", ...(webs[String(p.path)] ? { web: webs[String(p.path)] } : {}),
+      })),
     });
+  });
+
+  // Público do livro (rodada 6): Todos os colaboradores OU só pessoas específicas. Quem não está no público recebe o mesmo que
+  // "livro não publicado" (o banco decide). Escolher "pessoas específicas" exige >= 1 pessoa (AUDIENCE_EMPTY).
+  app.put("/admin/recipe-book/audience", async (c: any) => {
+    const a = await requireAdmin(c, "campaigns_publish");
+    const b = await body(c);
+    if (b.mode !== "all" && b.mode !== "users") throw invalid("mode");
+    let ids: string[] = [];
+    if (b.user_ids !== undefined && b.user_ids !== null) {
+      if (!Array.isArray(b.user_ids) || b.user_ids.length > 1000 || !b.user_ids.every((x: unknown) => typeof x === "string" && UUID_RE.test(x))) throw invalid("user_ids");
+      ids = [...new Set((b.user_ids as string[]).map((x) => x.toLowerCase()))];
+    }
+    const r = await rpc<Row>("recipe_book_set_audience", { p_actor: a.actor, p_mode: b.mode, p_user_ids: ids });
+    return c.json({ ok: true, audience: r });
   });
 
   // Chaves do livro: publicar para os colaboradores e incluir automaticamente as aprovadas.
@@ -211,6 +232,7 @@ export function registerRecipeBookRoutes(app: any, deps: RecipeBookDeps): void {
     const paths: string[] = [];
     for (const x of recipes) for (const p of (x.photos ?? []) as Row[]) if (p?.path) paths.push(String(p.path));
     const urls = await signPaths(paths, PHOTO_URL_TTL);
+    const webs = await webOf(paths);
     c.header("Cache-Control", "private, no-store");
     return c.json({
       title: "Livro de Receitas",
@@ -227,7 +249,7 @@ export function registerRecipeBookRoutes(app: any, deps: RecipeBookDeps): void {
         campaign_name: x.campaign_name ?? null,
         photos: ((x.photos ?? []) as Row[])
           .filter((p) => p?.path && urls[String(p.path)])
-          .map((p) => ({ url: urls[String(p.path)], kind: p.kind === "main_photo" ? "main_photo" : "photo" })),
+          .map((p) => ({ url: urls[String(p.path)], kind: p.kind === "main_photo" ? "main_photo" : "photo", ...(webs[String(p.path)] ? { web: webs[String(p.path)] } : {}) })),
       })),
     });
   });

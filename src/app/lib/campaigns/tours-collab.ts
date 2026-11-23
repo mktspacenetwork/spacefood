@@ -32,7 +32,7 @@ export const LIST_TOUR: TourStep[] = [
     selector: "camp-book-card",
     icon: icon(BookOpen),
     title: "Livro de Receitas",
-    description: "O livro reúne as receitas da plataforma. Leia aqui e use \"Baixar PDF\", na lista ou durante a leitura, para levar o livro inteiro.",
+    description: "O Livro de Receitas reúne as receitas da plataforma. Leia aqui e use \"Baixar PDF\", na lista ou durante a leitura, para levar o Livro de Receitas inteiro.",
   },
   {
     selector: "camp-card",

@@ -1,13 +1,52 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChefHat, Clock, ListChecks, Quote } from "lucide-react";
+import { ChefHat, Clock, ExternalLink, ListChecks, Quote } from "lucide-react";
 import { Card } from "../ui/Card";
-import { RecipePhoto } from "./RecipePhoto";
+import { RecipePhoto, WEB_PHOTO_LABEL } from "./RecipePhoto";
 import { cn } from "../../lib/utils";
 import { ingredientItems, preparationSteps, storyParagraphs } from "../../lib/campaigns/bookText";
-import type { MediaItem } from "../../lib/campaigns/types";
+import type { MediaItem, WebPhotoCredit } from "../../lib/campaigns/types";
 
 const SECTION_CARD = "space-y-3 rounded-3xl p-5 hover:shadow-sm";
 const SECTION_TITLE = "flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-muted-foreground";
+
+/** Só abre links https (a fonte vem de um serviço externo: nunca `javascript:` nem outros esquemas). */
+const httpsOnly = (u: string | null | undefined): string | null => (u && /^https:\/\//i.test(u) ? u : null);
+
+const CREDIT_LINK = "inline-flex items-center gap-0.5 rounded underline underline-offset-2 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40";
+
+/**
+ * Crédito de uma foto da internet, em letra miúda sob a foto grande: "Foto da internet · autor · licença · Fonte".
+ * A licença abre a página da licença e "Fonte" abre a página da imagem (Wikimedia Commons), sempre em nova aba e com
+ * `rel="noopener noreferrer"`. O crédito é a condição de uso das licenças livres.
+ */
+export function PhotoCredit({ web, className }: { web: WebPhotoCredit; className?: string }) {
+  const license = web.license?.trim();
+  const licenseUrl = httpsOnly(web.license_url);
+  const sourceUrl = httpsOnly(web.source_url);
+  const sep = <span aria-hidden="true">·</span>;
+  return (
+    <p data-photo-credit className={cn("flex flex-wrap items-center gap-x-1.5 gap-y-0.5 px-1 text-[11px] leading-snug text-muted-foreground", className)}>
+      <span className="font-medium">{WEB_PHOTO_LABEL}</span>
+      {web.creator?.trim() && <>{sep}<span className="min-w-0 break-words">{web.creator.trim()}</span></>}
+      {license && (
+        <>
+          {sep}
+          {licenseUrl
+            ? <a href={licenseUrl} target="_blank" rel="noopener noreferrer" className={CREDIT_LINK}>{license}</a>
+            : <span>{license}</span>}
+        </>
+      )}
+      {sourceUrl && (
+        <>
+          {sep}
+          <a href={sourceUrl} target="_blank" rel="noopener noreferrer" aria-label="Abrir a página da foto na fonte (nova aba)" className={CREDIT_LINK}>
+            Fonte <ExternalLink size={10} aria-hidden="true" />
+          </a>
+        </>
+      )}
+    </p>
+  );
+}
 
 /** Fotos da receita: a principal em destaque (4:3, centralizada) e, se houver mais, miniaturas para trocar a foto grande. */
 export function RecipePhotos({ media, alt, className }: { media: MediaItem[]; alt: string; className?: string }) {
@@ -21,7 +60,8 @@ export function RecipePhotos({ media, alt, className }: { media: MediaItem[]; al
   const current = photos[Math.min(index, photos.length - 1)];
   return (
     <div className={cn("mx-auto w-full max-w-[560px] space-y-2", className)} data-tutorial="camp-recipe-media">
-      <RecipePhoto key={current.id} src={current.url} alt={`Foto de ${alt}`} variant="hero" eager />
+      <RecipePhoto key={current.id} src={current.url} alt={`Foto de ${alt}`} variant="hero" eager web={!!current.web} />
+      {current.web && <PhotoCredit web={current.web} />}
       {photos.length > 1 && (
         <div className="flex flex-wrap gap-2" role="tablist" aria-label="Fotos da receita">
           {photos.map((p, i) => (
@@ -37,7 +77,7 @@ export function RecipePhotos({ media, alt, className }: { media: MediaItem[]; al
                 i === index ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : "opacity-70 hover:opacity-100",
               )}
             >
-              <RecipePhoto src={p.url} variant="thumb" eager />
+              <RecipePhoto src={p.url} variant="thumb" eager web={!!p.web} />
             </button>
           ))}
         </div>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, List } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import { RecipePhoto } from "../RecipePhoto";
+import { PhotoCredit } from "../RecipeBody";
 import { describeBook, ingredientItems, preparationSteps, recipeCampaign, storyParagraphs } from "../../../lib/campaigns/bookText";
 import type { AnyBook } from "../../../lib/campaigns/bookText";
 import { plural } from "../../../lib/campaigns/format";
@@ -67,7 +68,7 @@ export function BookReader({ book, className, initialPage = 0 }: { book: AnyBook
         </section>
       ))}
 
-      <nav className="book-nav flex items-center gap-2" aria-label="Navegação do livro">
+      <nav className="book-nav flex items-center gap-2" aria-label="Navegação do Livro de Receitas">
         {page === 0 ? (
           total > 0 ? (
             <button type="button" onClick={() => go(1)} className="btn-book-primary">
@@ -150,7 +151,7 @@ function Cover({ book }: { book: AnyBook }) {
 
 function Summary({ recipes, onOpen }: { recipes: BookRecipe[]; onOpen: (index: number) => void }) {
   if (recipes.length === 0) {
-    return <p className="mt-5 text-center text-sm text-muted-foreground">Este livro ainda não tem receitas.</p>;
+    return <p className="mt-5 text-center text-sm text-muted-foreground">O Livro de Receitas ainda não tem receitas.</p>;
   }
   return (
     <nav aria-label="Sumário" className="mt-6">
@@ -204,7 +205,9 @@ function RecipePage({ recipe, index, total }: { recipe: BookRecipe; index: numbe
       {current && (
         <figure className="space-y-2">
           {/* Padrão único da plataforma: 4:3, centralizada, com esqueleto enquanto carrega (mesma peça das campanhas) */}
-          <RecipePhoto src={current.url} alt={`Foto da receita ${recipe.dish_name}`} variant="hero" className="shadow-sm" />
+          <RecipePhoto src={current.url} alt={`Foto da receita ${recipe.dish_name}`} variant="hero" className="shadow-sm" web={!!current.web} />
+          {/* Foto da internet: o crédito (autor, licença e fonte) aparece sempre sob a foto, também na impressão */}
+          {current.web && <PhotoCredit web={current.web} className="mx-auto max-w-[560px]" />}
           {photos.length > 1 && (
             <div className="book-nav flex justify-center gap-2 overflow-x-auto pb-1" role="group" aria-label="Fotos da receita">
               {photos.map((p, i) => (
@@ -219,7 +222,7 @@ function RecipePage({ recipe, index, total }: { recipe: BookRecipe; index: numbe
                     photos[Math.min(sel, photos.length - 1)] === p ? "border-primary" : "border-transparent opacity-70",
                   )}
                 >
-                  <RecipePhoto src={p.url} variant="thumb" className="rounded-[10px]" />
+                  <RecipePhoto src={p.url} variant="thumb" className="rounded-[10px]" web={!!p.web} />
                 </button>
               ))}
             </div>

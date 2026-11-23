@@ -39,8 +39,8 @@ function Inner({ itemRef, canManage, onChanged, onRemove, onRestore }: Omit<Prop
   const { data, loading, error, reload } = useLoader(() => bookApi.item(itemRef), [itemRef]);
   const [editing, setEditing] = useState(false);
 
-  if (loading && !data) return <><DialogHeader><DialogTitle className="sr-only">Receita do livro</DialogTitle></DialogHeader><LoadingBox /></>;
-  if (error && !data) return <><DialogHeader><DialogTitle className="sr-only">Receita do livro</DialogTitle></DialogHeader><ErrorBox message={error} onRetry={reload} /></>;
+  if (loading && !data) return <><DialogHeader><DialogTitle className="sr-only">Receita do Livro de Receitas</DialogTitle></DialogHeader><LoadingBox /></>;
+  if (error && !data) return <><DialogHeader><DialogTitle className="sr-only">Receita do Livro de Receitas</DialogTitle></DialogHeader><ErrorBox message={error} onRetry={reload} /></>;
   if (!data) return null;
 
   const refresh = async () => { await reload(); onChanged(); };
@@ -121,7 +121,7 @@ function ViewBody({ item, canManage, onEdit, onRemove, onRestore }: { item: Admi
 
       {item.source === "campaign" && (
         <p className="rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground">
-          Receita enviada na campanha{item.campaign_name ? ` “${item.campaign_name}”` : ""}. Tirar do livro não altera a receita lá.
+          Receita enviada na campanha{item.campaign_name ? ` “${item.campaign_name}”` : ""}. Tirar do Livro de Receitas não altera a receita lá.
         </p>
       )}
 
@@ -129,11 +129,11 @@ function ViewBody({ item, canManage, onEdit, onRemove, onRestore }: { item: Admi
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           {item.status === "in_book" ? (
             <Button variant="outline" className="h-11 gap-2 rounded-xl text-destructive hover:text-destructive" onClick={onRemove}>
-              <Trash2 size={16} /> Remover do livro
+              <Trash2 size={16} /> Remover do Livro de Receitas
             </Button>
           ) : (
             <Button variant="outline" className="h-11 gap-2 rounded-xl" onClick={onRestore}>
-              <Undo2 size={16} /> Readicionar ao livro
+              <Undo2 size={16} /> Readicionar ao Livro de Receitas
             </Button>
           )}
           <Button className="h-11 gap-2 rounded-xl" onClick={onEdit}>
@@ -188,7 +188,7 @@ function EditForm({ item, onCancel, onSaved, onPhotoChanged }: { item: AdminBook
         preparation,
         ...(isManual ? { author_label: author.trim() } : {}),
       });
-      toast.success("Receita atualizada no livro.");
+      toast.success("Receita atualizada no Livro de Receitas.");
       await onSaved();
     } catch (e) {
       toast.error(errMsg(e));
@@ -233,9 +233,9 @@ function EditForm({ item, onCancel, onSaved, onPhotoChanged }: { item: AdminBook
   return (
     <>
       <DialogHeader className="pr-6 text-left">
-        <DialogTitle className="text-lg">Editar receita do livro</DialogTitle>
+        <DialogTitle className="text-lg">Editar receita do Livro de Receitas</DialogTitle>
         <DialogDescription className="text-left">
-          {isManual ? "Cadastro da administração." : "A edição vale só para o livro: a receita na campanha não muda."}
+          {isManual ? "Cadastro da administração." : "A edição vale só para o Livro de Receitas: a receita na campanha não muda."}
         </DialogDescription>
       </DialogHeader>
 

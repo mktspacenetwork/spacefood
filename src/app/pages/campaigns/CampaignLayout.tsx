@@ -168,7 +168,7 @@ export function CampaignLayout() {
               to={s.to}
               className={({ isActive }) =>
                 cn(
-                  "flex h-10 flex-1 shrink-0 items-center justify-center whitespace-nowrap rounded-xl font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                  "flex h-11 flex-1 shrink-0 items-center justify-center whitespace-nowrap rounded-xl font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
                   // com 4 ou mais seções o menu fica mais compacto para caber no celular sem rolagem
                   sections.length >= 4 ? "px-1.5 text-[12px]" : "px-3 text-[13px]",
                   isActive ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground",

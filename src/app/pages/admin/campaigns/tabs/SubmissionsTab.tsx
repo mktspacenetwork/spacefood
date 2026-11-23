@@ -296,7 +296,7 @@ function SubmissionDetail({
 
           {sub.is_late && (
             <Notice tone="info" title="Enviada fora do prazo">
-              Pode ser aprovada ou reprovada normalmente e aparece nas listas e no Livro, mas não participa da votação, do ranking nem do resultado.
+              Pode ser aprovada ou reprovada normalmente e aparece nas listas e no Livro de Receitas, mas não participa da votação, do ranking nem do resultado.
             </Notice>
           )}
 

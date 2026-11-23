@@ -193,7 +193,7 @@ export const AUDIT_ACTION: Record<string, string> = {
   RUN_DRAW: "Sorteio realizado", DISCARD_DRAW: "Sorteio descartado", CONFIRM_DRAW: "Ganhadores do sorteio confirmados",
   ANNOUNCE_DRAW: "Sorteio divulgado", SCHEDULE_DRAW_ANNOUNCEMENT: "Divulgação do sorteio programada",
   CANCEL_DRAW_ANNOUNCEMENT: "Programação da divulgação do sorteio cancelada",
-  GENERATE_BOOK: "Livro de Receitas gerado", ATTACH_BOOK_PDF: "PDF do livro anexado", PUBLISH_BOOK: "Livro de Receitas publicado",
+  GENERATE_BOOK: "Livro de Receitas gerado", ATTACH_BOOK_PDF: "PDF do Livro de Receitas anexado", PUBLISH_BOOK: "Livro de Receitas publicado",
   WITHDRAW_BOOK: "Livro de Receitas retirado",
   MODULE_ENABLED: "Campanhas ligadas para todos", MODULE_DISABLED: "Campanhas desligadas para todos",
   SET_CAMPAIGN_ADMIN: "Acesso ao módulo alterado", REMOVE_CAMPAIGN_ADMIN: "Acesso ao módulo removido",

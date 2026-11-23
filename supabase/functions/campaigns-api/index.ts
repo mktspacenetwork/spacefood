@@ -17,6 +17,7 @@ import { cors } from "npm:hono@4/cors";
 import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
 import { registerRecipeBookRoutes } from "./recipebook.ts";
 import { registerAnalyticsRoutes, rankPositions, resolveRange } from "./analytics.ts";
+import { createWebImages } from "./imagesearch.ts";
 
 const BUCKET = "make-c3078087-campaigns";
 const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
@@ -97,6 +98,13 @@ const ERR: Record<string, [number, string]> = {
   CAMPAIGN_DELETED: [409, "Esta campanha está excluída. Restaure-a para alterar."],
   LATE_IMMUTABLE: [409, "A marca de receita fora do prazo não pode ser alterada."],
   INVALID_RANGE: [422, "Período inválido: a data inicial deve ser anterior à data final."],
+  VOTING_LOCKED: [409, "A votação começou: não é mais possível enviar nem editar receitas."],
+  IMAGE_SEARCH_UNAVAILABLE: [502, "A busca de fotos na internet está indisponível agora. Tente de novo em instantes ou envie uma foto do aparelho."],
+  WEB_IMAGE_INVALID: [422, "Não foi possível usar esta foto da internet. Escolha outra ou envie uma foto do aparelho."],
+  WEB_IMAGE_TOO_LARGE: [422, "Esta foto é grande demais para a receita. Escolha outra ou envie uma foto do aparelho."],
+  WEB_IMAGE_COPY_FAILED: [502, "Não foi possível anexar a foto da internet. Remova-a e escolha de novo."],
+  AUDIENCE_EMPTY: [422, "Escolha pelo menos uma pessoa para o público do livro."],
+  AUDIENCE_USER_NOT_FOUND: [422, "Uma das pessoas escolhidas não existe mais. Atualize a lista e tente de novo."],
 };
 // Mensagens específicas do INVALID_DATES (o banco manda o motivo em `detail`).
 const DATES_MSG: Record<string, string> = {
@@ -427,10 +435,46 @@ async function mediaFor(ids: string[]) {
     .in("submission_id", ids).eq("status", "ready").order("position");
   const rows = data ?? [];
   const urls = await signPaths(rows.map((r) => r.path));
+  const credits = await webImages.creditsFor(rows.map((r) => r.id)); // só as fotos que vieram da internet
   const out: Record<string, Row[]> = {};
-  for (const r of rows) (out[r.submission_id] ||= []).push({ id: r.id, kind: r.kind, mime: r.mime, size: r.size_bytes, url: urls[r.path] });
+  for (const r of rows) (out[r.submission_id] ||= []).push({ id: r.id, kind: r.kind, mime: r.mime, size: r.size_bytes, url: urls[r.path], ...(credits[r.id] ? { web: credits[r.id] } : {}) });
   return out;
 }
+
+/** Participação FECHADA: se a VOTAÇÃO já começou (sequência estrita: ela começou depois do fim da participação), a mensagem
+ *  é a própria (VOTING_LOCKED). Campanha antiga de janela única (participação e votação juntas) mantém a mensagem de sempre. */
+async function votingLockedOr(e: unknown, campId: string): Promise<unknown> {
+  if (!(e instanceof AppError) || e.code !== "REGISTRATION_CLOSED") return e;
+  const stages = await getStages(campId);
+  const reg = stages.find((x) => x.stage_key === "registration");
+  const vot = stages.find((x) => x.stage_key === "voting");
+  const now = Date.now();
+  const votStarted = !!vot?.starts_at && now >= new Date(vot.starts_at).getTime();
+  const sequential = !!reg?.ends_at && !!vot?.starts_at && new Date(vot.starts_at).getTime() >= new Date(reg.ends_at).getTime();
+  return votStarted && sequential ? new AppError(409, "VOTING_LOCKED", ERR.VOTING_LOCKED[1]) : e;
+}
+/** Erro de "não dá para enviar/editar agora" (pelo estado do colaborador): pausada, votação iniciada ou simplesmente fechada. */
+async function closedError(camp: Row, state: Row): Promise<Error> {
+  if (state.registration === "paused") return new AppError(409, "REGISTRATION_PAUSED", ERR.REGISTRATION_PAUSED[1]);
+  return (await votingLockedOr(new AppError(409, "REGISTRATION_CLOSED", ERR.REGISTRATION_CLOSED[1]), camp.id)) as Error;
+}
+/** Bilhetes de envio: as fotos da internet NÃO recebem URL de envio (o arquivo já foi copiado pelo servidor); o resto, sim. */
+async function ticketsFor(uploads: Row[], webIdx: Set<number>) {
+  const out: Row[] = [];
+  for (let i = 0; i < uploads.length; i++) {
+    const u = uploads[i];
+    if (webIdx.has(i)) { out.push({ ...u, token: "", signedUrl: "", web: true }); continue; }
+    out.push((await uploadTokens([u as never]))[0]);
+  }
+  return out;
+}
+
+// Foto da INTERNET no cadastro da receita (rodada 6): busca + importação (imagesearch.ts). Fonte atual: Wikimedia Commons.
+const webImages = createWebImages({
+  sb, BUCKET, AppError, rpc, collab, body, verifyObject, closedError,
+  secret: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+  fetch: (u, init) => fetch(u, init as RequestInit),
+});
 
 // ===================================================================== APP ===
 const app = new Hono().basePath("/campaigns-api");
@@ -477,8 +521,9 @@ app.get("/campaigns/availability", async (c) => {
     if (st.visible) out.push({ id: camp.id, slug: camp.slug, tour: st.tour });
   }
   // Livro de Receitas único: aparece no menu/tela de Campanhas quando o administrador publica
-  const { data: bs } = await sb.from("recipe_book_settings").select("published").eq("id", 1).maybeSingle();
-  return c.json({ enabled: true, hasVisible: out.length > 0, book: bs?.published === true, campaigns: out });
+  // (rodada 6) só quem está no PÚBLICO do livro o enxerga: quem não está recebe o mesmo que "livro não publicado"
+  const book = await rpc<boolean>("recipe_book_available", { p_user: user.id });
+  return c.json({ enabled: true, hasVisible: out.length > 0, book: book === true, campaigns: out });
 });
 
 app.get("/campaigns", async (c) => {
@@ -592,29 +637,33 @@ app.get("/campaigns/:slug/my-submissions", async (c) => {
 app.post("/campaigns/:slug/submission", async (c) => {
   const { camp, user } = await collab(c, c.req.param("slug"));
   const b = await body(c);
-  const media = Array.isArray(b.media) ? b.media.map((m: Row) => ({ kind: m.kind, mime: m.mime, size: m.size })) : [];
+  const prepared = await webImages.prepareMedia(b.media, { camp, user }); // fotos da internet: assinatura e arquivo provisório conferidos
   const r = await rpc<Row>("campaign_submit", {
     p_campaign: camp.id, p_user: user.id, p_user_name: user.name,
     p_fields: { dish_name: strOrUndef(b.dish_name) ?? "", description: strOrUndef(b.description) ?? "", ingredients: strOrUndef(b.ingredients) ?? "", preparation: strOrUndef(b.preparation) ?? "" },
-    p_media: media,
-  }).catch((e) => {
+    p_media: prepared.intents,
+  }).catch(async (e) => {
     if (e instanceof AppError && e.code === "ALREADY_SUBMITTED") throw new AppError(409, e.code, e.message, { submission_id: e.details });
-    throw e;
+    throw await votingLockedOr(e, camp.id);
   });
-  const uploads = await uploadTokens(r.uploads ?? []);
+  await webImages.finishMedia(prepared, r.uploads ?? []);
+  const uploads = await ticketsFor(r.uploads ?? [], new Set(prepared.webs.map((w) => w.index)));
   if (r.status === "submitted") wait(notifyUser(camp.id, user.id, "submission_received", r.submission_id, "Receita recebida", `Recebemos a sua receita na campanha ${camp.name}. Ela passará por análise.`));
   return c.json({ submission_id: r.submission_id, status: r.status, slot: r.slot, uploads });
 });
 
 app.post("/campaigns/:slug/submission/:id/uploads", async (c) => {
-  const { camp, user } = await collab(c, c.req.param("slug"));
+  const { camp, user, state } = await collab(c, c.req.param("slug"));
+  // (rodada 6) nenhum caminho de mídia fica aberto depois que o envio/edição fecha (inclusive com a votação em andamento)
+  if (state.can_submit !== true && state.can_edit !== true) throw await closedError(camp, state);
   const { data: s } = await sb.from("campaign_submissions").select("id").eq("id", c.req.param("id")).eq("campaign_id", camp.id).eq("user_id", user.id).maybeSingle();
   if (!s) throw new AppError(404, "SUBMISSION_NOT_FOUND", "Receita não encontrada.");
   const { data: pend } = await sb.from("campaign_media").select("id,kind,path,mime").eq("submission_id", s.id).eq("status", "pending");
   const lim = camp.media_limits;
   const ups = (pend ?? []).map((m) => ({ id: m.id, kind: m.kind, path: m.path, mime: m.mime,
     max_bytes: (m.kind === "video" ? lim.max_video_mb : lim.max_photo_mb) * 1024 * 1024 }));
-  return c.json({ uploads: await uploadTokens(ups) });
+  const webIds = await webImages.creditsFor(ups.map((u) => u.id));
+  return c.json({ uploads: await ticketsFor(ups, new Set(ups.map((u, i) => (webIds[u.id] ? i : -1)).filter((i) => i >= 0))) });
 });
 
 app.post("/campaigns/:slug/submission/:id/finalize", async (c) => {
@@ -633,7 +682,8 @@ app.post("/campaigns/:slug/submission/:id/finalize", async (c) => {
     }
     verified.push({ id: m.id, size: v.size, mime: v.mime });
   }
-  const r = await rpc<Row>("campaign_finalize_submission", { p_campaign: camp.id, p_user: user.id, p_submission: sid, p_verified: verified });
+  const r = await rpc<Row>("campaign_finalize_submission", { p_campaign: camp.id, p_user: user.id, p_submission: sid, p_verified: verified })
+    .catch(async (e) => { throw await votingLockedOr(e, camp.id); });
   if (r.first_time) wait(notifyUser(camp.id, user.id, "submission_received", sid, "Receita recebida", `Recebemos a sua receita ${r.dish_name} na campanha ${camp.name}. Ela passará por análise.`));
   return c.json({ status: r.status });
 });
@@ -643,12 +693,15 @@ app.put("/campaigns/:slug/submission/:id", async (c) => {
   const b = await body(c);
   const fields: Row = {};
   for (const k of ["dish_name", "description", "ingredients", "preparation"]) if (typeof b[k] === "string") fields[k] = b[k];
+  const prepared = await webImages.prepareMedia(b.add, { camp, user });
   const ops = {
     remove: Array.isArray(b.remove) ? b.remove.filter((x: unknown) => typeof x === "string") : [],
-    add: Array.isArray(b.add) ? b.add.map((m: Row) => ({ kind: m.kind, mime: m.mime, size: m.size })) : [],
+    add: prepared.intents,
   };
-  const r = await rpc<Row>("campaign_update_submission", { p_campaign: camp.id, p_user: user.id, p_submission: c.req.param("id"), p_fields: fields, p_media_ops: ops });
-  return c.json({ changed: r.changed, status: r.status, uploads: await uploadTokens(r.uploads ?? []) });
+  const r = await rpc<Row>("campaign_update_submission", { p_campaign: camp.id, p_user: user.id, p_submission: c.req.param("id"), p_fields: fields, p_media_ops: ops })
+    .catch(async (e) => { throw await votingLockedOr(e, camp.id); });
+  await webImages.finishMedia(prepared, r.uploads ?? []);
+  return c.json({ changed: r.changed, status: r.status, uploads: await ticketsFor(r.uploads ?? [], new Set(prepared.webs.map((w) => w.index))) });
 });
 
 app.get("/campaigns/:slug/vote", async (c) => {
@@ -888,7 +941,10 @@ app.put("/admin/campaigns/:id/audience", async (c) => {
 });
 
 app.get("/admin/users", async (c) => {
-  await requireAdmin(c, "campaigns_edit");
+  // (rodada 6) "editar" OU "publicar": quem só publica o Livro precisa listar pessoas para escolher o público. A lista é a mesma de sempre.
+  try { await requireAdmin(c, "campaigns_edit"); } catch (e) {
+    if (e instanceof AppError && e.code === "FORBIDDEN") await requireAdmin(c, "campaigns_publish"); else throw e;
+  }
   const { data } = await sb.auth.admin.listUsers({ page: 1, perPage: 1000 });
   return c.json((data?.users ?? []).map((u) => ({ id: u.id, name: u.user_metadata?.name || (u.email ?? "").split("@")[0], department: u.user_metadata?.department ?? "", unit: u.user_metadata?.lunch_location ?? "" })).sort((x, y) => x.name.localeCompare(y.name)));
 });
@@ -1297,8 +1353,9 @@ app.delete("/admin/access/:userId", async (c) => {
 });
 
 // Livro de Receitas ÚNICO (rotas em recipebook.ts; as regras vivem nas funções recipe_book_* do banco)
-registerRecipeBookRoutes(app, { sb, BUCKET, AppError, rpc, requireUser, requireAdmin, body, signPaths, verifyObject });
+registerRecipeBookRoutes(app, { sb, BUCKET, AppError, rpc, requireUser, requireAdmin, body, signPaths, verifyObject, webByPath: webImages.creditsByPath });
 // Dashboard dos relatórios (rodada 5): GET /admin/campaigns/:id/analytics (rotas em analytics.ts; números vêm do banco)
 registerAnalyticsRoutes(app, { AppError, rpc, requireAdmin });
+webImages.registerRoutes(app);
 
 Deno.serve(app.fetch);

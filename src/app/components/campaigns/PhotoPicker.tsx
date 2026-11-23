@@ -3,12 +3,17 @@ import { Camera, Check, FileWarning, Loader2, RefreshCw, Trash2 } from "lucide-r
 import { Progress } from "../ui/progress";
 import { cn } from "../../lib/utils";
 import { IMAGE_ACCEPT, checkImage, detectMime, prepareImage } from "../../lib/campaigns/media";
+import { WebPhotoBadge } from "./RecipePhoto";
+import type { WebImportedMedia, WebPhotoCredit } from "../../lib/campaigns/types";
 
 /**
  * Uma foto da receita no formulário (o formulário usa até 3, uma por posição).
  *  - nova:      `file` presente e sem `serverId`;
  *  - existente: `serverId` + `serverStatus: "ready"`, `previewUrl` = URL assinada;
  *  - pendente:  `serverId` + `serverStatus: "pending"` — a linha existe no servidor, mas o arquivo não chegou.
+ *  - da internet: `webImport` (mídia que o servidor já guardou, com o crédito) e `previewUrl` = miniatura da busca; não há `file` nem
+ *    upload: ao salvar, a mídia entra na lista do envio/edição como uma foto enviada (ver CampaignSubmit). Depois de salva, vem do
+ *    servidor com `web` (crédito) e `serverStatus: "ready"`.
  */
 export type PhotoDraft = {
   previewUrl: string;
@@ -27,6 +32,10 @@ export type PhotoDraft = {
   uid?: string;
   /** tipo da mídia no servidor (para saber qual é a principal ao editar) */
   kind?: "main_photo" | "photo";
+  /** crédito da foto quando ela veio da internet (mostra o selo "Foto da internet") */
+  web?: WebPhotoCredit | null;
+  /** foto da internet escolhida e ainda não salva na receita */
+  webImport?: WebImportedMedia;
 };
 
 const MINI_BTN =
@@ -123,6 +132,7 @@ export function PhotoPicker({
       {hasPreview ? (
         <div className="relative overflow-hidden rounded-3xl bg-muted">
           <img src={draft!.previewUrl} alt="Foto da receita" className={cn("w-full object-cover", compact ? "aspect-square" : "aspect-[4/3]")} />
+          {draft!.web && <WebPhotoBadge variant={compact ? "thumb" : "tile"} className={compact ? "bottom-auto left-2 top-2" : "bottom-auto left-3 top-3"} />}
           {!disabled && (
             <div className={cn("absolute flex items-center justify-between gap-2", compact ? "inset-x-2 bottom-2" : "inset-x-3 bottom-3")}>
               <button type="button" className={cn(MINI_BTN, compact && "h-10 px-3")} onClick={() => inputRef.current?.click()} disabled={preparing} aria-label="Trocar a foto">

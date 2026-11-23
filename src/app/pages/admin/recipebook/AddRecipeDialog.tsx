@@ -21,7 +21,7 @@ export function AddRecipeDialog({ open, onClose, onAdded }: Props) {
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-h-[92vh] w-[calc(100%-1.5rem)] gap-4 overflow-y-auto p-4 sm:max-w-xl sm:p-6">
         <DialogHeader className="pr-6 text-left">
-          <DialogTitle className="text-lg">Adicionar ao livro</DialogTitle>
+          <DialogTitle className="text-lg">Adicionar ao Livro de Receitas</DialogTitle>
           <DialogDescription className="text-left">Escolha uma receita da plataforma ou cadastre uma nova.</DialogDescription>
         </DialogHeader>
         {open && (
@@ -69,7 +69,7 @@ function FromPlatform({ onAdded }: { onAdded: () => void }) {
     setAdding(c.submission_id);
     try {
       await bookApi.add(c.submission_id);
-      toast.success(`“${c.dish_name}” entrou no livro.`);
+      toast.success(`“${c.dish_name}” entrou no Livro de Receitas.`);
       setItems((cur) => (cur ?? []).filter((x) => x.submission_id !== c.submission_id));
       onAdded();
     } catch (e) {
@@ -91,7 +91,7 @@ function FromPlatform({ onAdded }: { onAdded: () => void }) {
         <LoadingBox label="Buscando…" />
       ) : items.length === 0 ? (
         <p className="py-8 text-center text-sm text-muted-foreground">
-          {q ? "Nenhuma receita encontrada." : "Todas as receitas aprovadas já estão no livro."}
+          {q ? "Nenhuma receita encontrada." : "Todas as receitas aprovadas já estão no Livro de Receitas."}
         </p>
       ) : (
         <ul className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
@@ -183,7 +183,7 @@ function ManualForm({ onCreated }: { onCreated: () => void }) {
           return;
         }
       }
-      toast.success("Receita adicionada ao livro.");
+      toast.success("Receita adicionada ao Livro de Receitas.");
       onCreated();
     } catch (e) {
       toast.error(errMsg(e));
@@ -239,7 +239,7 @@ function ManualForm({ onCreated }: { onCreated: () => void }) {
       </div>
       {triedSubmit && errors.limit && <p className="text-xs text-destructive">{errors.limit}</p>}
       <Button className="h-11 w-full gap-2 rounded-xl" onClick={() => void submit()} disabled={saving}>
-        {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Adicionar ao livro
+        {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Adicionar ao Livro de Receitas
       </Button>
     </div>
   );

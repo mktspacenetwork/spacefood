@@ -194,7 +194,7 @@ export function Campaigns() {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-base font-bold leading-tight text-foreground">Livro de Receitas</span>
-                    <span className="block text-xs text-muted-foreground">Leia as receitas ou baixe o livro em PDF.</span>
+                    <span className="block text-xs text-muted-foreground">Leia as receitas ou baixe o Livro de Receitas em PDF.</span>
                   </span>
                   <ChevronRight size={18} className="shrink-0 text-muted-foreground" aria-hidden="true" />
                 </Card>

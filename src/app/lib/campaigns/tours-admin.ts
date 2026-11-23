@@ -18,9 +18,9 @@ export const ADMIN_TOUR_OVERVIEW: TourStep[] = [
   },
   {
     selector: "camp-section-nav",
-    title: "Campanhas, Livro e Histórico",
+    title: "Campanhas, Livro de Receitas e Histórico",
     description:
-      "As áreas ficam lado a lado, aqui no topo: Campanhas (só as ativas), Livro de Receitas e Histórico de campanhas — onde estão as concluídas, desativadas e excluídas. A aba do Livro aparece para quem tem permissão de revisar ou publicar o livro.",
+      "As áreas ficam lado a lado, aqui no topo: Campanhas (só as ativas), Livro de Receitas e Histórico de campanhas — onde estão as concluídas, desativadas e excluídas. A aba Livro de Receitas aparece para quem tem permissão de revisar ou publicar o Livro de Receitas.",
     icon: icon(BookOpen),
     placement: "bottom",
   },

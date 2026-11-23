@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { UtensilsCrossed } from "lucide-react";
+import { Globe, UtensilsCrossed } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 /**
@@ -15,6 +15,10 @@ import { cn } from "../../lib/utils";
  *
  * Carregamento preguiçoso (`loading="lazy"`; use `eager` para a foto grande da tela), esqueleto enquanto carrega e
  * ícone no lugar quando não há foto ou ela falha. `children` são selos por cima da foto (canto superior).
+ *
+ * `web` (foto que veio da internet): selo pequeno e discreto "Foto da internet" no canto inferior esquerdo; nas variantes
+ * pequenas (`row`, `thumb`) só um ícone com título acessível. O crédito completo (autor, licença, fonte) fica na linha
+ * `PhotoCredit` sob a foto grande (RecipeBody) e no Livro.
  */
 export type RecipePhotoVariant = "tile" | "row" | "thumb" | "hero";
 
@@ -38,9 +42,32 @@ export type RecipePhotoProps = {
   className?: string;
   /** Selos desenhados por cima da foto (posicione com `absolute`). */
   children?: ReactNode;
+  /** Foto que veio da internet (busca no cadastro): mostra o selo "Foto da internet". */
+  web?: boolean;
 };
 
-export function RecipePhoto({ src, alt = "", variant = "tile", eager, className, children }: RecipePhotoProps) {
+export const WEB_PHOTO_LABEL = "Foto da internet";
+
+/** Selo discreto de foto da internet (texto nas variantes grandes, só ícone nas pequenas). */
+export function WebPhotoBadge({ variant = "tile", className }: { variant?: RecipePhotoVariant; className?: string }) {
+  const small = variant === "row" || variant === "thumb";
+  return (
+    <span
+      title={WEB_PHOTO_LABEL}
+      aria-label={small ? WEB_PHOTO_LABEL : undefined}
+      className={cn(
+        "pointer-events-none absolute z-[1] inline-flex items-center gap-1 rounded-md bg-black/55 text-white backdrop-blur-[2px]",
+        small ? "bottom-1 left-1 h-4 w-4 justify-center rounded-full" : "bottom-1.5 left-1.5 px-1.5 py-0.5 text-[10px] font-medium leading-none",
+        className,
+      )}
+    >
+      <Globe size={10} aria-hidden="true" />
+      {!small && <span>{WEB_PHOTO_LABEL}</span>}
+    </span>
+  );
+}
+
+export function RecipePhoto({ src, alt = "", variant = "tile", eager, className, children, web }: RecipePhotoProps) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">(src ? "loading" : "error");
   const imgRef = useRef<HTMLImageElement | null>(null);
 
@@ -78,6 +105,7 @@ export function RecipePhoto({ src, alt = "", variant = "tile", eager, className,
           <UtensilsCrossed size={ICON_SIZE[variant]} strokeWidth={variant === "hero" ? 1.5 : 2} aria-hidden="true" />
         </div>
       )}
+      {web && status !== "error" && <WebPhotoBadge variant={variant} />}
       {children}
     </div>
   );

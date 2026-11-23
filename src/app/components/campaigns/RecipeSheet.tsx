@@ -8,7 +8,22 @@ import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle } from ".
 import { RecipePhotos, RecipeText, LateNote } from "./RecipeBody";
 import { VoteConfirmDialog } from "./VoteConfirmDialog";
 import { campaignsApi, CampaignApiError, errMsg } from "../../lib/campaigns/api";
-import type { RecipeDetail } from "../../lib/campaigns/types";
+import type { CollabState, RecipeDetail } from "../../lib/campaigns/types";
+
+// ───────────────────── Votação começou: sem enviar nem editar ─────────────────────
+
+export const VOTING_LOCKED_MSG = "A votação começou: não é mais possível enviar nem editar receitas.";
+
+/**
+ * A campanha já está na votação (aberta, em pausa ou encerrada), a participação não está aberta, não há janela de atraso e o
+ * servidor não permite enviar nem editar (`can_submit`/`can_edit` falsos). Nesse caso a tela explica o motivo com a mensagem
+ * acima (em vez de "A participação foi encerrada.") e esconde/desabilita Editar e o botão de novo envio.
+ * Servidor antigo (sem essas informações) nunca cai aqui: a tela se comporta como antes.
+ */
+export function votingLocked(state: Pick<CollabState, "voting" | "registration" | "late_window" | "can_submit" | "can_edit">): boolean {
+  const started = state.voting === "open" || state.voting === "paused" || state.voting === "closed";
+  return started && state.registration === "closed" && !state.late_window && !state.can_submit && !state.can_edit;
+}
 
 // ───────────────────────── Folha única de receita ─────────────────────────
 

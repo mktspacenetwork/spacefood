@@ -1,7 +1,7 @@
 import { campaignsApi, uploadToSignedUrl } from "../../../lib/campaigns/api";
 import { normText } from "../../../lib/campaigns/bookText";
 import { prepareImage } from "../../../lib/campaigns/media";
-import type { AdminBookItemDetail, AdminRecipeBook, BookCandidate, RecipeBookSettings } from "../../../lib/campaigns/types";
+import type { AdminBookItemDetail, AdminRecipeBook, BookAudience, BookCandidate, RecipeBookSettings } from "../../../lib/campaigns/types";
 
 /** Limites que o servidor também aplica (nome 3–120; história ≤ 5000; ingredientes e preparo ≤ 20000). */
 export const LIMITS = { name: 120, story: 5000, text: 20000 } as const;
@@ -9,12 +9,20 @@ export const LIMITS = { name: 120, story: 5000, text: 20000 } as const;
 export type ManualFields = { dish_name: string; author_label?: string; story?: string; ingredients: string; preparation: string };
 export type EditFields = { dish_name?: string; story?: string; ingredients?: string; preparation?: string; author_label?: string };
 
+/** Pessoa que pode ser escolhida no público ("Pessoas específicas"): mesma lista usada no cadastro de campanhas. */
+export type BookUser = { id: string; name: string; department: string; unit: string };
+
 /** Chamadas do Livro de Receitas (acervo único) no Acesso Admin. `ref` identifica a receita em todas as ações. */
 export const bookApi = {
   load: () => campaignsApi.get<AdminRecipeBook>("/admin/recipe-book"),
   item: (ref: string) => campaignsApi.get<AdminBookItemDetail>(`/admin/recipe-book/item?ref=${encodeURIComponent(ref)}`),
   candidates: (q: string) => campaignsApi.get<BookCandidate[]>(`/admin/recipe-book/candidates?q=${encodeURIComponent(q)}`),
   settings: (patch: Partial<RecipeBookSettings>) => campaignsApi.put<{ ok?: boolean }>("/admin/recipe-book/settings", patch),
+  /** Público do Livro de Receitas (permissão campaigns_publish): `{mode:"all"}` ou `{mode:"users", user_ids}`. O servidor recusa "users" sem ninguém (AUDIENCE_EMPTY). */
+  audience: (a: BookAudience) =>
+    campaignsApi.put<{ ok?: boolean }>("/admin/recipe-book/audience", a.mode === "users" ? { mode: "users", user_ids: a.user_ids } : { mode: "all" }),
+  /** Lista de pessoas para escolher (a mesma do cadastro de campanhas; exige permissão de editar campanhas). */
+  users: () => campaignsApi.get<BookUser[]>("/admin/users"),
   add: (submission_id: string) => campaignsApi.post<{ ref: string }>("/admin/recipe-book/add", { submission_id }),
   addManual: (f: ManualFields) => campaignsApi.post<{ ref: string }>("/admin/recipe-book/manual", f),
   update: (ref: string, f: EditFields) => campaignsApi.put<{ ok?: boolean }>("/admin/recipe-book/item", { ref, ...f }),

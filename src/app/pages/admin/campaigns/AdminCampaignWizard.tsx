@@ -102,15 +102,22 @@ function Field({ label, hint, children, tutorial }: { label: string; hint?: stri
 }
 
 /**
- * Prévia da capa como o carrossel da Home a mostra (mesmo `object-cover` e mesma posição dos banners comuns).
- * É UMA imagem para todos os aparelhos: o seletor só muda o tamanho da caixa para conferir o enquadramento.
+ * Prévia da capa EXATAMENTE como a exibição real: as mesmas caixas do carrossel da Home e da página da campanha
+ * (celular 2:1 · tablet 3:1 · computador 3,5:1) e a mesma regra de imagem dos banners comuns (`object-cover`, posição
+ * `center right`). É UMA imagem para todos os aparelhos: o seletor só muda a caixa para conferir o enquadramento.
  */
+const PREVIEW_BOX = {
+  mobile: "aspect-[2/1] max-w-sm",
+  tablet: "aspect-[3/1] max-w-2xl",
+  desktop: "aspect-[3.5/1]",
+} as const;
+
 function BannerPreview({ url, title }: { url: string | null; title: string }) {
-  const [size, setSize] = useState<"mobile" | "desktop">(() => (typeof window !== "undefined" && window.innerWidth < 768 ? "mobile" : "desktop"));
+  const [size, setSize] = useState<keyof typeof PREVIEW_BOX>(() => (typeof window !== "undefined" && window.innerWidth < 768 ? "mobile" : "desktop"));
   return (
     <div className="space-y-2" aria-label="Como a capa aparece no banner da Home">
       <div className="inline-flex h-11 items-center rounded-lg border bg-card p-0.5 sm:h-8" role="group" aria-label="Tamanho da prévia">
-        {([["mobile", "Celular"], ["desktop", "Computador"]] as const).map(([k, label]) => (
+        {([["mobile", "Celular"], ["tablet", "Tablet"], ["desktop", "Computador"]] as const).map(([k, label]) => (
           <button
             key={k}
             type="button"
@@ -123,7 +130,7 @@ function BannerPreview({ url, title }: { url: string | null; title: string }) {
           </button>
         ))}
       </div>
-      <div className={cn("relative w-full overflow-hidden rounded-3xl bg-[#FF5A1F] shadow-sm", size === "mobile" ? "aspect-[2/1] max-w-sm" : "aspect-[3.5/1]")}>
+      <div className={cn("relative w-full overflow-hidden rounded-3xl bg-[#FF5A1F] shadow-sm", PREVIEW_BOX[size])}>
         {url ? (
           <img src={url} alt="" className="absolute inset-0 h-full w-full select-none object-cover" style={{ objectPosition: BANNER_OBJECT_POSITION }} draggable={false} />
         ) : (
@@ -514,8 +521,11 @@ export function AdminCampaignWizard() {
             )}
             {coverBusy && <Progress value={coverProgress * 100} className="w-32" />}
           </div>
+          <p className="text-[12px] font-medium text-foreground">
+            Use o mesmo padrão dos banners da plataforma. Em celular e tablet as laterais podem ser cortadas: mantenha textos e elementos importantes no centro.
+          </p>
           <p className="text-[11px] text-muted-foreground">
-            JPG, PNG ou WebP, como nos Banners; as bordas podem ser cortadas conforme a tela. Sem imagem, o banner usa o fundo laranja com o nome.
+            JPG, PNG ou WebP. Sem imagem, o banner usa o fundo laranja com o nome.
           </p>
         </CardContent>
       </Card>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { CheckCircle2, ClipboardList, Pencil, Plus } from "lucide-react";
+import { CheckCircle2, ClipboardList, Lock, Pencil, Plus } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "../../components/ui/Button";
 import { Skeleton } from "../../components/ui/skeleton";
@@ -8,7 +8,7 @@ import { RecipeTile, RecipeViewToggle, StatusBadge, useRecipeView } from "../../
 import { SubmissionStatus } from "../../components/campaigns/SubmissionStatus";
 import { EmptyState } from "../../components/campaigns/EmptyState";
 import { LateBadge, LateNote, RecipePhotos, RecipeText } from "../../components/campaigns/RecipeBody";
-import { RecipeSheet, useRecipeSheetParam } from "../../components/campaigns/RecipeSheet";
+import { RecipeSheet, VOTING_LOCKED_MSG, useRecipeSheetParam, votingLocked } from "../../components/campaigns/RecipeSheet";
 import { ErrorState } from "../../components/campaigns/ErrorState";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
 import { useCampaignCtx } from "./CampaignLayout";
@@ -88,11 +88,13 @@ export function CampaignMyEntry() {
   const regOpen = live && state.registration === "open";
   const lateOpen = live && !!state.late_window;
   const canEdit = (s: MySubmission) =>
-    multi ? s.status !== "approved" && (regOpen || (lateOpen && !!s.is_late)) : !!state.can_edit;
+    multi ? s.status !== "approved" && ((regOpen && state.can_edit !== false) || (lateOpen && !!s.is_late)) : !!state.can_edit;
+  // A votação começou: nada de enviar nem editar (mensagem clara no lugar de "participação não está aberta").
+  const lockedByVoting = votingLocked(state);
   const limitReached = multi && items.length >= max && (regOpen || lateOpen);
   const selected = items.find((x) => x.id === selId) ?? null;
-  const photoOf = (s: MySubmission) =>
-    (s.media.find((m) => m.kind === "main_photo") ?? s.media.find((m) => m.kind === "photo"))?.url ?? null;
+  const coverOf = (s: MySubmission) => s.media.find((m) => m.kind === "main_photo") ?? s.media.find((m) => m.kind === "photo");
+  const photoOf = (s: MySubmission) => coverOf(s)?.url ?? null;
 
   const newButton = (
     <Button
@@ -116,7 +118,7 @@ export function CampaignMyEntry() {
         <EmptyState
           icon={<ClipboardList size={22} aria-hidden="true" />}
           title="Você ainda não cadastrou receitas"
-          description={canSendMore ? "Informe os ingredientes e o modo de preparo." : "A participação não está aberta para você agora."}
+          description={canSendMore ? "Informe os ingredientes e o modo de preparo." : lockedByVoting ? VOTING_LOCKED_MSG : "A participação não está aberta para você agora."}
           action={
             canSendMore ? (
               <Button data-tutorial="camp-new-recipe" onClick={() => navigate(`${base}/enviar`)} className="h-12 gap-2 rounded-xl px-6">
@@ -154,6 +156,7 @@ export function CampaignMyEntry() {
             title={s.dish_name}
             subtitle="Enviada por você"
             photoUrl={photoOf(s)}
+            photoWeb={!!coverOf(s)?.web}
             badge={s.is_late ? (
               <span className="flex flex-col items-start gap-1"><StatusBadge status={s.status} /><LateBadge /></span>
             ) : <StatusBadge status={s.status} />}
@@ -164,6 +167,12 @@ export function CampaignMyEntry() {
         ))}
       </div>
 
+      {lockedByVoting && !limitReached && (
+        <p role="note" className="flex items-start gap-2 rounded-2xl bg-muted p-4 text-sm text-muted-foreground">
+          <Lock size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span>{VOTING_LOCKED_MSG}</span>
+        </p>
+      )}
       {canSendMore && newButton}
       {limitReached && !canSendMore && (
         <p role="note" className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">
@@ -198,6 +207,11 @@ export function CampaignMyEntry() {
               <Pencil size={18} aria-hidden="true" />
               {selected.status === "pending_media" ? "Terminar o envio" : selected.status === "rejected" ? "Corrigir e reenviar" : "Editar receita"}
             </Button>
+          ) : selected && selected.status !== "approved" && lockedByVoting ? (
+            <p role="note" className="flex items-start gap-2 text-sm text-muted-foreground">
+              <Lock size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+              <span>{VOTING_LOCKED_MSG}</span>
+            </p>
           ) : undefined
         }
       >

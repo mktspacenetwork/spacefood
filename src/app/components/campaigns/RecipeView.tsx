@@ -22,7 +22,7 @@ export function useRecipeView(): [RecipeLayout, (v: RecipeLayout) => void] {
   return [view, change];
 }
 
-/** Alternância Cards | Lista (alvos de toque de 40 px). */
+/** Alternância Cards | Lista (alvos de toque de 44 px). */
 export function RecipeViewToggle({ view, onChange }: { view: RecipeLayout; onChange: (v: RecipeLayout) => void }) {
   const opt = (value: RecipeLayout, label: string, icon: ReactNode) => (
     <button
@@ -30,7 +30,7 @@ export function RecipeViewToggle({ view, onChange }: { view: RecipeLayout; onCha
       aria-pressed={view === value}
       onClick={() => onChange(value)}
       className={cn(
-        "inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        "inline-flex h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
         view === value ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground",
       )}
     >
@@ -66,6 +66,8 @@ type TileProps = {
   /** Linha secundária: autor ("Enviada por você" em Minhas receitas). */
   subtitle: string;
   photoUrl: string | null;
+  /** A foto veio da internet: selo discreto "Foto da internet" (só o ícone na lista). */
+  photoWeb?: boolean;
   badge?: ReactNode;
   /** Abre outra tela… */
   to?: string;
@@ -76,12 +78,12 @@ type TileProps = {
 };
 
 /** Receita como cartão (2 colunas no celular) ou como linha de lista (miniatura + nome + autor). */
-export function RecipeTile({ layout, title, subtitle, photoUrl, badge, to, onClick, first, ariaLabel }: TileProps) {
+export function RecipeTile({ layout, title, subtitle, photoUrl, photoWeb, badge, to, onClick, first, ariaLabel }: TileProps) {
   const focus = "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background";
   const inner =
     layout === "cards" ? (
       <Card className="h-full overflow-hidden rounded-2xl transition-all group-active:scale-[0.98]">
-        <RecipePhoto src={photoUrl} variant="tile">
+        <RecipePhoto src={photoUrl} variant="tile" web={photoWeb}>
           {badge && <span className="absolute left-2 top-2">{badge}</span>}
         </RecipePhoto>
         <div className="space-y-1 p-3">
@@ -94,7 +96,7 @@ export function RecipeTile({ layout, title, subtitle, photoUrl, badge, to, onCli
       </Card>
     ) : (
       <Card className="flex items-center gap-3 rounded-2xl p-2.5 transition-all group-active:scale-[0.99]">
-        <RecipePhoto src={photoUrl} variant="row" />
+        <RecipePhoto src={photoUrl} variant="row" web={photoWeb} />
         <div className="min-w-0 flex-1 space-y-0.5">
           <p className="line-clamp-2 text-sm font-bold leading-snug text-foreground">{title}</p>
           <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
