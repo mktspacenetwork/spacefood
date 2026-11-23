@@ -15,7 +15,8 @@ import { Textarea } from "../../../components/ui/textarea";
 import { cn } from "../../../lib/utils";
 import { useAuth } from "../../../context/auth-context";
 import { CampaignApiError, campaignsApi, errMsg, uploadToSignedUrl } from "../../../lib/campaigns/api";
-import { BANNER_MIN_SOURCE_WIDTH, BANNER_OBJECT_POSITION, prepareCover } from "../../../lib/campaigns/banner";
+import { BANNER_MIN_SOURCE_WIDTH, prepareCover } from "../../../lib/campaigns/banner";
+import { BannerBoxPreview } from "../../../components/campaigns/BannerBoxPreview";
 import { MAX_PHOTOS_PER_RECIPE, MAX_SUBMISSIONS_PER_USER } from "../../../lib/campaigns/types";
 import type { AdminCampaign, AdminCampaignDetail, Audience, Features, MediaLimits, Visibility } from "../../../lib/campaigns/types";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../../components/campaigns/CampaignTour";
@@ -97,46 +98,6 @@ function Field({ label, hint, children, tutorial }: { label: string; hint?: stri
       <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{label}</Label>
       {children}
       {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
-    </div>
-  );
-}
-
-/**
- * Prévia da capa EXATAMENTE como a exibição real: as mesmas caixas do carrossel da Home e da página da campanha
- * (celular 2:1 · tablet 3:1 · computador 3,5:1) e a mesma regra de imagem dos banners comuns (`object-cover`, posição
- * `center right`). É UMA imagem para todos os aparelhos: o seletor só muda a caixa para conferir o enquadramento.
- */
-const PREVIEW_BOX = {
-  mobile: "aspect-[2/1] max-w-sm",
-  tablet: "aspect-[3/1] max-w-2xl",
-  desktop: "aspect-[3.5/1]",
-} as const;
-
-function BannerPreview({ url, title }: { url: string | null; title: string }) {
-  const [size, setSize] = useState<keyof typeof PREVIEW_BOX>(() => (typeof window !== "undefined" && window.innerWidth < 768 ? "mobile" : "desktop"));
-  return (
-    <div className="space-y-2" aria-label="Como a capa aparece no banner da Home">
-      <div className="inline-flex h-11 items-center rounded-lg border bg-card p-0.5 sm:h-8" role="group" aria-label="Tamanho da prévia">
-        {([["mobile", "Celular"], ["tablet", "Tablet"], ["desktop", "Computador"]] as const).map(([k, label]) => (
-          <button
-            key={k}
-            type="button"
-            aria-pressed={size === k}
-            onClick={() => setSize(k)}
-            className={cn("h-10 rounded-md px-3 text-[11px] font-semibold transition-colors sm:h-7 sm:px-2.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              size === k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent")}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <div className={cn("relative w-full overflow-hidden rounded-3xl bg-[#FF5A1F] shadow-sm", PREVIEW_BOX[size])}>
-        {url ? (
-          <img src={url} alt="" className="absolute inset-0 h-full w-full select-none object-cover" style={{ objectPosition: BANNER_OBJECT_POSITION }} draggable={false} />
-        ) : (
-          <span className="absolute inset-0 flex items-center justify-center px-4 text-center text-sm font-bold text-white">{title.trim() || "Nome da campanha"}</span>
-        )}
-      </div>
     </div>
   );
 }
@@ -501,7 +462,7 @@ export function AdminCampaignWizard() {
             <SectionLabel>Imagem do banner</SectionLabel>
             <p className="mt-1 text-[12px] text-muted-foreground">É a capa da campanha e o banner da Home — uma imagem só.</p>
           </div>
-          <BannerPreview url={form.coverUrl} title={form.name} />
+          <BannerBoxPreview url={form.coverUrl} empty={form.name.trim() || "Nome da campanha"} label="Como a capa aparece no banner da Home" />
           <input ref={fileRef} id="campaign-cover-upload" type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={coverBusy || closed} onChange={(e) => pickCover(e.target.files?.[0])} />
           <div className="flex flex-wrap items-center gap-3">
             <label

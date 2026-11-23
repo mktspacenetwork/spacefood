@@ -17,6 +17,20 @@ export const BANNER_BOX_CLASSES = "aspect-[2/1] md:aspect-[3/1] lg:aspect-[3.5/1
 export const BANNER_OBJECT_POSITION = "center right";
 
 /**
+ * Largura original da imagem (sem reenviar nem converter nada), para avisar quando ela é pequena demais para o banner.
+ * Devolve `null` se o navegador não conseguir ler o arquivo (o aviso simplesmente não aparece).
+ */
+export function readImageWidth(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img.naturalWidth || null); };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+}
+
+/**
  * Reduz (no máximo 1920 px de largura) e comprime a imagem em JPEG, mantendo a proporção original.
  * Devolve também a largura original, para avisar quando a imagem é pequena demais.
  */
