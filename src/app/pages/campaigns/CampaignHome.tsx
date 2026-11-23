@@ -68,7 +68,7 @@ export function CampaignHome() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-      <CampaignCover url={campaign.cover_url} eager className="rounded-3xl shadow-sm" />
+      <CampaignCover url={campaign.cover_url} banner={campaign.visibility?.banner} eager className="rounded-3xl shadow-sm" />
 
       <div className="space-y-2">
         <h1 className="text-2xl font-bold leading-tight text-foreground">{campaign.name}</h1>

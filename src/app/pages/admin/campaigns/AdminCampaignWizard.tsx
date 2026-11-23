@@ -15,8 +15,13 @@ import { Textarea } from "../../../components/ui/textarea";
 import { cn } from "../../../lib/utils";
 import { useAuth } from "../../../context/auth-context";
 import { CampaignApiError, campaignsApi, errMsg, uploadToSignedUrl } from "../../../lib/campaigns/api";
-import { BANNER_MIN_SOURCE_WIDTH, prepareCover } from "../../../lib/campaigns/banner";
+import {
+  BANNER_DEFAULT_BG, BANNER_DEFAULT_CTA, BANNER_DEFAULT_TEXT, BANNER_GRADIENT_PRESETS, BANNER_MIN_SOURCE_WIDTH,
+  BANNER_TEXT_LIMITS, BANNER_TEXT_MASK, bannerHasText, isHexColor, isSafeBackground, prepareCover, readBannerText,
+} from "../../../lib/campaigns/banner";
+import type { BannerText } from "../../../lib/campaigns/banner";
 import { BannerBoxPreview } from "../../../components/campaigns/BannerBoxPreview";
+import { BannerTextOverlay } from "../../../components/campaigns/BannerTextOverlay";
 import { MAX_PHOTOS_PER_RECIPE, MAX_SUBMISSIONS_PER_USER } from "../../../lib/campaigns/types";
 import type { AdminCampaign, AdminCampaignDetail, Audience, Features, MediaLimits, Visibility } from "../../../lib/campaigns/types";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../../components/campaigns/CampaignTour";
@@ -56,6 +61,8 @@ type Form = {
   instructions: string;
   coverPath: string | null;
   coverUrl: string | null;
+  /** Texto do banner (mesmo modelo do menu Banners): título, descrição, botão, fundo e cor do texto. */
+  banner: BannerText;
   hasVoting: boolean;
   /** Permite mais de uma receita por colaborador (até 10). */
   multiple: boolean;
@@ -68,6 +75,8 @@ type Form = {
 type Snapshot = {
   version: number;
   status: string;
+  /** Texto do banner como está gravado (para só regravar quando mudar). */
+  bannerKey: string;
   /** Datas gravadas no servidor (valores do formulário + instantes originais + se é janela única antiga). */
   schedule: SavedSchedule;
   audienceKey: string;
@@ -85,7 +94,7 @@ type Snapshot = {
 type SiteUser = { id: string; name: string; department: string; unit: string };
 
 const initialForm = (): Form => ({
-  name: "", description: "", instructions: "", coverPath: null, coverUrl: null,
+  name: "", description: "", instructions: "", coverPath: null, coverUrl: null, banner: {},
   hasVoting: false, multiple: false, hasPhotos: true,
   period: EMPTY_SCHEDULE, audienceMode: "all", users: [],
 });
@@ -183,13 +192,14 @@ export function AdminCampaignWizard() {
     setForm({
       name: c.name, description: c.description ?? "", instructions: c.instructions ?? "",
       coverPath: c.cover_path, coverUrl: c.cover_url,
+      banner: readBannerText(c.visibility?.banner),
       hasVoting: !!c.features?.voting,
       multiple: !!c.features?.multiple_submissions,
       hasPhotos: c.features?.photos !== false,
       period: schedule.values, audienceMode: mode, users,
     });
     setSnap({
-      version: c.version, status: c.status, schedule,
+      version: c.version, status: c.status, bannerKey: JSON.stringify(readBannerText(c.visibility?.banner)), schedule,
       audienceKey: JSON.stringify({ m: mode, u: [...users].sort() }),
       multiple: !!c.features?.multiple_submissions, hasMultipleSent: false,
       hasVoting: !!c.features?.voting, votesRegistered: 0, resultsStatus: d.results?.status ?? "none",
@@ -260,9 +270,19 @@ export function AdminCampaignWizard() {
   // Sequência participação → votação → divulgação; só avalia o que mudou em relação ao gravado. Roda ANTES de enviar
   // qualquer requisição (nada é criado nem alterado se as datas estiverem fora de ordem).
   const scheduleCheck = validateSchedule(form.period, form.hasVoting, snap?.schedule ?? null);
+  // Texto do banner: as cores digitadas à mão precisam ser válidas (o seletor de cor sempre gera uma válida).
+  const bgText = (form.banner.background ?? "").trim();
+  const txtText = (form.banner.text_color ?? "").trim();
+  const bgError = bgText && !isSafeBackground(bgText) ? "Use uma cor (#RRGGBB) ou um degradê (linear-gradient(...))." : null;
+  const txtError = txtText && !isHexColor(txtText) ? "Use uma cor no formato #RRGGBB." : null;
+  const bannerProblem = bgError ? `Fundo do banner: ${bgError}` : txtError ? `Cor do texto do banner: ${txtError}` : null;
+  const bn = readBannerText(form.banner);
+  const bannerHasTextNow = bannerHasText(bn);
+  const setBanner = (patch: Partial<BannerText>) => setForm((f) => ({ ...f, banner: { ...f.banner, ...patch } }));
   const validate = (): string | null => {
     const name = form.name.trim();
     if (name.length < 3 || name.length > 120) return "Informe um nome com 3 a 120 caracteres.";
+    if (bannerProblem) return bannerProblem;
     const scheduleProblem = scheduleCheck.issue;
     if (scheduleProblem) return scheduleProblem.message;
     if (form.audienceMode === "users" && form.users.length === 0) return "Escolha pelo menos uma pessoa ou volte para \"Todos\".";
@@ -299,7 +319,8 @@ export function AdminCampaignWizard() {
           const created = await campaignsApi.post<{ id: string; slug: string }>("/admin/campaigns", {
             name: form.name.trim(), description: form.description.trim(), instructions: form.instructions.trim(),
             cover_path: form.coverPath,
-            features: simpleFeatures(form), media_limits: mediaLimits(form.hasPhotos), visibility: SIMPLE_VISIBILITY,
+            features: simpleFeatures(form), media_limits: mediaLimits(form.hasPhotos),
+            visibility: Object.keys(bn).length ? { ...SIMPLE_VISIBILITY, banner: bn } : SIMPLE_VISIBILITY,
             audience: { mode: form.audienceMode },
           });
           cid = created.id;
@@ -311,11 +332,14 @@ export function AdminCampaignWizard() {
           };
           // Rascunho: normaliza para o modelo simples (inclui o rascunho antigo). Publicada: o servidor trava
           // fotos/outras funcionalidades; só "várias receitas" e a votação (com ranking/resultado/divulgação) mudam.
+          // O texto do banner só é regravado quando mudou (o servidor troca `visibility.banner` por inteiro; {} limpa).
+          const bannerChanged = !snap || snap.bannerKey !== JSON.stringify(bn);
           if (!snap || snap.status === "draft" || snap.status === "in_review") {
             body.features = simpleFeatures(form);
             body.media_limits = mediaLimits(form.hasPhotos);
-            body.visibility = SIMPLE_VISIBILITY;
+            body.visibility = bannerChanged ? { ...SIMPLE_VISIBILITY, banner: bn } : SIMPLE_VISIBILITY;
           } else {
+            if (bannerChanged) body.visibility = { banner: bn };
             const changed: Record<string, unknown> = {};
             if (snap.multiple !== form.multiple) changed.multiple_submissions = form.multiple;
             if (snap.hasVoting !== form.hasVoting) Object.assign(changed, votingFlags(form.hasVoting));
@@ -462,7 +486,24 @@ export function AdminCampaignWizard() {
             <SectionLabel>Imagem do banner</SectionLabel>
             <p className="mt-1 text-[12px] text-muted-foreground">É a capa da campanha e o banner da Home — uma imagem só.</p>
           </div>
-          <BannerBoxPreview url={form.coverUrl} empty={form.name.trim() || "Nome da campanha"} label="Como a capa aparece no banner da Home" />
+          <BannerBoxPreview
+            url={form.coverUrl}
+            empty={bannerHasTextNow ? undefined : form.name.trim() || "Nome da campanha"}
+            background={bn.background}
+            imageClassName={bannerHasTextNow ? "opacity-90" : undefined}
+            imageStyle={bannerHasTextNow ? { maskImage: BANNER_TEXT_MASK, WebkitMaskImage: BANNER_TEXT_MASK } : undefined}
+            overlay={bannerHasTextNow ? (size) => (
+              <BannerTextOverlay
+                size={size}
+                title={bn.title}
+                description={bn.description}
+                buttonText={bn.button_text || BANNER_DEFAULT_CTA}
+                textColor={bn.text_color}
+                background={bn.background}
+              />
+            ) : undefined}
+            label="Como a capa aparece no banner da Home"
+          />
           <input ref={fileRef} id="campaign-cover-upload" type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={coverBusy || closed} onChange={(e) => pickCover(e.target.files?.[0])} />
           <div className="flex flex-wrap items-center gap-3">
             <label
@@ -486,8 +527,109 @@ export function AdminCampaignWizard() {
             Use o mesmo padrão dos banners da plataforma. Em celular e tablet as laterais podem ser cortadas: mantenha textos e elementos importantes no centro.
           </p>
           <p className="text-[11px] text-muted-foreground">
-            JPG, PNG ou WebP. Sem imagem, o banner usa o fundo laranja com o nome.
+            JPG, PNG ou WebP. Sem imagem e sem texto, o banner usa o fundo laranja com o nome da campanha.
           </p>
+
+          {/* Texto do banner: as mesmas opções do menu Banners (título, descrição, botão, fundo e cor do texto) */}
+          <div className="grid grid-cols-1 gap-4 border-t pt-4 md:grid-cols-2" data-tutorial="camp-wiz-banner-text">
+            <div className="space-y-4">
+              <Field label="Título">
+                <Input
+                  value={form.banner.title ?? ""}
+                  maxLength={BANNER_TEXT_LIMITS.title}
+                  disabled={closed}
+                  onChange={(e) => setBanner({ title: e.target.value })}
+                  placeholder="Ex: Café Especial | Memórias Afetivas"
+                />
+              </Field>
+              <Field label="Descrição">
+                <Textarea
+                  value={form.banner.description ?? ""}
+                  maxLength={BANNER_TEXT_LIMITS.description}
+                  disabled={closed}
+                  rows={3}
+                  onChange={(e) => setBanner({ description: e.target.value })}
+                  placeholder="Ex: Conte a história da sua receita e concorra."
+                />
+              </Field>
+              <Field
+                label="Texto do botão"
+                hint={`Vazio: o botão diz “${BANNER_DEFAULT_CTA}” enquanto a participação está aberta (e leva ao envio da receita).`}
+              >
+                <Input
+                  value={form.banner.button_text ?? ""}
+                  maxLength={BANNER_TEXT_LIMITS.button_text}
+                  disabled={closed}
+                  onChange={(e) => setBanner({ button_text: e.target.value })}
+                  placeholder="Ex: Participe"
+                />
+              </Field>
+            </div>
+
+            <div className="space-y-4">
+              <Field label="Fundo (cor ou degradê)">
+                <div className="flex gap-2">
+                  <input
+                    type="color"
+                    aria-label="Escolher a cor do fundo"
+                    disabled={closed}
+                    value={/^#[0-9a-f]{6}$/i.test(bgText) ? bgText : BANNER_DEFAULT_BG}
+                    onChange={(e) => setBanner({ background: e.target.value })}
+                    className="h-10 w-12 shrink-0 cursor-pointer overflow-hidden rounded border-0 p-0"
+                  />
+                  <Input
+                    value={form.banner.background ?? ""}
+                    maxLength={BANNER_TEXT_LIMITS.background}
+                    disabled={closed}
+                    onChange={(e) => setBanner({ background: e.target.value })}
+                    className="font-mono text-sm"
+                    placeholder={`${BANNER_DEFAULT_BG} ou linear-gradient(...)`}
+                    aria-invalid={!!bgError}
+                  />
+                </div>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {BANNER_GRADIENT_PRESETS.map((grad) => (
+                    <button
+                      key={grad}
+                      type="button"
+                      disabled={closed}
+                      onClick={() => setBanner({ background: grad })}
+                      className="h-6 w-6 rounded-full border border-gray-200 shadow-sm transition-transform hover:scale-110 disabled:opacity-50"
+                      style={{ background: grad }}
+                      title="Aplicar degradê"
+                      aria-label="Aplicar degradê"
+                    />
+                  ))}
+                </div>
+                {bgError && <p className="text-[11px] text-destructive">{bgError}</p>}
+              </Field>
+              <Field label="Cor do texto">
+                <div className="flex gap-2">
+                  <input
+                    type="color"
+                    aria-label="Escolher a cor do texto"
+                    disabled={closed}
+                    value={/^#[0-9a-f]{6}$/i.test(txtText) ? txtText : BANNER_DEFAULT_TEXT}
+                    onChange={(e) => setBanner({ text_color: e.target.value })}
+                    className="h-10 w-12 shrink-0 cursor-pointer overflow-hidden rounded border-0 p-0"
+                  />
+                  <Input
+                    value={form.banner.text_color ?? ""}
+                    maxLength={9}
+                    disabled={closed}
+                    onChange={(e) => setBanner({ text_color: e.target.value })}
+                    className="font-mono text-sm"
+                    placeholder={BANNER_DEFAULT_TEXT}
+                    aria-invalid={!!txtError}
+                  />
+                </div>
+                {txtError && <p className="text-[11px] text-destructive">{txtError}</p>}
+              </Field>
+              <p className="text-[11px] text-muted-foreground">
+                O banner abre a página da campanha. Quem o vê é definido em “Quem participa” e em Publicar; o link e a ordem são automáticos.
+              </p>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

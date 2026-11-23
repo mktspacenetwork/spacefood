@@ -1,11 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { api } from "../../lib/api";
 import { toast } from "sonner";
-import { Plus, Trash2, Edit, Save, X, Image as ImageIcon, Upload, ToggleLeft, ToggleRight, Layout, Loader2 } from "lucide-react";
+import { Plus, Trash2, Edit, Save, X, Image as ImageIcon, Upload, ToggleLeft, ToggleRight, Layout } from "lucide-react";
 import { Button } from "../../components/ui/Button";
-import { BannerBoxPreview } from "../../components/campaigns/BannerBoxPreview";
-import type { BannerPreviewSize } from "../../components/campaigns/BannerBoxPreview";
-import { BANNER_MIN_SOURCE_WIDTH, readImageWidth } from "../../lib/campaigns/banner";
 
 interface Banner {
   id: string;
@@ -21,63 +18,12 @@ interface Banner {
   unitRestrictions?: string[];
 }
 
-/**
- * Texto por cima da imagem, na MESMA proporção do `BannerItem` da Home (components/menu/BannerCarousel.tsx).
- * Lá os tamanhos são fixos em px por faixa de tela (celular = classes-base, tablet = `md:`, computador = `lg:`) e o banner
- * ocupa a largura da página; aqui a caixa da prévia é menor, então cada medida é convertida para `cqw` (% da largura da
- * caixa) a partir da largura REAL do banner naquela faixa — assim o texto corta (ou não) exatamente como na Home.
- * Larguras de referência: celular 343 (tela de 375 − 2×16), tablet 704 (768 − 2×32), computador 1216 (`max-w-7xl` − 2×32).
- * Se mudar o texto do banner lá, ajuste aqui também.
- */
-const OVERLAY: Record<BannerPreviewSize, {
-  ref: number; padX: number; padY: number; gap: number; title: number; desc: number;
-  btnTop: number; btnX: number; btnY: number; btnText: number; maxW: string;
-}> = {
-  mobile: { ref: 343, padX: 20, padY: 16, gap: 6, title: 16, desc: 11, btnTop: 2, btnX: 14, btnY: 6, btnText: 11, maxW: "62%" },
-  tablet: { ref: 704, padX: 40, padY: 32, gap: 16, title: 30, desc: 14, btnTop: 8, btnX: 24, btnY: 10, btnText: 14, maxW: "60%" },
-  desktop: { ref: 1216, padX: 48, padY: 32, gap: 16, title: 36, desc: 16, btnTop: 8, btnX: 24, btnY: 10, btnText: 14, maxW: "60%" },
-};
-/** Com texto, a lateral esquerda da imagem esmaece para o texto ficar legível (mesma máscara da Home). */
-const TEXT_MASK = "linear-gradient(to right, transparent 0%, black 60%)";
-
-function BannerTextOverlay({ size, banner }: { size: BannerPreviewSize; banner: Partial<Banner> }) {
-  const o = OVERLAY[size];
-  const cq = (px: number) => `${((px / o.ref) * 100).toFixed(3)}cqw`;
-  const txtColor = banner.textColor || "#000000";
-  const bgColor = banner.backgroundColor || "#f3f4f6";
-  return (
-    <div
-      className="relative z-10 flex h-full w-full flex-col items-start justify-center overflow-hidden"
-      style={{ maxWidth: o.maxW, padding: `${cq(o.padY)} ${cq(o.padX)}`, gap: cq(o.gap) }}
-    >
-      {banner.title && (
-        <h3 className="font-extrabold leading-tight tracking-tight drop-shadow-sm line-clamp-2" style={{ color: txtColor, fontSize: cq(o.title) }}>{banner.title}</h3>
-      )}
-      {banner.description && (
-        <p className="font-medium opacity-90 leading-snug drop-shadow-sm line-clamp-2" style={{ color: txtColor, fontSize: cq(o.desc) }}>{banner.description}</p>
-      )}
-      {banner.buttonText && (
-        <div className="shrink-0" style={{ marginTop: cq(o.btnTop) }}>
-          <span
-            className="inline-block rounded-full font-bold shadow-lg"
-            style={{ backgroundColor: txtColor, color: bgColor, fontSize: cq(o.btnText), padding: `${cq(o.btnY)} ${cq(o.btnX)}` }}
-          >
-            {banner.buttonText}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function AdminBanners() {
   const [banners, setBanners] = useState<Banner[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<Banner>>({});
   const [uploading, setUploading] = useState(false);
-  // "Colar o endereço (URL)": abre sozinho só quando o banner editado já usa uma URL colada (não um upload nosso)
-  const [urlOpen, setUrlOpen] = useState(false);
   
   // Use settings to control global carousel visibility + available units
   const [settings, setSettings] = useState<{ showBannerCarousel?: boolean; units?: any[] }>({});
@@ -162,7 +108,6 @@ export function AdminBanners() {
   };
 
   const startEdit = (banner?: Banner) => {
-    setUrlOpen(!!banner?.imageUrl && !banner.imageUrl.includes("/storage/v1/"));
     if (banner) {
       setEditingId(banner.id);
       setFormData(banner);
@@ -186,16 +131,11 @@ export function AdminBanners() {
     const toastId = toast.loading("Enviando imagem...");
 
     try {
-      const srcWidth = await readImageWidth(file);
       const res = await api.upload("/admin/upload", file);
       
       if (res.url) {
         setFormData(prev => ({ ...prev, imageUrl: res.url }));
-        if (srcWidth !== null && srcWidth < BANNER_MIN_SOURCE_WIDTH) {
-          toast.warning("A imagem é pequena e pode ficar sem nitidez no banner. Prefira uma foto mais larga.");
-        } else {
-          toast.success("Imagem enviada com sucesso!");
-        }
+        toast.success("Imagem enviada com sucesso!");
       } else {
         throw new Error("URL não retornada pelo servidor");
       }
@@ -219,7 +159,6 @@ export function AdminBanners() {
   ];
 
   const showCarousel = settings.showBannerCarousel !== false;
-  const hasPreviewText = !!(formData.title || formData.description || formData.buttonText);
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-6">
@@ -262,66 +201,39 @@ export function AdminBanners() {
         <div className="bg-card border rounded-xl p-6 space-y-4 shadow-sm animate-in fade-in slide-in-from-bottom-4 duration-300">
           <h2 className="text-lg font-semibold">{editingId === "new" ? "Novo Banner" : "Editar Banner"}</h2>
           
-          {/* Imagem do banner: mesma configuração da capa das campanhas (prévia nas caixas reais + dica de corte) */}
-          <div className="space-y-3 rounded-2xl border bg-muted/20 p-4">
-            <div>
-              <label className="text-sm font-medium">Imagem do Banner</label>
-              <p className="mt-0.5 text-xs text-muted-foreground">É o banner da Home — uma imagem só, para todos os aparelhos. A prévia mostra como fica em cada tamanho.</p>
-            </div>
-
-            <BannerBoxPreview
-              url={formData.imageUrl}
-              background={formData.backgroundColor || "#f3f4f6"}
-              imageClassName={hasPreviewText ? "opacity-90" : undefined}
-              imageStyle={hasPreviewText ? { maskImage: TEXT_MASK, WebkitMaskImage: TEXT_MASK } : undefined}
-              overlay={hasPreviewText ? (size) => <BannerTextOverlay size={size} banner={formData} /> : undefined}
-            />
-
-            <div className="flex flex-wrap items-center gap-3">
-              <input
-                type="file"
-                id="banner-upload"
-                className="hidden"
-                accept="image/*"
-                onChange={handleImageUpload}
-                disabled={uploading}
-              />
-              <label
-                htmlFor="banner-upload"
-                className={`flex items-center gap-2 px-3 py-2 bg-secondary text-secondary-foreground rounded-lg cursor-pointer hover:bg-secondary/80 transition-colors text-sm font-medium ${uploading ? 'opacity-50 pointer-events-none' : ''}`}
-              >
-                {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                {formData.imageUrl ? "Trocar imagem" : "Upload"}
-              </label>
-              {formData.imageUrl && !uploading && (
-                <Button type="button" variant="ghost" size="sm" className="gap-1.5 rounded-xl text-muted-foreground" onClick={() => setFormData({ ...formData, imageUrl: "" })}>
-                  <X size={13} /> Remover
-                </Button>
-              )}
-            </div>
-
-            <p className="text-[12px] font-medium text-foreground">
-              Use o mesmo padrão dos banners da plataforma. Em celular e tablet as laterais podem ser cortadas: mantenha textos e elementos importantes no centro.
-            </p>
-            <p className="text-[11px] text-muted-foreground">
-              JPG, PNG ou WebP. Sem imagem, o banner usa a cor ou o degradê de fundo escolhido abaixo.
-              {hasPreviewText && " Com título, descrição ou botão, a lateral esquerda da imagem fica esmaecida para o texto aparecer."}
-            </p>
-
-            <details className="text-xs" open={urlOpen} onToggle={(e) => setUrlOpen(e.currentTarget.open)}>
-              <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground">Ou colar o endereço (URL) de uma imagem</summary>
-              <input
-                type="text"
-                value={formData.imageUrl || ""}
-                onChange={(e) => setFormData({ ...formData, imageUrl: e.target.value })}
-                className="mt-2 w-full p-2 border rounded-lg bg-background text-sm"
-                placeholder="https://..."
-              />
-            </details>
-          </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Imagem do Banner</label>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="text"
+                    value={formData.imageUrl || ""}
+                    onChange={(e) => setFormData({ ...formData, imageUrl: e.target.value })}
+                    className="flex-1 p-2 border rounded-lg bg-background text-sm"
+                    placeholder="https://..."
+                  />
+                  <div className="relative">
+                    <input
+                      type="file"
+                      id="banner-upload"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      disabled={uploading}
+                    />
+                    <label 
+                      htmlFor="banner-upload"
+                      className={`flex items-center gap-2 px-3 py-2 bg-secondary text-secondary-foreground rounded-lg cursor-pointer hover:bg-secondary/80 transition-colors text-sm font-medium ${uploading ? 'opacity-50 pointer-events-none' : ''}`}
+                    >
+                      <Upload size={16} />
+                      {uploading ? '...' : 'Upload'}
+                    </label>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">Cole uma URL ou faça upload.</p>
+              </div>
+
               <div className="space-y-2">
                 <label className="text-sm font-medium">Título</label>
                 <input
@@ -480,6 +392,48 @@ export function AdminBanners() {
               <Save size={16} className="mr-2" />
               Salvar
             </Button>
+          </div>
+
+          {/* Preview Area */}
+          <div className="mt-4 border-t pt-4">
+            <p className="text-sm font-medium mb-2 text-muted-foreground">Pré-visualização (Aproximada):</p>
+            <div 
+              className="relative w-full h-48 sm:h-56 rounded-3xl overflow-hidden flex items-center shadow-lg transition-all"
+              style={{ background: formData.backgroundColor || '#f3f4f6' }}
+            >
+              {formData.imageUrl && (
+                <img 
+                  src={formData.imageUrl} 
+                  alt="Preview" 
+                  className={`absolute right-0 top-0 h-full w-full object-cover transition-opacity duration-300 ${
+                    (formData.title || formData.description) ? 'mask-image-linear-to-l opacity-90' : ''
+                  }`}
+                  style={{ 
+                    objectPosition: (formData.title || formData.description) ? 'center right' : 'center',
+                    maskImage: (formData.title || formData.description) ? 'linear-gradient(to right, transparent 0%, black 60%)' : 'none',
+                    WebkitMaskImage: (formData.title || formData.description) ? 'linear-gradient(to right, transparent 0%, black 60%)' : 'none'
+                  }}
+                />
+              )}
+              
+              {(formData.title || formData.description || formData.buttonText) && (
+                <div className="relative z-10 p-8 max-w-[70%] flex flex-col gap-2 items-start" style={{ color: formData.textColor || '#000' }}>
+                  {formData.title && <h3 className="text-3xl font-extrabold leading-tight drop-shadow-sm">{formData.title}</h3>}
+                  {formData.description && <p className="text-base font-medium opacity-90 drop-shadow-sm">{formData.description}</p>}
+                  {formData.buttonText && (
+                    <span 
+                      className="mt-2 px-5 py-2 rounded-full text-xs font-bold shadow-md inline-block"
+                      style={{ 
+                        backgroundColor: formData.textColor || '#000', 
+                        color: formData.backgroundColor?.includes('gradient') ? '#fff' : (formData.backgroundColor || '#fff')
+                      }}
+                    >
+                      {formData.buttonText}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -424,7 +424,7 @@ function publicCampaign(camp: Row, stages: Row[], cover?: string) {
   return {
     id: camp.id, slug: camp.slug, name: camp.name, description: camp.description, objective: camp.objective,
     instructions: camp.instructions, cover_url: cover ?? null, features: camp.features,
-    visibility: { show_podium: !!camp.visibility?.show_podium },
+    visibility: { show_podium: !!camp.visibility?.show_podium, ...bannerForPublic(camp.visibility?.banner) },
     media_limits: camp.media_limits, visible_from: camp.visible_from,
     stages: stages.map((s) => ({ key: s.stage_key, starts_at: s.starts_at, ends_at: s.ends_at, paused: s.paused })),
   };
@@ -904,9 +904,57 @@ app.post("/admin/campaigns", async (c) => {
   }
   throw lastErr;
 });
+// ── Texto do banner (campaigns.visibility.banner) ──
+// Mesmo modelo do menu Banners: título, descrição, texto do botão, fundo (cor ou degradê) e cor do texto. Tudo opcional.
+// Os limites e as regras de cor espelham `lib/campaigns/banner.ts` no front. Na GRAVAÇÃO valor inválido é recusado com
+// mensagem clara; na LEITURA (colaborador) o que não passa na regra simplesmente não sai.
+const BANNER_LIMITS = { title: 80, description: 200, button_text: 30, background: 200 } as const;
+const BANNER_LABELS: Record<string, string> = { title: "O título", description: "A descrição", button_text: "O texto do botão", background: "O fundo", text_color: "A cor do texto" };
+const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+// Degradê seguro: só `linear-gradient(` + cores/porcentagens/ângulos; nada de url(), ponto e vírgula, aspas ou barras.
+const SAFE_GRADIENT = /^linear-gradient\([#0-9a-zA-Z%.,()\s-]+\)$/;
+const isSafeBackground = (t: string) =>
+  t.length <= BANNER_LIMITS.background && (HEX_COLOR.test(t) || (SAFE_GRADIENT.test(t) && !/(url|expression|var|attr|env|image-set)\s*\(/i.test(t)));
+function cleanBanner(raw: unknown, strict: boolean): Row {
+  const out: Row = {};
+  if (raw == null) return out;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    if (strict) throw new AppError(422, "INVALID_BANNER", "Texto do banner inválido.");
+    return out;
+  }
+  const r = raw as Row;
+  const bad = (k: string, why: string): never => { throw new AppError(422, "INVALID_BANNER", `${BANNER_LABELS[k]} ${why}`); };
+  for (const k of ["title", "description", "button_text"] as const) {
+    if (r[k] == null) continue;
+    const v = typeof r[k] === "string" ? (r[k] as string).replace(/[\u0000-\u001f\u007f]+/g, " ").trim() : "";
+    if (typeof r[k] !== "string") { if (strict) bad(k, "precisa ser um texto."); continue; }
+    if (v.length > BANNER_LIMITS[k]) { if (strict) bad(k, `pode ter no máximo ${BANNER_LIMITS[k]} caracteres.`); continue; }
+    if (v) out[k] = v;
+  }
+  if (r.background != null && r.background !== "") {
+    const v = typeof r.background === "string" ? r.background.trim() : "";
+    if (isSafeBackground(v)) out.background = v;
+    else if (strict) bad("background", "precisa ser uma cor (#RRGGBB) ou um degradê (linear-gradient).");
+  }
+  if (r.text_color != null && r.text_color !== "") {
+    const v = typeof r.text_color === "string" ? r.text_color.trim() : "";
+    if (HEX_COLOR.test(v)) out.text_color = v;
+    else if (strict) bad("text_color", "precisa ser uma cor no formato #RRGGBB.");
+  }
+  return out;
+}
+/** Parte pública: só devolve `banner` se houver algo configurado. */
+function bannerForPublic(raw: unknown): Row {
+  const b = cleanBanner(raw, false);
+  return Object.keys(b).length ? { banner: b } : {};
+}
 function pickConfig(b: Row): Row {
   const out: Row = {};
   for (const k of ["description", "objective", "instructions", "cover_path", "audience", "features", "visibility", "media_limits", "type"]) if (k in b) out[k] = b[k];
+  // `visibility.banner` é substituído por inteiro no banco ({} limpa): grava só o que passou na validação
+  if (out.visibility && typeof out.visibility === "object" && !Array.isArray(out.visibility) && "banner" in (out.visibility as Row)) {
+    out.visibility = { ...(out.visibility as Row), banner: cleanBanner((out.visibility as Row).banner, true) };
+  }
   return out;
 }
 

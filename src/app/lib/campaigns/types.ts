@@ -1,4 +1,5 @@
 // Tipos das respostas da API `campaigns-api` (ver supabase/functions/campaigns-api/index.ts).
+import type { BannerText } from "./banner";
 
 export type CampaignStatus = "draft" | "in_review" | "authorized" | "closed" | "archived";
 export type StageKey = "registration" | "voting" | "results" | "announcement";
@@ -42,6 +43,8 @@ export type Visibility = {
   gallery_visibility: "on_approval" | "on_voting_start" | "on_results";
   show_podium: boolean;
   allow_preview: boolean;
+  /** Texto do banner da campanha (título, descrição, botão, fundo, cor do texto); ver `BannerText`. Opcional. */
+  banner?: BannerText;
 };
 
 export type MediaLimits = {
@@ -83,7 +86,7 @@ export type PublicCampaign = {
   instructions: string;
   cover_url: string | null;
   features: Features;
-  visibility: { show_podium: boolean };
+  visibility: { show_podium: boolean; banner?: BannerText };
   media_limits: MediaLimits;
   visible_from: string | null;
   stages: PublicStage[];

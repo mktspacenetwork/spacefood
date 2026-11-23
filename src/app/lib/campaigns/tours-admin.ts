@@ -116,7 +116,7 @@ export const ADMIN_TOUR_WIZARD: TourStep[] = [
     selector: "camp-wiz-cover",
     title: "A capa é o banner da Home",
     description:
-      "A mesma imagem vira o banner da Home quando a campanha for publicada — e sai de lá sozinha ao desativar ou encerrar. É uma imagem só para todos os aparelhos, como no menu Banners; confira a prévia.",
+      "A mesma imagem vira o banner da Home quando a campanha for publicada — e sai de lá sozinha ao desativar ou encerrar. É uma imagem só para todos os aparelhos, como no menu Banners. Aqui você também define título, descrição, botão, fundo e cor do texto, igual ao menu Banners; confira a prévia.",
     icon: icon(ImagePlus),
     placement: "bottom",
   },

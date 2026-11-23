@@ -1,4 +1,5 @@
 import { campaignsApi } from "./api";
+import { BANNER_DEFAULT_BG, BANNER_DEFAULT_TEXT, bannerHasText, readBannerText } from "./banner";
 import type { CollabCampaignListItem } from "./types";
 
 /**
@@ -26,6 +27,11 @@ export type HomeCampaignBanner = {
    * (`object-cover`, posição padrão) e acrescenta o botão de envio (`cta`).
    */
   campaign: true;
+  /**
+   * Campanha com TEXTO configurado no cadastro (título, descrição, botão, fundo e cor do texto — o mesmo modelo do menu
+   * Banners): o slide desenha o texto por cima da imagem, como os banners comuns. Sem isto, tudo segue como sempre.
+   */
+  styled?: true;
   /**
    * Botão "Envie sua receita": só existe enquanto a campanha aceita envio NO PRAZO (servidor: `can_submit` verdadeiro e
    * fora da janela de atraso). Quando a votação começa, o prazo acaba ou o limite de receitas é atingido, some sozinho.
@@ -78,6 +84,7 @@ function submitCta(c: CollabCampaignListItem): HomeCampaignBanner["cta"] {
 
 function toBanner(c: CollabCampaignListItem, i: number): HomeCampaignBanner {
   const cta = submitCta(c);
+  const text = readBannerText(c.visibility?.banner);
   const base: HomeCampaignBanner = {
     id: `campaign-${c.id}`,
     link: `/campanhas/${c.slug}`,
@@ -87,6 +94,19 @@ function toBanner(c: CollabCampaignListItem, i: number): HomeCampaignBanner {
     campaign: true, // mesma caixa e regra de imagem dos banners comuns; só acrescenta o botão de envio
     cta,
   };
+  // Texto configurado: mesmo modelo dos banners comuns (a imagem é opcional; sem ela o fundo escolhido aparece).
+  if (bannerHasText(text)) {
+    return {
+      ...base,
+      ...(c.cover_url ? { imageUrl: c.cover_url } : {}),
+      title: text.title,
+      description: text.description,
+      buttonText: text.button_text,
+      backgroundColor: text.background ?? BANNER_DEFAULT_BG,
+      textColor: text.text_color ?? BANNER_DEFAULT_TEXT,
+      styled: true,
+    };
+  }
   if (c.cover_url) return { ...base, imageUrl: c.cover_url };
   // Sem capa: texto sobre o laranja do site (mesmo padrão do banner padrão). Com o botão de envio, o "Ver campanha" some.
   return {
@@ -94,8 +114,8 @@ function toBanner(c: CollabCampaignListItem, i: number): HomeCampaignBanner {
     title: c.name,
     description: shorten(c.description, 90) || undefined,
     buttonText: cta ? undefined : "Ver campanha",
-    backgroundColor: "#FF5A1F",
-    textColor: "#FFFFFF",
+    backgroundColor: text.background ?? "#FF5A1F",
+    textColor: text.text_color ?? "#FFFFFF",
   };
 }
 
