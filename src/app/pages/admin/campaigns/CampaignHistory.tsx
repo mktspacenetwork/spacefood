@@ -100,18 +100,22 @@ export function CampaignHistory() {
   const canDuplicate = !!perms.campaigns_duplicate;
   const canDelete = !!perms.campaigns_edit;
 
-  // Excluir campanha DESATIVADA = ocultar (nada é apagado; dá para restaurar em Excluídas). Exige confirmação pelo nome e motivo.
+  // Excluir (Concluída ou Desativada) = ocultar a campanha de todas as telas (nada é apagado; dá para restaurar em Excluídas).
+  // Excluída = "Remover do histórico": ela deixa de aparecer aqui (nada é apagado). Os dois exigem confirmação pelo nome e motivo.
   const doDelete = async (confirmName: string, reason: string) => {
     const target = deleteTarget;
     if (!target) return;
+    const hide = target.kind === "deleted";
     const r = await run(
       `delete:${target.id}`,
-      () => campaignsApi.post(`/admin/campaigns/${target.id}/soft-delete`, { confirm: confirmName, reason }),
-      "Campanha excluída. Ela está em Histórico de campanhas › Excluídas.",
+      () => campaignsApi.post(`/admin/campaigns/${target.id}/${hide ? "history-hide" : "soft-delete"}`, { confirm: confirmName, reason }),
+      hide
+        ? "Campanha removida do histórico. Nada foi apagado: receitas, votos e auditoria continuam guardados."
+        : "Campanha excluída. Ela está em Histórico de campanhas › Excluídas.",
     );
     if (r.ok) {
       setDeleteTarget(null);
-      list.setData((d) => (d ? d.filter((x) => x.id !== target.id) : d)); // some das Desativadas já; a recarga confirma
+      list.setData((d) => (d ? d.filter((x) => x.id !== target.id) : d)); // sai da categoria atual já; a recarga confirma (e a excluída reaparece em Excluídas)
       void list.reload();
     }
   };
@@ -347,6 +351,7 @@ export function CampaignHistory() {
         open={deleteTarget !== null}
         onOpenChange={(o) => !o && setDeleteTarget(null)}
         campaignName={deleteTarget?.name ?? ""}
+        mode={deleteTarget?.kind === "deleted" ? "hide" : "delete"}
         pending={deleteTarget !== null && busy === `delete:${deleteTarget.id}`}
         onConfirm={doDelete}
       />

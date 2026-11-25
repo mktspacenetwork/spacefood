@@ -199,13 +199,14 @@ async function getPerms(userId: string): Promise<Record<string, boolean>> {
 type Admin = { user: AuthUser; perms: Record<string, boolean>; actor: Record<string, unknown> };
 // Campanha EXCLUÍDA (oculta) não aceita nenhuma escrita pela API, só a restauração (o gatilho do banco só protege a linha de
 // `campaigns`; período, divulgação, público, receitas e resultado moram em outras tabelas). Leituras (GET) seguem liberadas, e
-// restaurar e duplicar passam (duplicar não altera a original).
+// restaurar, duplicar e "remover do histórico" passam (duplicar não altera a original; remover do histórico só grava numa tabela à
+// parte, sem tocar na campanha).
 // deno-lint-ignore no-explicit-any
 async function assertCampaignNotDeleted(c: any) {
   const method = c.req.method;
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return;
   const id = c.req.param("id");
-  if (!id || !/^[0-9a-f-]{36}$/i.test(id) || /\/(restore|duplicate)\/?$/.test(c.req.path)) return;
+  if (!id || !/^[0-9a-f-]{36}$/i.test(id) || /\/(restore|duplicate|history-hide)\/?$/.test(c.req.path)) return;
   const { data } = await sb.from("campaigns").select("deleted_at").eq("id", id).maybeSingle();
   if (data?.deleted_at) throw new AppError(409, "CAMPAIGN_DELETED", ERR.CAMPAIGN_DELETED[1]);
 }
@@ -842,7 +843,10 @@ app.get("/admin/campaigns", async (c) => {
 app.get("/admin/campaigns/history", async (c) => {
   await requireAdmin(c, "campaigns");
   const { data } = await sb.from("campaigns").select("id,slug,name,status,features,authorized_at,suspended_at,closed_at,archived_at,created_at,deleted_at").order("created_at", { ascending: false });
-  const rows = data ?? [];
+  // Campanhas EXCLUÍDAS que o administrador removeu do Histórico não aparecem aqui (ficam guardadas; ver `campaign_history_hidden`).
+  const { data: hiddenRows } = await sb.from("campaign_history_hidden").select("campaign_id");
+  const hidden = new Set((hiddenRows ?? []).map((h) => h.campaign_id));
+  const rows = (data ?? []).filter((r) => !(r.deleted_at && hidden.has(r.id)));
   const ids = rows.map((r) => r.id);
   if (!ids.length) return c.json([]);
   const [{ data: stages }, { data: results }, { data: subs }] = await Promise.all([
@@ -1093,7 +1097,26 @@ app.post("/admin/campaigns/:id/soft-delete", async (c) => {
   const reason = typeof b.reason === "string" ? b.reason.trim() : "";
   if (reason.length < 5) throw new AppError(422, "REASON_REQUIRED", "Informe o motivo da exclusão (mínimo de 5 caracteres).");
   if (reason.length > 500) throw new AppError(422, "REASON_TOO_LONG", "O motivo pode ter no máximo 500 caracteres.");
+  // Campanha CONCLUÍDA por fim de período segue "authorized" e sem suspensão; o banco a trataria como "no ar". Quem decide que ela é
+  // Concluída é ESTE servidor (mesma regra do Histórico: `priorKind`), nunca o cliente. No ar de verdade, ou ainda em apuração, segue recusada.
+  const camp = await getCampaignById(c.req.param("id"));
+  const { data: res } = await sb.from("campaign_results").select("status").eq("campaign_id", camp.id).maybeSingle();
+  const allowEnded = priorKind(camp, await getStages(camp.id), res?.status ?? null) === "ended";
   await rpc("campaign_soft_delete", {
+    p_actor: a.actor, p_campaign: c.req.param("id"), p_confirm: typeof b.confirm === "string" ? b.confirm : "", p_reason: reason,
+    p_allow_ended: allowEnded,
+  });
+  return c.json({ ok: true });
+});
+// "Remover do histórico": só campanha JÁ EXCLUÍDA. Ela deixa de aparecer no Histórico de campanhas, mas NADA é apagado (campanha, receitas,
+// votos e auditoria ficam guardados). Exige o nome da campanha e o MOTIVO; a auditoria grava motivo, administrador, campanha e data/hora.
+app.post("/admin/campaigns/:id/history-hide", async (c) => {
+  const a = await requireAdmin(c, "campaigns_edit");
+  const b = await body(c);
+  const reason = typeof b.reason === "string" ? b.reason.trim() : "";
+  if (reason.length < 5) throw new AppError(422, "REASON_REQUIRED", "Informe o motivo (mínimo de 5 caracteres).");
+  if (reason.length > 500) throw new AppError(422, "REASON_TOO_LONG", "O motivo pode ter no máximo 500 caracteres.");
+  await rpc("campaign_history_hide", {
     p_actor: a.actor, p_campaign: c.req.param("id"), p_confirm: typeof b.confirm === "string" ? b.confirm : "", p_reason: reason,
   });
   return c.json({ ok: true });

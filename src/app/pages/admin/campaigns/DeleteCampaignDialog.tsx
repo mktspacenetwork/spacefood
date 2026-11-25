@@ -17,11 +17,16 @@ const norm = (s: string) => s.normalize("NFC").replace(/\s+/g, " ").trim().toLow
 export const MIN_DELETE_REASON = 5;
 export const MAX_DELETE_REASON = 500;
 export function DeleteCampaignDialog({
-  open, onOpenChange, campaignName, isDraft = false, pending = false, onConfirm,
+  open, onOpenChange, campaignName, isDraft = false, pending = false, onConfirm, mode = "delete",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   campaignName: string;
+  /**
+   * "delete" (padrão): excluir a campanha (ela vai para Histórico › Excluídas).
+   * "hide": remover do Histórico uma campanha JÁ EXCLUÍDA (ela deixa de aparecer na lista; nada é apagado).
+   */
+  mode?: "delete" | "hide";
   /** Rascunho: o texto não cita receitas, votos nem o Livro. */
   isDraft?: boolean;
   pending?: boolean;
@@ -32,6 +37,7 @@ export function DeleteCampaignDialog({
   useEffect(() => {
     if (open) { setText(""); setReason(""); }
   }, [open]);
+  const hide = mode === "hide";
   const match = norm(text) === norm(campaignName) && norm(campaignName).length > 0;
   const reasonOk = reason.trim().length >= MIN_DELETE_REASON;
   const ready = match && reasonOk;
@@ -44,16 +50,18 @@ export function DeleteCampaignDialog({
     <Dialog open={open} onOpenChange={(v) => !pending && onOpenChange(v)}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Excluir a campanha?</DialogTitle>
+          <DialogTitle>{hide ? "Remover do histórico?" : "Excluir a campanha?"}</DialogTitle>
           <DialogDescription>
-            {isDraft
-              ? "A campanha some das listas e do site. Nada é apagado: você a encontra em Histórico de campanhas › Excluídas e pode restaurá-la."
-              : "A campanha some das listas e do site. Receitas, votos e histórico ficam guardados e você pode restaurá-la em Histórico de campanhas › Excluídas. As receitas aprovadas continuam no Livro de Receitas, se ele estiver publicado: remova-as por lá se quiser."}
+            {hide
+              ? "A campanha, que já está excluída, deixa de aparecer no Histórico de campanhas. Nada é apagado: a campanha, as receitas, os votos e a auditoria continuam guardados. Não há botão de desfazer na tela."
+              : isDraft
+                ? "A campanha some das listas e do site. Nada é apagado: você a encontra em Histórico de campanhas › Excluídas e pode restaurá-la."
+                : "A campanha some das listas e do site. Receitas, votos e histórico ficam guardados e você pode restaurá-la em Histórico de campanhas › Excluídas. As receitas aprovadas continuam no Livro de Receitas, se ele estiver publicado: remova-as por lá se quiser."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
           <Label htmlFor="delete-campaign-reason" className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Motivo da exclusão (obrigatório)
+            {hide ? "Motivo da remoção (obrigatório)" : "Motivo da exclusão (obrigatório)"}
           </Label>
           <Textarea
             id="delete-campaign-reason"
@@ -91,7 +99,7 @@ export function DeleteCampaignDialog({
           </Button>
           <Button variant="destructive" onClick={submit} disabled={!ready || pending} className="h-11 gap-2 rounded-xl">
             {pending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-            Excluir campanha
+            {hide ? "Remover do histórico" : "Excluir campanha"}
           </Button>
         </DialogFooter>
       </DialogContent>

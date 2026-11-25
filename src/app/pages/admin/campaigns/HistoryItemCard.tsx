@@ -65,7 +65,10 @@ export type HistoryItemCardProps = {
   canReactivate: boolean;
   canRestore: boolean;
   canDuplicate: boolean;
-  /** Pode excluir (permissão `campaigns_edit`). O botão só aparece em campanha DESATIVADA; o servidor confere a permissão de novo. */
+  /**
+   * Pode excluir (permissão `campaigns_edit`; o servidor confere de novo). O botão aparece em TODAS as situações do Histórico:
+   * Concluída e Desativada = "Excluir" (a campanha vai para Excluídas); Excluída = "Remover do histórico" (deixa de aparecer; nada é apagado).
+   */
   canDelete: boolean;
   /** Alguma ação está em andamento: trava os botões para não repetir. */
   busy: boolean;
@@ -157,14 +160,14 @@ export function HistoryItemCard(p: HistoryItemCardProps) {
               <Copy size={15} aria-hidden="true" /> Duplicar
             </Button>
           )}
-          {it.kind === "suspended" && p.canDelete && (
+          {p.canDelete && (
             <Button
               variant="outline"
               className="h-11 gap-2 rounded-xl border-destructive/40 px-4 text-destructive hover:bg-destructive/10 hover:text-destructive"
               onClick={p.onDelete}
               disabled={p.busy}
             >
-              <Trash2 size={15} aria-hidden="true" /> Excluir
+              <Trash2 size={15} aria-hidden="true" /> {it.kind === "deleted" ? "Remover do histórico" : "Excluir"}
             </Button>
           )}
         </div>
