@@ -35,8 +35,9 @@ export function CampaignHome() {
     enabled: !!state.tour?.enabled && !!user,
   });
 
-  // O MESMO banner da Home e da lista de Campanhas (mesmos dados: imagem, texto e botão configurados no cadastro). Nesta página o
-  // slide inteiro não é link (já estamos na campanha); o botão continua ativo.
+  // O mesmo banner da Home e da lista de Campanhas (mesmos dados: imagem e texto configurados no cadastro). Nesta página o slide
+  // inteiro não é link (já estamos na campanha) e o botão do banner não aparece: ele existe só na Home, e aqui a ação do momento
+  // já é o botão logo abaixo.
   const banner = useMemo(
     () => campaignToBanner({ ...campaign, state, ended: false } as unknown as CollabCampaignListItem),
     [campaign, state],
@@ -63,7 +64,7 @@ export function CampaignHome() {
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
       <div className="overflow-hidden rounded-3xl shadow-sm">
-        <CampaignBannerSlide banner={banner} fit="container" linkSlide={false} />
+        <CampaignBannerSlide banner={banner} fit="container" linkSlide={false} showButton={false} />
       </div>
 
       <div className="space-y-2">

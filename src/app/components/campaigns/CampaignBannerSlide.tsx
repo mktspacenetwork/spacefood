@@ -16,8 +16,9 @@ import type { BannerFit } from "./BannerTextLayer";
  *  - `fit="viewport"` (Home): medidas por tamanho de TELA, como os banners comuns.
  *  - `fit="container"` (Campanhas): a página é mais estreita que a Home; em tablet/computador as medidas do texto seguem a
  *    largura do próprio banner (ver `BannerTextLayer`). No celular é idêntico à Home.
- *  - `linkSlide={false}`: o slide inteiro NÃO é link (usado na própria página da campanha, para não "abrir a si mesma");
- *    o botão continua ativo.
+ *  - `linkSlide={false}`: o slide inteiro NÃO é link (usado na própria página da campanha, para não "abrir a si mesma").
+ *  - `showButton={false}`: o banner aparece SEM o botão (o texto, título e descrição, continua). Usado na área de Campanhas
+ *    (lista e página da campanha), onde o botão repetiria a ação que o cartão e a página já oferecem; o botão fica só na Home.
  */
 export type CampaignSlideData = {
   /** Página da campanha (o slide inteiro é um link para ela). */
@@ -59,8 +60,8 @@ function SlideLayer({ to, label, linkSlide, children }: { to: string; label?: st
  * slide inteiro é um link; o botão é outro link, IRMÃO (nunca um dentro do outro). Fica no canto inferior esquerdo, acima
  * da linha dos pontos do carrossel. O alvo de toque de 44 px vem de uma área invisível estendida (`before:`).
  */
-function LegacySlide({ banner, fit, linkSlide }: { banner: CampaignSlideData; fit: BannerFit; linkSlide: boolean }) {
-  const { cta } = banner;
+function LegacySlide({ banner, fit, linkSlide, showButton }: { banner: CampaignSlideData; fit: BannerFit; linkSlide: boolean; showButton: boolean }) {
+  const cta = showButton ? banner.cta : undefined;
   const hasImage = !!banner.imageUrl;
   const hasText = !hasImage && !!(banner.title || banner.description);
   const bgColor = banner.backgroundColor || (hasImage ? "#f3f4f6" : "#FF5A1F");
@@ -133,15 +134,15 @@ function LegacySlide({ banner, fit, linkSlide }: { banner: CampaignSlideData; fi
  * envio da receita e o rótulo é o texto configurado (ou "Envie sua receita" se vazio); sem `cta`, o botão só aparece se houver
  * texto configurado e é decorativo (o slide já é o link).
  */
-function StyledSlide({ banner, fit, linkSlide }: { banner: CampaignSlideData; fit: BannerFit; linkSlide: boolean }) {
-  const { cta } = banner;
+function StyledSlide({ banner, fit, linkSlide, showButton }: { banner: CampaignSlideData; fit: BannerFit; linkSlide: boolean; showButton: boolean }) {
+  const cta = showButton ? banner.cta : undefined;
   const hasImage = !!banner.imageUrl;
   const bgColor = banner.backgroundColor || "#FF5A1F";
   const txtColor = banner.textColor || "#FFFFFF";
   const pillText = bannerPillTextColor(bgColor);
   const label = banner.alt || banner.title || "Campanha";
   const pillStyle = { backgroundColor: txtColor, color: pillText };
-  const buttonLabel = cta ? banner.buttonText || cta.label : banner.buttonText;
+  const buttonLabel = showButton ? (cta ? banner.buttonText || cta.label : banner.buttonText) : undefined;
   const pill = bannerPillClasses(fit);
 
   return (
@@ -178,13 +179,14 @@ function StyledSlide({ banner, fit, linkSlide }: { banner: CampaignSlideData; fi
 }
 
 export function CampaignBannerSlide({
-  banner, fit = "viewport", linkSlide = true,
+  banner, fit = "viewport", linkSlide = true, showButton = true,
 }: {
   banner: CampaignSlideData;
   fit?: BannerFit;
   linkSlide?: boolean;
+  showButton?: boolean;
 }) {
   return banner.styled
-    ? <StyledSlide banner={banner} fit={fit} linkSlide={linkSlide} />
-    : <LegacySlide banner={banner} fit={fit} linkSlide={linkSlide} />;
+    ? <StyledSlide banner={banner} fit={fit} linkSlide={linkSlide} showButton={showButton} />
+    : <LegacySlide banner={banner} fit={fit} linkSlide={linkSlide} showButton={showButton} />;
 }

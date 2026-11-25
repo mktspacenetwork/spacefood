@@ -12,8 +12,8 @@ import type { CollabCampaignListItem } from "../../lib/campaigns/types";
 /**
  * Cartão da lista, em quatro blocos curtos:
  *   Banner · Nome e situação (chip + período) · Receitas (só quem já enviou) · Ação (botão do momento).
- * O banner é EXATAMENTE o mesmo da Home (mesma imagem, texto e botão configurados na campanha: `CampaignBannerSlide`); o nome
- * abre a campanha; o botão leva direto ao que dá para fazer agora. `first` marca o 1º cartão para a tour.
+ * O banner é o mesmo da Home (mesma imagem e mesmo texto configurados na campanha: `CampaignBannerSlide`), sem o botão do banner (o
+ * cartão já tem o seu, logo abaixo; o botão do banner fica só na Home); o nome abre a campanha; o botão leva direto ao que dá para fazer agora. `first` marca o 1º cartão para a tour.
  */
 export function CampaignCard({ campaign, first = false }: { campaign: CollabCampaignListItem; first?: boolean }) {
   const base = `/campanhas/${campaign.slug}`;
@@ -29,7 +29,7 @@ export function CampaignCard({ campaign, first = false }: { campaign: CollabCamp
   return (
     <Card className="overflow-hidden rounded-3xl">
       <div data-tutorial={first ? "camp-card" : undefined}>
-        <CampaignBannerSlide banner={banner} fit="container" />
+        <CampaignBannerSlide banner={banner} fit="container" showButton={false} />
         <Link
           to={base}
           aria-label={`Abrir a campanha ${campaign.name}`}
