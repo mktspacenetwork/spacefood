@@ -48,20 +48,43 @@ async function getToken(force = false): Promise<string | null> {
   }
 }
 
+/** Tempo máximo de uma leitura (GET) antes de ser cancelada e repetida. */
+const GET_TIMEOUT_MS = 20_000;
+/** Respostas que indicam indisponibilidade momentânea (vale repetir a leitura). */
+const RETRY_STATUS = new Set([502, 503, 504]);
+
 async function doFetch(method: string, path: string, token: string | null, body?: unknown): Promise<Response> {
   const headers: Record<string, string> = { Authorization: `Bearer ${publicAnonKey}` };
   if (token) headers["X-User-Auth-Token"] = token;
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  const init: RequestInit = { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined };
-  // Só repete GET em falha de rede; POST/PUT não repetem para nunca duplicar uma ação.
+  // Só repete GET (idempotente); POST/PUT não repetem para nunca duplicar uma ação.
+  //  - falha de rede OU resposta sem retorno em 20 s (a chamada é cancelada): antes uma chamada pendurada deixava o banner/a
+  //    lista sem nunca resolver;
+  //  - 502/503/504 (gateway/servidor momentaneamente indisponível): antes virava erro na hora e a tela ficava sem o banner
+  //    até a próxima atualização da página; agora tenta de novo.
   const attempts = method === "GET" ? 3 : 1;
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
+    const last = i === attempts - 1;
+    // AbortController + temporizador (e não AbortSignal.timeout, que não existe em iPhones mais antigos)
+    const ctl = method === "GET" ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), GET_TIMEOUT_MS) : null;
     try {
-      return await fetch(`${BASE}${path}`, init);
+      const init: RequestInit = {
+        method, headers, body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: ctl?.signal,
+      };
+      const res = await fetch(`${BASE}${path}`, init);
+      if (method === "GET" && RETRY_STATUS.has(res.status) && !last) {
+        await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+        continue;
+      }
+      return res;
     } catch (err) {
       lastErr = err;
-      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+      if (!last) await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
   throw new CampaignApiError(0, "NETWORK", "Sem conexão com o servidor. Verifique sua internet e tente de novo.", lastErr);

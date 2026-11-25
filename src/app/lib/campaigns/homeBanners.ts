@@ -42,7 +42,6 @@ export type HomeCampaignBanner = {
 const CTA_LABEL = "Envie sua receita";
 
 const TTL_MS = 60_000;
-const TIMEOUT_MS = 3_000;
 
 let cache: { key: string; ts: number; data: HomeCampaignBanner[] } | null = null;
 let pending: { key: string; promise: Promise<HomeCampaignBanner[]> } | null = null;
@@ -72,7 +71,7 @@ function shorten(text: string, max: number): string {
  * nunca mostrar o botão depois do prazo. Limite de receitas atingido ou votação aberta → o servidor manda `can_submit`
  * falso e o botão não aparece.
  */
-function submitCta(c: CollabCampaignListItem): HomeCampaignBanner["cta"] {
+export function submitCta(c: CollabCampaignListItem): HomeCampaignBanner["cta"] {
   const s = c.state as CollabCampaignListItem["state"] & { late_window?: boolean };
   if (s.can_submit !== true || s.late_window === true) return undefined;
   const reg = (c.stages ?? []).find((st) => st.key === "registration");
@@ -82,7 +81,11 @@ function submitCta(c: CollabCampaignListItem): HomeCampaignBanner["cta"] {
   return { label: CTA_LABEL, link: `/campanhas/${c.slug}/enviar` };
 }
 
-function toBanner(c: CollabCampaignListItem, i: number): HomeCampaignBanner {
+/**
+ * Dados do banner de UMA campanha — usados pela Home (carrossel), pela lista de Campanhas e pela página da campanha, para o
+ * banner ser sempre o mesmo: mesma imagem, mesmo texto, mesmo botão (campanhas antigas inclusas). `i` só ordena o carrossel.
+ */
+export function campaignToBanner(c: CollabCampaignListItem, i = 0): HomeCampaignBanner {
   const cta = submitCta(c);
   const text = readBannerText(c.visibility?.banner);
   const base: HomeCampaignBanner = {
@@ -120,8 +123,9 @@ function toBanner(c: CollabCampaignListItem, i: number): HomeCampaignBanner {
 }
 
 /**
- * Banners das campanhas visíveis para a pessoa. NUNCA lança erro (falha = lista vazia) e nunca demora
- * mais que alguns segundos, para jamais atrapalhar a Home. Guarda o resultado por 60 s.
+ * Banners das campanhas visíveis para a pessoa. NUNCA lança erro (falha = lista vazia). Quem chama (o carrossel) é que decide
+ * até quando o esqueleto espera: antes havia aqui um corte de 3 s que DESCARTAVA a resposta quando o servidor demorava, e o
+ * slide da campanha simplesmente não aparecia naquela visita. Guarda o resultado por 60 s.
  * `userKey` evita reaproveitar o cache de outra pessoa na mesma aba.
  */
 export async function fetchHomeCampaignBanners(userKey = "anon"): Promise<HomeCampaignBanner[]> {
@@ -133,7 +137,7 @@ export async function fetchHomeCampaignBanners(userKey = "anon"): Promise<HomeCa
       .then((list) => {
         const data = (Array.isArray(list) ? list : [])
           .filter((c) => c?.state?.released && c.state.stage !== "closed" && !hasEnded(c))
-          .map(toBanner);
+          .map((c, i) => campaignToBanner(c, i));
         cache = { key: userKey, ts: Date.now(), data };
         return data;
       })
@@ -144,6 +148,5 @@ export async function fetchHomeCampaignBanners(userKey = "anon"): Promise<HomeCa
     pending = { key: userKey, promise };
   }
 
-  const timeout = new Promise<HomeCampaignBanner[]>((resolve) => setTimeout(() => resolve([]), TIMEOUT_MS));
-  return Promise.race([pending.promise, timeout]);
+  return pending.promise;
 }

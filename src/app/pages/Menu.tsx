@@ -44,6 +44,9 @@ export function Menu() {
   const [selectedCategory, setSelectedCategory] = useState("Todos");
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
+  // Os pedidos do usuário já foram carregados (com sucesso ou não)? Antes disso não dá para saber se existe pedido na data vista;
+  // o carrossel só é desenhado depois, para não aparecer por instantes e sumir.
+  const [ordersReady, setOrdersReady] = useState(false);
   const [fullCatalog, setFullCatalog] = useState<MenuItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [hasAbstained, setHasAbstained] = useState(false);
@@ -212,6 +215,7 @@ export function Menu() {
       }
 
       setLoading(false);
+      setOrdersReady(true);
     };
 
     bootstrap();
@@ -752,10 +756,12 @@ export function Menu() {
           )}
 
           {/* Banner Carousel - Controlled by settings.showBannerCarousel (default true).
-               Hidden only when an order banner is active for the viewed date (campaign slides included).
+               Com pedido na data vista os banners COMUNS ficam escondidos (regra do site), mas o slide da CAMPANHA continua
+               visível (`campaignsOnly`). Só é desenhado depois de os pedidos carregarem (`ordersReady`): antes, com `orderForDate`
+               ainda vazio, o carrossel aparecia por instantes e sumia para quem já tinha pedido.
                Manual logs (Taipas diary) do NOT count as "ordered", so banners always show. */}
-          {!orderForDate && (settings.showBannerCarousel !== false) && (
-            <BannerCarousel userUnit={selectedUnit} />
+          {ordersReady && (settings.showBannerCarousel !== false) && (
+            <BannerCarousel userUnit={selectedUnit} campaignsOnly={!!orderForDate} />
           )}
 
           {/* Previous Day Menu Banner */}

@@ -96,7 +96,7 @@ export const ADMIN_TOUR_HISTORY: TourStep[] = [
     selector: "camp-history-actions",
     title: "O que dá para fazer",
     description:
-      "Abrir e Relatórios consultam tudo da campanha; Duplicar cria uma cópia em rascunho. Reativar (campanhas desativadas) e Restaurar (excluídas) devolvem a campanha à lista principal, sem reabrir períodos já encerrados.",
+      "Abrir e Relatórios consultam tudo da campanha; Duplicar cria uma cópia em rascunho. Reativar (campanhas desativadas) e Restaurar (excluídas) devolvem a campanha à lista principal, sem reabrir períodos já encerrados. Excluir (só em campanhas desativadas) esconde a campanha de todas as telas: pede o motivo e o nome da campanha, fica registrado na auditoria e dá para restaurar depois.",
     icon: icon(ArchiveRestore),
     placement: "top",
   },

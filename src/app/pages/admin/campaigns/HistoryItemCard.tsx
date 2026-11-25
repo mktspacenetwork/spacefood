@@ -1,4 +1,4 @@
-import { ArchiveRestore, BarChart3, CalendarDays, ChefHat, Copy, Eye, FolderOpen, Loader2 } from "lucide-react";
+import { ArchiveRestore, BarChart3, CalendarDays, ChefHat, Copy, Eye, FolderOpen, Loader2, Trash2 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card, CardContent } from "../../../components/ui/Card";
 import { Badge } from "../../../components/ui/Badge";
@@ -65,6 +65,8 @@ export type HistoryItemCardProps = {
   canReactivate: boolean;
   canRestore: boolean;
   canDuplicate: boolean;
+  /** Pode excluir (permissão `campaigns_edit`). O botão só aparece em campanha DESATIVADA; o servidor confere a permissão de novo. */
+  canDelete: boolean;
   /** Alguma ação está em andamento: trava os botões para não repetir. */
   busy: boolean;
   /** Ação em andamento deste cartão ("reactivate" | "restore"), para o botão mostrar o spinner. */
@@ -72,6 +74,7 @@ export type HistoryItemCardProps = {
   onOpen: () => void;
   onReports: () => void;
   onDuplicate: () => void;
+  onDelete: () => void;
   onRestorable: () => void;
   /** Primeiro cartão da lista: leva os alvos (`data-tutorial`) da tour da tela. */
   tutorial?: boolean;
@@ -152,6 +155,16 @@ export function HistoryItemCard(p: HistoryItemCardProps) {
           {p.canDuplicate && (
             <Button variant="outline" className="h-11 gap-2 rounded-xl px-4" onClick={p.onDuplicate} disabled={p.busy}>
               <Copy size={15} aria-hidden="true" /> Duplicar
+            </Button>
+          )}
+          {it.kind === "suspended" && p.canDelete && (
+            <Button
+              variant="outline"
+              className="h-11 gap-2 rounded-xl border-destructive/40 px-4 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={p.onDelete}
+              disabled={p.busy}
+            >
+              <Trash2 size={15} aria-hidden="true" /> Excluir
             </Button>
           )}
         </div>

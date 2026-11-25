@@ -4,7 +4,7 @@ import { CheckCircle2, ChevronRight, Info } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "../../components/ui/Button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../components/ui/sheet";
-import { CampaignCover } from "../../components/campaigns/CampaignCover";
+import { CampaignBannerSlide } from "../../components/campaigns/CampaignBannerSlide";
 import { StatusChip } from "../../components/campaigns/StatusChip";
 import { PeriodRows } from "../../components/campaigns/PeriodRows";
 import {
@@ -15,6 +15,8 @@ import { useCampaignCtx } from "./CampaignLayout";
 import { useAuth } from "../../context/Store";
 import { homeTour } from "../../lib/campaigns/tours-collab";
 import { fmtDateTime } from "../../lib/campaigns/format";
+import { campaignToBanner } from "../../lib/campaigns/homeBanners";
+import type { CollabCampaignListItem } from "../../lib/campaigns/types";
 
 type Cta = { label: string; to: string };
 
@@ -33,6 +35,12 @@ export function CampaignHome() {
     enabled: !!state.tour?.enabled && !!user,
   });
 
+  // O MESMO banner da Home e da lista de Campanhas (mesmos dados: imagem, texto e botão configurados no cadastro). Nesta página o
+  // slide inteiro não é link (já estamos na campanha); o botão continua ativo.
+  const banner = useMemo(
+    () => campaignToBanner({ ...campaign, state, ended: false } as unknown as CollabCampaignListItem),
+    [campaign, state],
+  );
   const status = statusOfDetail(campaign, state);
   const periods = periodRows(campaign);
   const count = submissionsCount(state);
@@ -68,7 +76,9 @@ export function CampaignHome() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-      <CampaignCover url={campaign.cover_url} banner={campaign.visibility?.banner} eager className="rounded-3xl shadow-sm" />
+      <div className="overflow-hidden rounded-3xl shadow-sm">
+        <CampaignBannerSlide banner={banner} fit="container" linkSlide={false} />
+      </div>
 
       <div className="space-y-2">
         <h1 className="text-2xl font-bold leading-tight text-foreground">{campaign.name}</h1>

@@ -143,10 +143,10 @@ export function AdminCampaigns() {
     else setSoftDeleteTarget(c);
   };
 
-  const doSoftDelete = async (confirmName: string) => {
+  const doSoftDelete = async (confirmName: string, reason: string) => {
     const target = softDeleteTarget;
     if (!target) return;
-    const r = await run("softdelete", () => campaignsApi.post(`/admin/campaigns/${target.id}/soft-delete`, { confirm: confirmName }),
+    const r = await run("softdelete", () => campaignsApi.post(`/admin/campaigns/${target.id}/soft-delete`, { confirm: confirmName, reason }),
       "Campanha excluída. Ela está em Histórico de campanhas › Excluídas.");
     if (r.ok) { setSoftDeleteTarget(null); reloadAll(); }
   };

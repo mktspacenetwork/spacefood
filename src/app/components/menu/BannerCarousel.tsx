@@ -6,8 +6,7 @@ import { api } from "../../lib/api";
 import { Link } from "react-router";
 import { useAuth } from "../../context/Store";
 import { fetchHomeCampaignBanners } from "../../lib/campaigns/homeBanners";
-import { BANNER_TEXT_MASK, bannerPillTextColor } from "../../lib/campaigns/banner";
-import { BANNER_PILL_CLASSES, BannerTextLayer } from "../campaigns/BannerTextLayer";
+import { CampaignBannerSlide } from "../campaigns/CampaignBannerSlide";
 // @ts-ignore
 import exampleBanner from "figma:asset/5791843b5a574f8adc2665f1e6dc54ea3d4302e6.png";
 
@@ -105,151 +104,13 @@ const BannerItem = ({ banner }: { banner: Banner }) => {
 };
 
 /**
- * Slide de CAMPANHA — IGUAL aos banners comuns: a MESMA caixa (classes de proporção 2:1 → 3:1 → 3,5:1, cantos e
- * transição de `BannerItem`; a altura do carrossel é a mesma para todos os slides) e a MESMA regra de imagem do banner
- * só-imagem (`absolute inset-0 w-full h-full object-cover`, posição `center right`, opacidade total). Nada de contain,
- * fundo desfocado ou altura variável. Uma capa de proporção diferente da caixa tem as bordas cortadas, como em qualquer banner.
- *
- * O botão "Envie sua receita" tem o MESMO estilo, tamanho por breakpoint e margem lateral dos botões (`buttonText`) dos
- * banners comuns. O slide inteiro é um link (`/campanhas/<slug>`); o botão é outro link, IRMÃO (nunca um dentro do
- * outro), então tocar nele vai ao cadastro da receita. O botão fica no canto inferior esquerdo, acima da linha dos
- * pontos do carrossel (que ficam embaixo à direita). O alvo de toque de 44 px vem de uma área invisível estendida
- * (`before:`), sem aumentar o visual do botão.
- */
-const CampaignSlide = ({ banner }: { banner: Banner }) => {
-  const { cta } = banner;
-  const hasImage = !!banner.imageUrl;
-  const hasText = !hasImage && !!(banner.title || banner.description);
-  const bgColor = banner.backgroundColor || (hasImage ? "#f3f4f6" : "#FF5A1F");
-  const label = banner.alt || banner.title || "Campanha";
-
-  return (
-    <div
-      className="relative w-full aspect-[2/1] md:aspect-[3/1] lg:aspect-[3.5/1] flex items-center overflow-hidden bg-cover bg-center transition-all"
-      style={{ background: bgColor }}
-    >
-      {/* Camada clicável do slide inteiro */}
-      <Link
-        to={banner.link ?? "/campanhas"}
-        draggable={false}
-        aria-label={hasImage ? undefined : label}
-        className="absolute inset-0 block outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-      >
-        {hasImage && (
-          <img
-            src={banner.imageUrl}
-            alt={label}
-            draggable={false}
-            className="absolute inset-0 w-full h-full object-cover select-none transition-opacity duration-500 opacity-100"
-            style={{ objectPosition: banner.objectPosition ?? "center right" }}
-          />
-        )}
-      </Link>
-
-      {(hasText || cta) && (
-        <div
-          className={`pointer-events-none relative z-10 flex h-full w-full flex-col items-start overflow-hidden px-5 md:px-10 lg:px-12 ${
-            hasText
-              ? "justify-center gap-1.5 py-3 md:gap-4 md:py-8"
-              : "max-w-[62%] justify-end pb-6 pt-4 md:max-w-[60%] md:pb-8 md:pt-8"
-          }`}
-          style={hasText ? { color: banner.textColor || "#FFFFFF" } : undefined}
-        >
-          {hasText && banner.title && (
-            <h2 className="text-sm sm:text-base md:text-3xl lg:text-4xl font-extrabold leading-tight tracking-tight drop-shadow-sm [overflow-wrap:anywhere]">
-              {banner.title}
-            </h2>
-          )}
-          {hasText && banner.description && (
-            <p className="text-[11px] sm:text-xs md:text-sm lg:text-base font-medium opacity-90 leading-snug drop-shadow-sm [overflow-wrap:anywhere]">
-              {banner.description}
-            </p>
-          )}
-          {cta && (
-            <div className="mt-0.5 md:mt-2 shrink-0">
-              <Link
-                to={cta.link}
-                draggable={false}
-                aria-label={banner.alt ? `${cta.label} — ${banner.alt}` : cta.label}
-                className="pointer-events-auto relative inline-block select-none rounded-full px-3.5 py-1.5 text-[11px] font-bold shadow-lg transition-transform before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-[''] hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-700 focus-visible:ring-offset-2 focus-visible:ring-offset-white active:scale-95 sm:text-xs md:px-6 md:py-2.5 md:text-sm"
-                style={{ backgroundColor: "#FFFFFF", color: "#c2410c" }}
-              >
-                {cta.label}
-              </Link>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-/**
- * Slide de campanha COM TEXTO configurado no cadastro (título, descrição, botão, fundo e cor do texto — as mesmas opções
- * do menu Banners). Desenha igual ao `BannerItem`: a MESMA caixa (2:1 → 3:1 → 3,5:1), a imagem com a lateral esquerda
- * esmaecida e o texto real por cima (não corta no celular, ao contrário do texto desenhado dentro da imagem).
- *
- * Mantém o comportamento do `CampaignSlide`: o slide inteiro é um link para a campanha e o botão é um link IRMÃO. Com
- * participação aberta no prazo (`cta`), o botão leva ao envio da receita e o rótulo é o texto configurado (ou "Envie sua
- * receita" se vazio); sem `cta`, o botão só aparece se houver texto configurado e é decorativo (o slide já é o link).
- */
-const StyledCampaignSlide = ({ banner }: { banner: Banner }) => {
-  const { cta } = banner;
-  const hasImage = !!banner.imageUrl;
-  const bgColor = banner.backgroundColor || "#FF5A1F";
-  const txtColor = banner.textColor || "#FFFFFF";
-  const pillText = bannerPillTextColor(bgColor);
-  const label = banner.alt || banner.title || "Campanha";
-  const pillStyle = { backgroundColor: txtColor, color: pillText };
-  const buttonLabel = cta ? banner.buttonText || cta.label : banner.buttonText;
-
-  return (
-    <div
-      className="relative w-full aspect-[2/1] md:aspect-[3/1] lg:aspect-[3.5/1] flex items-center overflow-hidden bg-cover bg-center transition-all"
-      style={{ background: bgColor }}
-    >
-      {/* Camada clicável do slide inteiro */}
-      <Link
-        to={banner.link ?? "/campanhas"}
-        draggable={false}
-        aria-label={hasImage ? undefined : label}
-        className="absolute inset-0 block outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-      >
-        {hasImage && (
-          <img
-            src={banner.imageUrl}
-            alt={label}
-            draggable={false}
-            className="absolute inset-0 w-full h-full object-cover select-none transition-opacity duration-500 opacity-90"
-            style={{ objectPosition: banner.objectPosition ?? "center right", maskImage: BANNER_TEXT_MASK, WebkitMaskImage: BANNER_TEXT_MASK }}
-          />
-        )}
-      </Link>
-
-      <BannerTextLayer title={banner.title} description={banner.description} textColor={txtColor} className="pointer-events-none">
-        {buttonLabel && (cta ? (
-          <Link
-            to={cta.link}
-            draggable={false}
-            aria-label={banner.alt ? `${buttonLabel} — ${banner.alt}` : buttonLabel}
-            className={`${BANNER_PILL_CLASSES} pointer-events-auto relative select-none transition-transform before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-[''] hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black active:scale-95`}
-            style={pillStyle}
-          >
-            {buttonLabel}
-          </Link>
-        ) : (
-          <span className={BANNER_PILL_CLASSES} style={pillStyle}>{buttonLabel}</span>
-        ))}
-      </BannerTextLayer>
-    </div>
-  );
-};
-
-/**
  * Carrossel da Home: banners de campanhas publicadas (na frente) + banners comuns.
- * Com o pedido do dia já feito a Home nem renderiza o carrossel (regra original do site; ver Menu.tsx).
+ *
+ * `campaignsOnly`: com o pedido do dia já feito (regra do site) os banners comuns não aparecem, mas o slide da CAMPANHA continua
+ * visível para quem pediu o almoço também (ver Menu.tsx). Nesse modo não há esqueleto nem banner padrão: se não houver campanha
+ * visível, nada é desenhado (nenhum espaço vazio).
  */
-export function BannerCarousel({ userUnit }: { userUnit?: string }) {
+export function BannerCarousel({ userUnit, campaignsOnly = false }: { userUnit?: string; campaignsOnly?: boolean }) {
   const { user } = useAuth();
   const [banners, setBanners] = useState<Banner[]>([]);
   const [campaignBanners, setCampaignBanners] = useState<Banner[]>([]);
@@ -263,7 +124,7 @@ export function BannerCarousel({ userUnit }: { userUnit?: string }) {
     const campaigns = fetchHomeCampaignBanners(user?.id ?? "anon")
       .then((list) => { if (!stale) setCampaignBanners(list as Banner[]); })
       .catch(() => { if (!stale) setCampaignBanners([]); });
-    const regular = api.get(`/banners${unitParam}`)
+    const regular = campaignsOnly ? Promise.resolve() : api.get(`/banners${unitParam}`)
       .then((data) => {
         if (stale) return;
         if (Array.isArray(data)) {
@@ -279,9 +140,12 @@ export function BannerCarousel({ userUnit }: { userUnit?: string }) {
         console.error("Failed to load banners", err);
         setBanners([]);
       });
-    Promise.all([regular, campaigns]).finally(() => { if (!stale) setLoading(false); });
+    // O esqueleto espera os dois por até 3 s. A resposta das campanhas que chegar DEPOIS entra do mesmo jeito (antes era descartada
+    // e o slide da campanha ficava de fora naquela visita).
+    const cutoff = new Promise<void>((resolve) => setTimeout(resolve, 3000));
+    Promise.race([Promise.all([regular, campaigns]), cutoff]).finally(() => { if (!stale) setLoading(false); });
     return () => { stale = true; };
-  }, [userUnit, user?.id]);
+  }, [userUnit, user?.id, campaignsOnly]);
 
   const defaultBanner: Banner = {
     id: "default",
@@ -292,10 +156,12 @@ export function BannerCarousel({ userUnit }: { userUnit?: string }) {
   };
 
   // Campanhas publicadas entram na frente; o banner padrão só aparece se não houver nenhum slide.
-  const allBanners = [...campaignBanners, ...banners];
-  const displayBanners = allBanners.length > 0 ? allBanners : [defaultBanner];
+  const allBanners = [...campaignBanners, ...(campaignsOnly ? [] : banners)];
+  const displayBanners = allBanners.length > 0 ? allBanners : campaignsOnly ? [] : [defaultBanner];
 
-  if (loading) {
+  if (campaignsOnly && displayBanners.length === 0) return null;
+
+  if (loading && !campaignsOnly) {
     return (
       <div className="w-full aspect-[2/1] md:aspect-[3/1] rounded-3xl bg-muted animate-pulse mb-6" />
     );
@@ -348,7 +214,7 @@ export function BannerCarousel({ userUnit }: { userUnit?: string }) {
             if (banner.campaign) {
               return (
                 <div key={banner.id} className="outline-none h-full">
-                  {banner.styled ? <StyledCampaignSlide banner={banner} /> : <CampaignSlide banner={banner} />}
+                  <CampaignBannerSlide banner={banner} />
                 </div>
               );
             }

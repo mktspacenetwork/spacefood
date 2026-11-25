@@ -122,6 +122,7 @@ const DATES_MSG: Record<string, string> = {
 const FIELD_LABELS: Record<string, string> = {
   dish_name: "Título da receita", description: "História e memória afetiva", ingredients: "Ingredientes",
   preparation: "Modo de preparo", name: "Nome da campanha", key: "Chave", story: "História", author_label: "Autor",
+  reason: "Motivo da exclusão",
 };
 // deno-lint-ignore no-explicit-any
 function fromPg(error: any): AppError {
@@ -1083,11 +1084,18 @@ app.delete("/admin/campaigns/:id", async (c) => {
   await requireAdmin(c, "campaigns_edit");
   throw new AppError(409, "HARD_DELETE_DISABLED", ERR.HARD_DELETE_DISABLED[1]);
 });
-// "Excluir campanha" = OCULTAR: nada é apagado (receitas, votos e auditoria ficam); só campanha fora do ar; confirma-se digitando o nome.
+// "Excluir campanha" = OCULTAR: nada é apagado (receitas, votos e auditoria ficam); só campanha fora do ar; confirma-se digitando o nome
+// e informando o MOTIVO (5 a 500 caracteres), que vai para a auditoria junto de quem excluiu, da campanha e da data/hora.
+// A permissão (`campaigns_edit`) é conferida AQUI, antes de qualquer coisa: esconder o botão na tela não basta.
 app.post("/admin/campaigns/:id/soft-delete", async (c) => {
   const a = await requireAdmin(c, "campaigns_edit");
   const b = await body(c);
-  await rpc("campaign_soft_delete", { p_actor: a.actor, p_campaign: c.req.param("id"), p_confirm: typeof b.confirm === "string" ? b.confirm : "" });
+  const reason = typeof b.reason === "string" ? b.reason.trim() : "";
+  if (reason.length < 5) throw new AppError(422, "REASON_REQUIRED", "Informe o motivo da exclusão (mínimo de 5 caracteres).");
+  if (reason.length > 500) throw new AppError(422, "REASON_TOO_LONG", "O motivo pode ter no máximo 500 caracteres.");
+  await rpc("campaign_soft_delete", {
+    p_actor: a.actor, p_campaign: c.req.param("id"), p_confirm: typeof b.confirm === "string" ? b.confirm : "", p_reason: reason,
+  });
   return c.json({ ok: true });
 });
 app.post("/admin/campaigns/:id/restore", async (c) => {

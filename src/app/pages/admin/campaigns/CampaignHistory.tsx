@@ -14,6 +14,7 @@ import { CampaignTour, TourButton, tourKey, useTour } from "../../../components/
 import { ADMIN_TOUR_HISTORY } from "../../../lib/campaigns/tours-admin";
 import { useCampaignPerms } from "./useCampaignPerms";
 import { DuplicateDialog } from "./DuplicateDialog";
+import { DeleteCampaignDialog } from "./DeleteCampaignDialog";
 import { HistoryItemCard } from "./HistoryItemCard";
 import { EmptyBox, ErrorBox, LoadingBox, RestrictedBox, useBusy, useLoader } from "./shared";
 import { SectionNav } from "./SectionNav";
@@ -67,6 +68,7 @@ export function CampaignHistory() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [dupTarget, setDupTarget] = useState<AdminHistoryItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminHistoryItem | null>(null);
 
   const setCategory = (k: CategoryFilter) => {
     const next = new URLSearchParams(params);
@@ -96,6 +98,23 @@ export function CampaignHistory() {
   const canReactivate = !!perms.campaigns_publish;
   const canRestore = !!perms.campaigns_edit;
   const canDuplicate = !!perms.campaigns_duplicate;
+  const canDelete = !!perms.campaigns_edit;
+
+  // Excluir campanha DESATIVADA = ocultar (nada é apagado; dá para restaurar em Excluídas). Exige confirmação pelo nome e motivo.
+  const doDelete = async (confirmName: string, reason: string) => {
+    const target = deleteTarget;
+    if (!target) return;
+    const r = await run(
+      `delete:${target.id}`,
+      () => campaignsApi.post(`/admin/campaigns/${target.id}/soft-delete`, { confirm: confirmName, reason }),
+      "Campanha excluída. Ela está em Histórico de campanhas › Excluídas.",
+    );
+    if (r.ok) {
+      setDeleteTarget(null);
+      list.setData((d) => (d ? d.filter((x) => x.id !== target.id) : d)); // some das Desativadas já; a recarga confirma
+      void list.reload();
+    }
+  };
 
   const doConfirm = async () => {
     const c = confirm;
@@ -295,11 +314,13 @@ export function CampaignHistory() {
                     canReactivate={canReactivate}
                     canRestore={canRestore}
                     canDuplicate={canDuplicate}
+                    canDelete={canDelete}
                     busy={busy !== null}
                     busyKey={busy}
                     onOpen={() => navigate(`/admin/campaigns/${it.id}`)}
                     onReports={() => navigate(`/admin/campaigns/${it.id}?tab=reports`)}
                     onDuplicate={() => setDupTarget(it)}
+                    onDelete={() => setDeleteTarget(it)}
                     onRestorable={() => it.restorable && setConfirm({ kind: it.restorable === "reactivate" ? "reactivate" : "restore", item: it })}
                   />
                 </li>
@@ -320,6 +341,14 @@ export function CampaignHistory() {
         }
         confirmLabel={confirm?.kind === "reactivate" ? "Reativar" : "Restaurar"}
         onConfirm={doConfirm}
+      />
+
+      <DeleteCampaignDialog
+        open={deleteTarget !== null}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        campaignName={deleteTarget?.name ?? ""}
+        pending={deleteTarget !== null && busy === `delete:${deleteTarget.id}`}
+        onConfirm={doDelete}
       />
 
       {dupTarget && (

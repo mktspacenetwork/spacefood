@@ -288,8 +288,8 @@ export function AdminCampaignPanel() {
   };
 
   // "Excluir campanha" = ocultar: some das listas e do site; receitas, votos e histórico ficam guardados e dá para restaurar.
-  const doSoftDelete = async (confirmName: string) => {
-    const r = await run("softdelete", () => campaignsApi.post(`${base}/soft-delete`, { confirm: confirmName }),
+  const doSoftDelete = async (confirmName: string, reason: string) => {
+    const r = await run("softdelete", () => campaignsApi.post(`${base}/soft-delete`, { confirm: confirmName, reason }),
       "Campanha excluída. Ela está em Histórico de campanhas › Excluídas.");
     if (r.ok) { setDeleteOpen(false); navigate("/admin/campaigns"); }
   };

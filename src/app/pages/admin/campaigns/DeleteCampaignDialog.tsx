@@ -3,6 +3,7 @@ import { Loader2, Trash2 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Input } from "../../../components/ui/input";
 import { Label } from "../../../components/ui/label";
+import { Textarea } from "../../../components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 
 /** Compara sem diferença de maiúsculas, acentos compostos ou espaços repetidos (o que a pessoa digitou x o nome salvo). */
@@ -10,8 +11,11 @@ const norm = (s: string) => s.normalize("NFC").replace(/\s+/g, " ").trim().toLow
 
 /**
  * "Excluir campanha" = OCULTAR: ela some das listas e do site, mas receitas, votos e histórico ficam guardados e dá para restaurar.
- * Só habilita o botão depois de a pessoa digitar o nome da campanha. Ao confirmar, envia o nome salvo (o servidor confere de novo).
+ * Só habilita o botão depois de a pessoa digitar o nome da campanha E informar o motivo (mínimo de 5 caracteres). Ao confirmar,
+ * envia o nome salvo e o motivo (o servidor confere os dois de novo e grava o motivo na auditoria).
  */
+export const MIN_DELETE_REASON = 5;
+export const MAX_DELETE_REASON = 500;
 export function DeleteCampaignDialog({
   open, onOpenChange, campaignName, isDraft = false, pending = false, onConfirm,
 }: {
@@ -21,16 +25,19 @@ export function DeleteCampaignDialog({
   /** Rascunho: o texto não cita receitas, votos nem o Livro. */
   isDraft?: boolean;
   pending?: boolean;
-  onConfirm: (confirm: string) => void | Promise<void>;
+  onConfirm: (confirm: string, reason: string) => void | Promise<void>;
 }) {
   const [text, setText] = useState("");
+  const [reason, setReason] = useState("");
   useEffect(() => {
-    if (open) setText("");
+    if (open) { setText(""); setReason(""); }
   }, [open]);
   const match = norm(text) === norm(campaignName) && norm(campaignName).length > 0;
+  const reasonOk = reason.trim().length >= MIN_DELETE_REASON;
+  const ready = match && reasonOk;
 
   const submit = () => {
-    if (match && !pending) void onConfirm(campaignName);
+    if (ready && !pending) void onConfirm(campaignName, reason.trim());
   };
 
   return (
@@ -44,6 +51,22 @@ export function DeleteCampaignDialog({
               : "A campanha some das listas e do site. Receitas, votos e histórico ficam guardados e você pode restaurá-la em Histórico de campanhas › Excluídas. As receitas aprovadas continuam no Livro de Receitas, se ele estiver publicado: remova-as por lá se quiser."}
           </DialogDescription>
         </DialogHeader>
+        <div className="space-y-2">
+          <Label htmlFor="delete-campaign-reason" className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            Motivo da exclusão (obrigatório)
+          </Label>
+          <Textarea
+            id="delete-campaign-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            maxLength={MAX_DELETE_REASON}
+            rows={2}
+            placeholder="Ex.: campanha criada só para teste."
+            disabled={pending}
+            className="rounded-xl"
+          />
+          <p className="text-[11px] text-muted-foreground">Fica registrado na auditoria, com o seu nome e a data e hora.</p>
+        </div>
         <div className="space-y-2">
           <Label htmlFor="delete-campaign-name" className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
             Digite o nome da campanha para confirmar
@@ -66,7 +89,7 @@ export function DeleteCampaignDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending} className="h-11 rounded-xl">
             Cancelar
           </Button>
-          <Button variant="destructive" onClick={submit} disabled={!match || pending} className="h-11 gap-2 rounded-xl">
+          <Button variant="destructive" onClick={submit} disabled={!ready || pending} className="h-11 gap-2 rounded-xl">
             {pending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
             Excluir campanha
           </Button>
