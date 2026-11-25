@@ -48,30 +48,16 @@ export function CampaignHome() {
   const multi = max > 1;
   const mine = recipesSummary(count, state.my_submission_status);
 
-  // Um botão principal (a ação do momento) e, no máximo, um secundário.
-  let primary: Cta | null = null;
-  let secondary: Cta | null = null;
+  // UM só botão no corpo da página: a AÇÃO DO MOMENTO (enviar a receita, votar ou ver o resultado). Receitas, Minhas receitas,
+  // Cadastrar, Votação e Resultado já estão no menu da campanha, logo acima: repetir cada uma em botão grande era duplicidade
+  // (ex.: "Minhas receitas" e "Ver receitas" apareciam no menu E no corpo). Sem ação pendente nenhum botão aparece.
+  let cta: Cta | null = null;
   const votingNow = hasVoting && !!state.can_vote;
   if (state.released) {
-    if (hasVoting && state.results_visible) primary = { label: "Ver resultado", to: `${base}/resultado` };
-    else if (count === 0 && state.can_submit) {
-      primary = { label: "Cadastrar receita", to: `${base}/enviar` };
-      if (votingNow) secondary = { label: "Votar nas receitas", to: `${base}/votacao` };
-      else if (state.gallery_visible) secondary = { label: "Ver receitas", to: `${base}/receitas` };
-    } else if (votingNow) {
-      primary = { label: "Votar", to: `${base}/votacao` };
-      if (count > 0) secondary = state.can_submit
-        ? { label: "Cadastrar outra receita", to: `${base}/enviar` }
-        : { label: "Minhas receitas", to: `${base}/participacao` };
-    } else if (count > 0) {
-      if (state.can_submit) {
-        primary = { label: "Cadastrar outra receita", to: `${base}/enviar` };
-        secondary = { label: "Minhas receitas", to: `${base}/participacao` };
-      } else {
-        primary = { label: "Minhas receitas", to: `${base}/participacao` };
-        if (state.gallery_visible) secondary = { label: "Ver receitas", to: `${base}/receitas` };
-      }
-    } else if (state.gallery_visible) primary = { label: "Ver receitas", to: `${base}/receitas` };
+    if (hasVoting && state.results_visible) cta = { label: "Ver resultado", to: `${base}/resultado` };
+    else if (count === 0 && state.can_submit) cta = { label: "Enviar minha receita", to: `${base}/enviar` };
+    else if (votingNow) cta = { label: "Votar", to: `${base}/votacao` };
+    else if (count > 0 && state.can_submit) cta = { label: "Enviar outra receita", to: `${base}/enviar` };
   }
 
   return (
@@ -98,17 +84,10 @@ export function CampaignHome() {
         </p>
       )}
 
-      {primary && (
-        <div className="space-y-2">
-          <Button size="lg" data-tutorial="camp-cta" onClick={() => navigate(primary!.to)} className="h-14 w-full rounded-2xl text-base font-bold">
-            {primary.label}
-          </Button>
-          {secondary && (
-            <Button variant="outline" onClick={() => navigate(secondary!.to)} className="h-12 w-full rounded-2xl text-sm font-semibold">
-              {secondary.label}
-            </Button>
-          )}
-        </div>
+      {cta && (
+        <Button size="lg" data-tutorial="camp-cta" onClick={() => navigate(cta!.to)} className="h-14 w-full rounded-2xl text-base font-bold">
+          {cta.label}
+        </Button>
       )}
 
       <div className="flex items-center justify-between gap-3">

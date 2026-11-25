@@ -44,7 +44,7 @@ export const LIST_TOUR: TourStep[] = [
     selector: "camp-card-action",
     icon: icon(MousePointerClick),
     title: "Ir direto à ação",
-    description: "O botão leva ao que dá para fazer agora, como participar ou ver as suas receitas.",
+    description: "O botão abre a campanha para você conhecer as regras e participar, ou leva direto ao que dá para fazer agora, como votar ou ver o resultado.",
   },
 ];
 
@@ -58,8 +58,8 @@ export function homeTour(hasVoting: boolean): TourStep[] {
       icon: icon(MousePointerClick),
       title: "Ação do momento",
       description: hasVoting
-        ? "Este botão leva ao que dá para fazer agora: cadastrar sua receita, votar ou ver o resultado."
-        : "Este botão leva ao que dá para fazer agora: cadastrar sua receita ou ver as suas receitas.",
+        ? "Este botão leva ao que dá para fazer agora: enviar sua receita, votar ou ver o resultado. As demais telas ficam no menu logo acima."
+        : "Este botão leva ao que dá para fazer agora: enviar sua receita. As demais telas ficam no menu logo acima.",
     },
     {
       selector: "camp-sections",

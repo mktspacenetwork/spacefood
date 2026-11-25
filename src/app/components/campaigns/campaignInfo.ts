@@ -183,6 +183,10 @@ export type CardAction = { label: string; to: "" | "/enviar" | "/participacao" |
 /**
  * Botão do cartão da lista: a ação que faz sentido agora. Usa os campos do servidor quando existem
  * e, se não vierem, deduz pelas datas (lista leve).
+ *
+ * "Ver campanha" e "Participar da campanha" abrem a PÁGINA da campanha (informações, regras, menu e o botão "Enviar minha receita"):
+ * a jornada é Home → Ver campanha → conhecer → participar → enviar. "Minhas receitas" não é mais botão do cartão (fica no menu
+ * da campanha). "Votar" e "Ver resultado" seguem indo direto à tela deles.
  */
 export function cardAction(c: CollabCampaignListItem): CardAction {
   const s = c.state;
@@ -191,10 +195,9 @@ export function cardAction(c: CollabCampaignListItem): CardAction {
   const vot = hasVoting(c) ? phaseOf(stageOf(c, "voting")) : "unset";
   const canSubmit = s.can_submit ?? (reg === "open" && count < submissionsMax(c, s) && s.stage !== "closed");
   const canVote = hasVoting(c) && (s.can_vote ?? (vot === "open" && !s.has_voted));
-  if (!s.released) return { label: "Ver detalhes", to: "", emphasis: "outline" };
+  if (!s.released) return { label: "Ver campanha", to: "", emphasis: "outline" };
   if (s.results_visible || s.stage === "results") return { label: "Ver resultado", to: "/resultado", emphasis: "primary" };
-  if (count === 0 && canSubmit) return { label: "Participar", to: "/enviar", emphasis: "primary" };
+  if (count === 0 && canSubmit) return { label: "Participar da campanha", to: "", emphasis: "primary" };
   if (canVote) return { label: "Votar", to: "/votacao", emphasis: "primary" };
-  if (count > 0) return { label: "Minhas receitas", to: "/participacao", emphasis: "outline" };
-  return { label: "Ver detalhes", to: "", emphasis: "outline" };
+  return { label: "Ver campanha", to: "", emphasis: "outline" };
 }
