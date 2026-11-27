@@ -30,7 +30,7 @@ interface Banner {
   campaign?: boolean;
   /** slide de campanha com texto configurado no cadastro (mesmo modelo dos banners comuns): ver `StyledCampaignSlide` */
   styled?: boolean;
-  /** slides de campanha: botão "Envie sua receita" (só enquanto a campanha aceita envio no prazo) */
+  /** slides de campanha: botão que leva à página da campanha (só enquanto a campanha aceita envio no prazo) */
   cta?: { label: string; link: string };
 }
 

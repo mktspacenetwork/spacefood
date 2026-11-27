@@ -92,8 +92,8 @@ export const BANNER_TEXT_LIMITS = { title: 80, description: 200, button_text: 30
 /** Padrões da campanha: laranja do site com texto branco. */
 export const BANNER_DEFAULT_BG = "#FF5A1F";
 export const BANNER_DEFAULT_TEXT = "#FFFFFF";
-/** Rótulo do botão quando a participação está aberta e o texto do botão fica vazio. */
-export const BANNER_DEFAULT_CTA = "Envie sua receita";
+/** Rótulo do botão quando a participação está aberta e o texto do botão fica vazio. O botão leva à página da campanha. */
+export const BANNER_DEFAULT_CTA = "Ver campanha";
 /** Com texto, a lateral esquerda da imagem esmaece para o texto ficar legível (mesma máscara dos banners comuns). */
 export const BANNER_TEXT_MASK = "linear-gradient(to right, transparent 0%, black 60%)";
 /** Os mesmos degradês prontos do menu Banners. */

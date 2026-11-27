@@ -1,5 +1,5 @@
 import { campaignsApi } from "./api";
-import { BANNER_DEFAULT_BG, BANNER_DEFAULT_TEXT, bannerHasText, readBannerText } from "./banner";
+import { BANNER_DEFAULT_BG, BANNER_DEFAULT_CTA, BANNER_DEFAULT_TEXT, bannerHasText, readBannerText } from "./banner";
 import type { CollabCampaignListItem } from "./types";
 
 /**
@@ -24,7 +24,7 @@ export type HomeCampaignBanner = {
   objectPosition?: string;
   /**
    * Marca o slide de campanha: o carrossel o desenha na MESMA caixa e com a MESMA regra de imagem dos banners comuns
-   * (`object-cover`, posição padrão) e acrescenta o botão de envio (`cta`).
+   * (`object-cover`, posição padrão) e acrescenta o botão (`cta`), que leva à PÁGINA DA CAMPANHA.
    */
   campaign: true;
   /**
@@ -33,13 +33,12 @@ export type HomeCampaignBanner = {
    */
   styled?: true;
   /**
-   * Botão "Envie sua receita": só existe enquanto a campanha aceita envio NO PRAZO (servidor: `can_submit` verdadeiro e
-   * fora da janela de atraso). Quando a votação começa, o prazo acaba ou o limite de receitas é atingido, some sozinho.
+   * Botão do slide: só existe enquanto a campanha aceita envio NO PRAZO (servidor: `can_submit` verdadeiro e fora da janela
+   * de atraso). Quando a votação começa, o prazo acaba ou o limite de receitas é atingido, some sozinho. Leva à PÁGINA INICIAL
+   * DA CAMPANHA (pedido do usuário, 2026-11-27); de lá a pessoa escolhe o que fazer. Antes levava direto ao formulário de envio.
    */
   cta?: { label: string; link: string };
 };
-
-const CTA_LABEL = "Envie sua receita";
 
 const TTL_MS = 60_000;
 
@@ -66,7 +65,7 @@ function shorten(text: string, max: number): string {
 }
 
 /**
- * Chamada "Envie sua receita" do slide. Segue o servidor: `state.can_submit === true` e fora da janela de atraso
+ * Botão do slide (leva à página da campanha). Segue o servidor: `state.can_submit === true` e fora da janela de atraso
  * (`late_window`, que NÃO conta). Como a lista fica em cache por 60 s, confere também as datas da participação para
  * nunca mostrar o botão depois do prazo. Limite de receitas atingido ou votação aberta → o servidor manda `can_submit`
  * falso e o botão não aparece.
@@ -78,7 +77,7 @@ export function submitCta(c: CollabCampaignListItem): HomeCampaignBanner["cta"] 
   const now = Date.now();
   if (reg?.starts_at && new Date(reg.starts_at).getTime() > now) return undefined;
   if (reg?.ends_at && new Date(reg.ends_at).getTime() <= now) return undefined;
-  return { label: CTA_LABEL, link: `/campanhas/${c.slug}/enviar` };
+  return { label: BANNER_DEFAULT_CTA, link: `/campanhas/${c.slug}` };
 }
 
 /**
@@ -111,7 +110,7 @@ export function campaignToBanner(c: CollabCampaignListItem, i = 0): HomeCampaign
     };
   }
   if (c.cover_url) return { ...base, imageUrl: c.cover_url };
-  // Sem capa: texto sobre o laranja do site (mesmo padrão do banner padrão). Com o botão de envio, o "Ver campanha" some.
+  // Sem capa: texto sobre o laranja do site (mesmo padrão do banner padrão). Com o botão (`cta`, que já diz "Ver campanha"), este não repete.
   return {
     ...base,
     title: c.name,

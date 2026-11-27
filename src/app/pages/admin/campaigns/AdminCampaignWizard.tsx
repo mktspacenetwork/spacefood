@@ -554,7 +554,7 @@ export function AdminCampaignWizard() {
               </Field>
               <Field
                 label="Texto do botão"
-                hint={`Vazio: o botão diz “${BANNER_DEFAULT_CTA}” enquanto a participação está aberta (e leva ao envio da receita).`}
+                hint={`Vazio: o botão diz “${BANNER_DEFAULT_CTA}” enquanto a participação está aberta. Ele aparece só na Home e leva à página da campanha.`}
               >
                 <Input
                   value={form.banner.button_text ?? ""}

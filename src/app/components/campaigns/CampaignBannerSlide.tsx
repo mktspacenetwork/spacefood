@@ -34,7 +34,7 @@ export type CampaignSlideData = {
   objectPosition?: string;
   /** Campanha com texto configurado no cadastro (mesmo modelo dos banners comuns). */
   styled?: boolean;
-  /** Botão de envio: só existe enquanto a campanha aceita envio NO PRAZO. */
+  /** Botão do slide (leva à página da campanha): só existe enquanto a campanha aceita envio NO PRAZO. */
   cta?: { label: string; link: string };
 };
 
@@ -130,9 +130,9 @@ function LegacySlide({ banner, fit, linkSlide, showButton }: { banner: CampaignS
  * do menu Banners). Desenha igual ao `BannerItem`: a MESMA caixa (2:1 → 3:1 → 3,5:1), a imagem com a lateral esquerda
  * esmaecida e o texto real por cima (não corta no celular, ao contrário do texto desenhado dentro da imagem).
  *
- * O slide inteiro é um link para a campanha e o botão é um link IRMÃO. Com participação aberta no prazo (`cta`) o botão leva ao
- * envio da receita e o rótulo é o texto configurado (ou "Envie sua receita" se vazio); sem `cta`, o botão só aparece se houver
- * texto configurado e é decorativo (o slide já é o link).
+ * O slide inteiro é um link para a campanha e o botão é um link IRMÃO. Com participação aberta no prazo (`cta`) o botão leva à
+ * PÁGINA DA CAMPANHA (o mesmo destino do slide) e o rótulo é o texto configurado (ou "Ver campanha" se vazio); sem `cta`, o botão
+ * só aparece se houver texto configurado e é decorativo (o slide já é o link).
  */
 function StyledSlide({ banner, fit, linkSlide, showButton }: { banner: CampaignSlideData; fit: BannerFit; linkSlide: boolean; showButton: boolean }) {
   const cta = showButton ? banner.cta : undefined;
