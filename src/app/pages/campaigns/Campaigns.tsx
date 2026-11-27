@@ -1,32 +1,19 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, Megaphone, PlusCircle } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, Megaphone } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "../../components/ui/Button";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Card } from "../../components/ui/Card";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../../components/ui/sheet";
 import { CampaignCard } from "../../components/campaigns/CampaignCard";
 import { EmptyState } from "../../components/campaigns/EmptyState";
 import { ErrorState } from "../../components/campaigns/ErrorState";
-import { acceptsSubmission, periodText } from "../../components/campaigns/campaignInfo";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
 import { campaignsApi, errMsg, fetchCampaignAvailability } from "../../lib/campaigns/api";
 import { LIST_TOUR } from "../../lib/campaigns/tours-collab";
 import { useAuth } from "../../context/Store";
 import { cn } from "../../lib/utils";
 import type { CollabCampaignListItem } from "../../lib/campaigns/types";
-
-/**
- * Pode cadastrar receita agora? Com o campo do servidor (`state.can_submit`) ele decide sozinho — inclusive numa
- * campanha já "Encerrada" que está na janela de receita fora do prazo (`late_window`). Servidor antigo, sem o campo:
- * deduz pelas datas como antes e só vale para campanha ainda em andamento.
- */
-const canSubmitNow = (c: CollabCampaignListItem): boolean =>
-  typeof c.state.can_submit === "boolean" ? acceptsSubmission(c) : !c.ended && acceptsSubmission(c);
-
-/** Janela de receita fora do prazo (o servidor manda `late_window`; ausente = não há). */
-const inLateWindow = (c: CollabCampaignListItem): boolean => (c.state as { late_window?: boolean }).late_window === true;
 
 /**
  * Campanhas encerradas: um controle discreto e recolhido (sem cartão em volta). Toque abre/fecha a lista; o conteúdo
@@ -70,10 +57,10 @@ function EndedCampaigns({ items }: { items: CollabCampaignListItem[] }) {
 
 /**
  * Tela inicial de Campanhas:
- *   1. "Cadastrar receita" (só quando alguma campanha aceita envio agora);
- *   2. Campanhas ativas;
- *   3. Livro de Receitas (só quando o administrador publicou);
- *   4. "Campanhas encerradas (n)": controle recolhido, só se houver encerradas.
+ *   1. Campanhas ativas (cada cartão tem o seu botão: Ver campanha / Participar da campanha / Votar / Ver resultado);
+ *   2. Livro de Receitas (só quando o administrador publicou);
+ *   3. "Campanhas encerradas (n)": controle recolhido, só se houver encerradas.
+ * Não há botão "Cadastrar receita" no topo: ele repetia o botão do cartão (pedido do usuário). Enviar receita é o botão da página da campanha.
  */
 export function Campaigns() {
   const navigate = useNavigate();
@@ -81,7 +68,6 @@ export function Campaigns() {
   const [items, setItems] = useState<CollabCampaignListItem[] | null>(null);
   const [book, setBook] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pickOpen, setPickOpen] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -100,12 +86,11 @@ export function Campaigns() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const { active, ended, submittable } = useMemo(() => {
+  const { active, ended } = useMemo(() => {
     const all = items ?? [];
     return {
       active: all.filter((c) => !c.ended),
       ended: all.filter((c) => c.ended),
-      submittable: all.filter(canSubmitNow),
     };
   }, [items]);
 
@@ -115,11 +100,6 @@ export function Campaigns() {
     storageKey: tourKey("collab", user?.id, "list", undefined, tourVersion),
     enabled: tourEnabled && !!user,
   });
-
-  const startSubmit = () => {
-    if (submittable.length === 1) navigate(`/campanhas/${submittable[0].slug}/enviar`);
-    else if (submittable.length > 1) setPickOpen(true);
-  };
 
   const noCampaigns = items !== null && items.length === 0;
 
@@ -141,7 +121,6 @@ export function Campaigns() {
           <ErrorState message={error} onRetry={() => void load()} />
         ) : items === null ? (
           <div className="space-y-4" aria-busy="true" aria-live="polite">
-            <Skeleton className="h-14 w-full rounded-2xl" />
             {[0, 1].map((i) => (
               <Card key={i} className="overflow-hidden rounded-3xl hover:shadow-sm">
                 <Skeleton className="aspect-[2/1] w-full rounded-none" />
@@ -155,17 +134,6 @@ export function Campaigns() {
           </div>
         ) : (
           <>
-            {submittable.length > 0 && (
-              <Button
-                size="lg"
-                data-tutorial="camp-submit-cta"
-                onClick={startSubmit}
-                className="h-14 w-full gap-2 rounded-2xl text-base font-bold"
-              >
-                <PlusCircle size={20} aria-hidden="true" /> Cadastrar receita
-              </Button>
-            )}
-
             {active.length > 0 && (
               <section className="space-y-3" aria-label="Campanhas ativas">
                 <h2 className="px-1 text-xs font-bold uppercase tracking-wider text-muted-foreground">Campanhas ativas</h2>
@@ -205,36 +173,6 @@ export function Campaigns() {
           </>
         )}
       </motion.div>
-
-      <Sheet open={pickOpen} onOpenChange={setPickOpen}>
-        <SheetContent side="bottom" className="max-h-[80vh] overflow-y-auto rounded-t-3xl px-1 pb-6">
-          <SheetHeader className="text-left">
-            <SheetTitle className="pr-8 text-lg">Cadastrar receita em…</SheetTitle>
-            <SheetDescription className="sr-only">Escolha a campanha</SheetDescription>
-          </SheetHeader>
-          <ul className="space-y-2 px-4">
-            {submittable.map((c) => (
-              <li key={c.id}>
-                <button
-                  type="button"
-                  onClick={() => { setPickOpen(false); navigate(`/campanhas/${c.slug}/enviar`); }}
-                  className="flex min-h-14 w-full items-center gap-3 rounded-2xl border border-border bg-card px-4 py-2 text-left transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-bold text-foreground">{c.name}</span>
-                    {inLateWindow(c) ? (
-                      <span className="block text-xs text-muted-foreground">Fora do prazo: não concorre à votação</span>
-                    ) : (
-                      periodText(c) && <span className="block text-xs text-muted-foreground">{periodText(c)}</span>
-                    )}
-                  </span>
-                  <ChevronRight size={16} className="shrink-0 text-muted-foreground" aria-hidden="true" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </SheetContent>
-      </Sheet>
 
       <CampaignTour steps={LIST_TOUR} tour={tour} />
     </div>

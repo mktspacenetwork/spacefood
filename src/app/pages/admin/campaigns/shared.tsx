@@ -204,6 +204,7 @@ export function ReasonDialog({
   label = "Justificativa",
   placeholder,
   minLength = 0,
+  maxLength = 1000,
   confirmLabel = "Confirmar",
   destructive = false,
   pending = false,
@@ -217,6 +218,8 @@ export function ReasonDialog({
   label?: string;
   placeholder?: string;
   minLength?: number;
+  /** Limite de caracteres do texto (padrão 1000; a exclusão de receita usa 500, o mesmo teto do servidor). */
+  maxLength?: number;
   confirmLabel?: string;
   destructive?: boolean;
   pending?: boolean;
@@ -247,7 +250,7 @@ export function ReasonDialog({
             onChange={(e) => setText(e.target.value)}
             placeholder={placeholder}
             rows={4}
-            maxLength={1000}
+            maxLength={maxLength}
             className="rounded-xl min-h-24"
             disabled={pending}
           />

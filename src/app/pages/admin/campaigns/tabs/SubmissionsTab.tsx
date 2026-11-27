@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ChefHat, Loader2, Lock, Pencil, Search, XCircle } from "lucide-react";
+import { CheckCircle2, ChefHat, Loader2, Lock, Pencil, Search, Trash2, XCircle } from "lucide-react";
 import { Badge } from "../../../../components/ui/Badge";
 import { Button } from "../../../../components/ui/Button";
 import { Card } from "../../../../components/ui/Card";
@@ -240,7 +240,7 @@ function SubmissionSheet({
     <Sheet open={!!submissionId} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full sm:max-w-xl overflow-y-auto p-0">
         {submissionId && (
-          <SubmissionDetail key={submissionId} campaignId={campaignId} submissionId={submissionId} perms={perms} onChanged={onChanged} />
+          <SubmissionDetail key={submissionId} campaignId={campaignId} submissionId={submissionId} perms={perms} onChanged={onChanged} onClose={onClose} />
         )}
       </SheetContent>
     </Sheet>
@@ -248,8 +248,8 @@ function SubmissionSheet({
 }
 
 function SubmissionDetail({
-  campaignId, submissionId, perms, onChanged,
-}: { campaignId: string; submissionId: string; perms: Record<string, boolean>; onChanged: () => void }) {
+  campaignId, submissionId, perms, onChanged, onClose,
+}: { campaignId: string; submissionId: string; perms: Record<string, boolean>; onChanged: () => void; onClose: () => void }) {
   const d = useLoader<AdminSubmissionDetail>(
     () => campaignsApi.get(`/admin/campaigns/${campaignId}/submissions/${submissionId}`),
     [campaignId, submissionId],
@@ -257,6 +257,7 @@ function SubmissionDetail({
   const { busy, run } = useBusy();
   const [rejectOpen, setRejectOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const base = `/admin/campaigns/${campaignId}/submissions/${submissionId}`;
   const sub = d.data?.submission;
@@ -268,6 +269,12 @@ function SubmissionDetail({
   const reject = async (reason: string) => {
     const r = await run("reject", () => campaignsApi.post(`${base}/reject`, { reason }), "Receita reprovada.");
     if (r.ok) { setRejectOpen(false); d.reload(); onChanged(); }
+  };
+
+  // Só receita REPROVADA pode ser excluída (nada é apagado: a receita fica guardada e a auditoria registra o motivo). A vaga do autor volta.
+  const remove = async (reason: string) => {
+    const r = await run("delete", () => campaignsApi.post(`${base}/delete`, { reason }), "Receita excluída. O colaborador foi avisado e pode enviar outra.");
+    if (r.ok) { setDeleteOpen(false); onChanged(); onClose(); }
   };
 
   return (
@@ -350,9 +357,22 @@ function SubmissionDetail({
                   )}
                 </div>
               )}
-              <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => setEditOpen(true)} disabled={busy !== null}>
-                <Pencil size={13} /> Corrigir texto
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" className="gap-2 rounded-xl" onClick={() => setEditOpen(true)} disabled={busy !== null}>
+                  <Pencil size={13} /> Corrigir texto
+                </Button>
+                {sub.status === "rejected" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 rounded-xl border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/30"
+                    onClick={() => setDeleteOpen(true)}
+                    disabled={busy !== null}
+                  >
+                    <Trash2 size={13} /> Excluir receita
+                  </Button>
+                )}
+              </div>
             </div>
           )}
 
@@ -383,6 +403,20 @@ function SubmissionDetail({
             destructive
             pending={busy === "reject"}
             onConfirm={reject}
+          />
+          <ReasonDialog
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            title="Excluir receita reprovada"
+            description="A receita sai das listas e a vaga do colaborador volta, para ele poder enviar outra. Ela fica guardada com o motivo no histórico da campanha. O colaborador será avisado."
+            label="Motivo da exclusão"
+            placeholder="Explique o motivo (mínimo de 5 caracteres)"
+            minLength={5}
+            maxLength={500}
+            confirmLabel="Excluir receita"
+            destructive
+            pending={busy === "delete"}
+            onConfirm={remove}
           />
           {editOpen && (
             <EditDialog

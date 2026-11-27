@@ -16,12 +16,15 @@ export function SubmissionStatus({
   reviewedAt,
   reason,
   canEdit,
+  canDelete,
 }: {
   status: Status;
   submittedAt: string | null;
   reviewedAt: string | null;
   reason: string | null;
   canEdit?: boolean;
+  /** A pessoa pode EXCLUIR esta receita reprovada e enviar outra (só a tela "Minhas receitas" passa isto). */
+  canDelete?: boolean;
 }) {
   const view =
     status === "approved"
@@ -48,7 +51,11 @@ export function SubmissionStatus({
             <MessageSquareWarning size={14} aria-hidden="true" /> Motivo
           </p>
           <p className="whitespace-pre-line text-sm leading-relaxed text-red-900 dark:text-red-100">{reason?.trim() || "A equipe não informou um motivo."}</p>
-          {canEdit && <p className="mt-2 text-xs text-red-800/80 dark:text-red-200/80">Você pode corrigir e enviar de novo.</p>}
+          {canEdit && (
+            <p className="mt-2 text-xs text-red-800/80 dark:text-red-200/80">
+              {canDelete ? "Você pode corrigir e reenviar esta receita, ou excluí-la e enviar uma nova." : "Você pode corrigir e enviar de novo."}
+            </p>
+          )}
         </div>
       )}
     </div>

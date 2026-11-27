@@ -184,7 +184,7 @@ export const AUDIT_ACTION: Record<string, string> = {
   EXTEND_STAGE: "Etapa prorrogada", PAUSE_STAGE: "Etapa pausada", REOPEN_STAGE: "Etapa reaberta",
   SUBMIT_RECIPE: "Receita enviada", FINALIZE_SUBMISSION: "Envio da receita concluído", UPDATE_SUBMISSION: "Receita editada",
   ADMIN_EDIT_SUBMISSION: "Receita corrigida pela administração", APPROVE_SUBMISSION: "Receita aprovada",
-  REJECT_SUBMISSION: "Receita reprovada", CAST_VOTE: "Voto registrado", INVALIDATE_VOTE: "Voto invalidado",
+  REJECT_SUBMISSION: "Receita reprovada", DELETE_SUBMISSION: "Receita reprovada excluída", CAST_VOTE: "Voto registrado", INVALIDATE_VOTE: "Voto invalidado",
   END_VOTING_NOW: "Votação encerrada manualmente", CLOSE_VOTING: "Votação apurada", DECIDE_TIE: "Desempate decidido",
   CONFIRM_WINNER: "Vencedor confirmado", ANNOUNCE_RESULTS: "Resultado divulgado", EXPORT_REPORT: "Relatório exportado",
   SCHEDULE_ANNOUNCEMENT: "Divulgação programada", CANCEL_ANNOUNCEMENT: "Programação de divulgação cancelada",

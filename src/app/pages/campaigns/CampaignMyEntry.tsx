@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { CheckCircle2, ClipboardList, Lock, Pencil, Plus } from "lucide-react";
+import { CheckCircle2, ClipboardList, Lock, Pencil, Plus, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
+import { toast } from "sonner";
 import { Button } from "../../components/ui/Button";
 import { Skeleton } from "../../components/ui/skeleton";
 import { RecipeTile, RecipeViewToggle, StatusBadge, useRecipeView } from "../../components/campaigns/RecipeView";
@@ -10,6 +11,7 @@ import { EmptyState } from "../../components/campaigns/EmptyState";
 import { LateBadge, LateNote, RecipePhotos, RecipeText } from "../../components/campaigns/RecipeBody";
 import { RecipeSheet, VOTING_LOCKED_MSG, useRecipeSheetParam, votingLocked } from "../../components/campaigns/RecipeSheet";
 import { ErrorState } from "../../components/campaigns/ErrorState";
+import { DeleteRecipeDialog } from "../../components/campaigns/DeleteRecipeDialog";
 import { CampaignTour, TourButton, tourKey, useTour } from "../../components/campaigns/CampaignTour";
 import { useCampaignCtx } from "./CampaignLayout";
 import { useAuth } from "../../context/Store";
@@ -24,10 +26,10 @@ type Payload = MySubmissions;
  * Minhas receitas: tudo o que a pessoa enviou nesta campanha (uma, ou várias se a campanha permitir),
  * no mesmo padrão visual de "Receitas" (cards ou lista, com selo da situação).
  * Tocar numa receita abre a folha com o texto completo, a situação, o motivo quando não foi aprovada
- * e o botão de editar.
+ * e os botões: editar (ou "Corrigir e reenviar") e, só para receita reprovada, EXCLUIR (a vaga volta e dá para enviar outra).
  */
 export function CampaignMyEntry() {
-  const { campaign, state: ctxState, slug } = useCampaignCtx();
+  const { campaign, state: ctxState, slug, refresh } = useCampaignCtx();
   const { user } = useAuth();
   const navigate = useNavigate();
   const base = `/campanhas/${slug}`;
@@ -37,6 +39,9 @@ export function CampaignMyEntry() {
   // Receita aberta na folha (texto completo, situação e botão de editar). Fica na URL: o "voltar" fecha a folha.
   const [selId, setSelId] = useRecipeSheetParam();
   const [view, setView] = useRecipeView();
+  // Excluir a própria receita reprovada: confirmação + envio em andamento (bloqueia clique duplo).
+  const [delOpen, setDelOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -89,12 +94,33 @@ export function CampaignMyEntry() {
   const lateOpen = live && !!state.late_window;
   const canEdit = (s: MySubmission) =>
     multi ? s.status !== "approved" && ((regOpen && state.can_edit !== false) || (lateOpen && !!s.is_late)) : !!state.can_edit;
+  // Excluir vale para receita REPROVADA, nas mesmas condições da edição (o servidor confere de novo).
+  const canDelete = (s: MySubmission) => s.status === "rejected" && canEdit(s);
   // A votação começou: nada de enviar nem editar (mensagem clara no lugar de "participação não está aberta").
   const lockedByVoting = votingLocked(state);
   const limitReached = multi && items.length >= max && (regOpen || lateOpen);
   const selected = items.find((x) => x.id === selId) ?? null;
   const coverOf = (s: MySubmission) => s.media.find((m) => m.kind === "main_photo") ?? s.media.find((m) => m.kind === "photo");
   const photoOf = (s: MySubmission) => coverOf(s)?.url ?? null;
+
+  const doDelete = async () => {
+    if (!selected || deleting) return;
+    setDeleting(true);
+    try {
+      await campaignsApi.del(`${api}/submission/${encodeURIComponent(selected.id)}`);
+      setDelOpen(false);
+      setSelId(null);
+      toast.success("Receita excluída. Você já pode enviar uma nova receita.");
+      await Promise.all([load(), refresh()]);
+    } catch (e) {
+      setDelOpen(false);
+      toast.error(errMsg(e, "Não foi possível excluir a receita. Tente de novo."));
+      // o estado mudou (ex.: a votação começou ou a receita já não existe): recarrega para a tela refletir a realidade
+      if (e instanceof CampaignApiError && (e.status === 409 || e.status === 404)) { setSelId(null); void load(); void refresh(); }
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const newButton = (
     <Button
@@ -197,16 +223,29 @@ export function CampaignMyEntry() {
         subtitle={selected ? "Enviada por você" : undefined}
         footer={
           selected && canEdit(selected) ? (
-            <Button
-              size="lg"
-              variant={selected.status === "rejected" || selected.status === "pending_media" ? "primary" : "outline"}
-              data-tutorial="camp-edit"
-              onClick={() => navigate(`${base}/enviar/${selected.id}`)}
-              className="h-14 w-full gap-2 rounded-2xl text-base font-bold"
-            >
-              <Pencil size={18} aria-hidden="true" />
-              {selected.status === "pending_media" ? "Terminar o envio" : selected.status === "rejected" ? "Corrigir e reenviar" : "Editar receita"}
-            </Button>
+            <div className="space-y-2">
+              <Button
+                size="lg"
+                variant={selected.status === "rejected" || selected.status === "pending_media" ? "primary" : "outline"}
+                data-tutorial="camp-edit"
+                onClick={() => navigate(`${base}/enviar/${selected.id}`)}
+                className="h-14 w-full gap-2 rounded-2xl text-base font-bold"
+              >
+                <Pencil size={18} aria-hidden="true" />
+                {selected.status === "pending_media" ? "Terminar o envio" : selected.status === "rejected" ? "Corrigir e reenviar" : "Editar receita"}
+              </Button>
+              {canDelete(selected) && (
+                <Button
+                  size="lg"
+                  variant="outline"
+                  data-tutorial="camp-delete"
+                  onClick={() => setDelOpen(true)}
+                  className="h-12 w-full gap-2 rounded-2xl border-red-300 text-base font-semibold text-red-700 hover:bg-red-50 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/30"
+                >
+                  <Trash2 size={18} aria-hidden="true" /> Excluir receita
+                </Button>
+              )}
+            </div>
           ) : selected && selected.status !== "approved" && lockedByVoting ? (
             <p role="note" className="flex items-start gap-2 text-sm text-muted-foreground">
               <Lock size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
@@ -225,11 +264,20 @@ export function CampaignMyEntry() {
               reviewedAt={selected.reviewed_at}
               reason={selected.rejection_reason}
               canEdit={canEdit(selected)}
+              canDelete={canDelete(selected)}
             />
             <RecipeText story={selected.description} ingredients={selected.ingredients} preparation={selected.preparation} />
           </>
         )}
       </RecipeSheet>
+
+      <DeleteRecipeDialog
+        open={delOpen && !!selected}
+        onOpenChange={setDelOpen}
+        dishName={selected?.dish_name ?? ""}
+        loading={deleting}
+        onConfirm={() => void doDelete()}
+      />
 
       <CampaignTour steps={MYENTRY_TOUR} tour={tour} />
     </motion.div>

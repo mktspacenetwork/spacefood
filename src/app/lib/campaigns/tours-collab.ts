@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import {
   Megaphone, CalendarDays, MousePointerClick, Camera, Send, Pencil, Vote, ShieldCheck, ListOrdered,
-  Trophy, Images, ClipboardList, Info, UtensilsCrossed, ListChecks, BookOpen, PlusCircle,
+  Trophy, Images, ClipboardList, Info, UtensilsCrossed, ListChecks, BookOpen,
 } from "lucide-react";
 import type { TourStep } from "../../components/campaigns/CampaignTour";
 
@@ -21,12 +21,6 @@ export const LIST_TOUR: TourStep[] = [
     icon: icon(Megaphone),
     title: "Campanhas",
     description: "Aqui ficam as campanhas ativas. Toque em uma para participar.",
-  },
-  {
-    selector: "camp-submit-cta",
-    icon: icon(PlusCircle),
-    title: "Cadastrar receita",
-    description: "Cadastre sua receita por aqui. Em campanha com votação, passado o prazo ainda dá para enviar até o resultado, mas a receita não concorre à votação.",
   },
   {
     selector: "camp-book-card",
@@ -173,8 +167,8 @@ export const MYENTRY_TOUR: TourStep[] = [
   {
     selector: "camp-edit",
     icon: icon(Pencil),
-    title: "Editar",
-    description: "Dá para editar enquanto ela não for aprovada.",
+    title: "Editar ou excluir",
+    description: "Dá para editar enquanto ela não for aprovada. Se for reprovada, você pode corrigir e reenviar, ou excluir a receita e enviar uma nova.",
   },
 ];
 

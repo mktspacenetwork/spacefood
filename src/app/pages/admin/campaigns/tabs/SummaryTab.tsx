@@ -297,7 +297,7 @@ export function SummaryTab(props: SummaryTabProps) {
 /** Ações do histórico que valem como "movimentação relevante" na visão geral (sem votos nem exportações). */
 const RECENT_ACTIONS = new Set([
   "PUBLISH_CAMPAIGN", "SUSPEND_CAMPAIGN", "RESUME_CAMPAIGN", "CLOSE_CAMPAIGN", "UPDATE_CAMPAIGN", "SET_PERIOD",
-  "APPROVE_SUBMISSION", "REJECT_SUBMISSION", "END_VOTING_NOW", "CLOSE_VOTING", "DECIDE_TIE", "CONFIRM_WINNER",
+  "APPROVE_SUBMISSION", "REJECT_SUBMISSION", "DELETE_SUBMISSION", "END_VOTING_NOW", "CLOSE_VOTING", "DECIDE_TIE", "CONFIRM_WINNER",
   "ANNOUNCE_RESULTS", "SCHEDULE_ANNOUNCEMENT",
 ]);
 

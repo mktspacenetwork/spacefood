@@ -139,6 +139,8 @@ function fromPg(error: any): AppError {
     }
     if (code === "MEDIA_LIMIT" && details === "photos_max_3") return new AppError(info[0], code, "Cada receita aceita no máximo 3 fotos.", details);
     if (code === "MEDIA_NOT_ALLOWED" && details === "photos") return new AppError(info[0], code, "Esta campanha não aceita fotos.", details);
+    if (code === "INVALID_STATE" && details === "not_rejected") return new AppError(info[0], code, "Só é possível excluir uma receita reprovada.", details);
+    if (code === "INVALID_STATE" && details === "in_book") return new AppError(info[0], code, "Esta receita está no Livro de Receitas e não pode ser excluída.", details);
     if (info) return new AppError(info[0], code, info[1], details);
     return new AppError(422, code, "Operação não permitida (" + code + ").", details);
   }
@@ -706,6 +708,19 @@ app.put("/campaigns/:slug/submission/:id", async (c) => {
   return c.json({ changed: r.changed, status: r.status, uploads: await ticketsFor(r.uploads ?? [], new Set(prepared.webs.map((w) => w.index))) });
 });
 
+// Excluir a PRÓPRIA receita reprovada (a vaga volta e a pessoa pode enviar outra). Só reprovada, só a dela, nas mesmas portas da edição.
+// Nada é apagado de verdade: o banco move a receita (e a mídia) para o arquivo morto e grava a auditoria.
+app.delete("/campaigns/:slug/submission/:id", async (c) => {
+  const { camp, user } = await collab(c, c.req.param("slug"));
+  const r = await rpc<Row>("campaign_delete_submission", {
+    p_actor: { id: user.id, name: user.name, role: "user" }, p_campaign: camp.id, p_submission: c.req.param("id"), p_user: user.id, p_reason: null,
+  }).catch(async (e) => {
+    if (e instanceof AppError && e.code === "HAS_VOTES") throw new AppError(409, e.code, "Esta receita já recebeu votos e não pode ser excluída.");
+    throw await votingLockedOr(e, camp.id);
+  });
+  return c.json({ deleted: true, dish_name: r.dish_name });
+});
+
 app.get("/campaigns/:slug/vote", async (c) => {
   const { camp, state, user } = await collab(c, c.req.param("slug"));
   if (!camp.features?.voting) throw new AppError(404, "CAMPAIGN_UNAVAILABLE", "Campanha indisponível.");
@@ -1225,6 +1240,26 @@ app.put("/admin/campaigns/:id/submissions/:sid", async (c) => {
   for (const k of ["dish_name", "description", "ingredients", "preparation"]) if (typeof b[k] === "string") fields[k] = b[k];
   await rpc("campaign_admin_edit_submission", { p_actor: a.actor, p_campaign: c.req.param("id"), p_submission: c.req.param("sid"), p_fields: fields, p_reason: strOrUndef(b.reason) ?? "" });
   return c.json({ ok: true });
+});
+
+// Excluir receita REPROVADA (administração): motivo obrigatório (5 a 500), auditado; a pessoa é avisada e a vaga dela volta.
+// A receita sai das listas, mas fica guardada inteira (campaign_submissions_deleted + auditoria DELETE_SUBMISSION).
+app.post("/admin/campaigns/:id/submissions/:sid/delete", async (c) => {
+  const a = await requireAdmin(c, "campaigns_review");
+  const id = c.req.param("id");
+  const b = await body(c);
+  const reason = typeof b.reason === "string" ? b.reason.trim() : "";
+  if (reason.length < 5) throw new AppError(422, "REASON_REQUIRED", "Informe o motivo da exclusão (mínimo de 5 caracteres).");
+  if (reason.length > 500) throw new AppError(422, "REASON_TOO_LONG", "O motivo pode ter no máximo 500 caracteres.");
+  const r = await rpc<Row>("campaign_delete_submission", {
+    p_actor: a.actor, p_campaign: id, p_submission: c.req.param("sid"), p_user: null, p_reason: reason,
+  }).catch((e) => {
+    if (e instanceof AppError && e.code === "HAS_VOTES") throw new AppError(409, e.code, "Esta receita já recebeu votos e não pode ser excluída.");
+    throw e;
+  });
+  const camp = await getCampaignById(id);
+  wait(notifyUser(id, r.user_id, "submission_deleted", c.req.param("sid"), "Receita excluída", `Sua receita ${r.dish_name} (reprovada) foi excluída da campanha ${camp.name} pela administração. Você pode enviar uma nova receita, se a campanha ainda aceitar.`));
+  return c.json({ deleted: true });
 });
 
 app.get("/admin/campaigns/:id/participants", async (c) => {
