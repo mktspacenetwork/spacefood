@@ -214,7 +214,7 @@ export function BannerCarousel({ userUnit, campaignsOnly = false }: { userUnit?:
             if (banner.campaign) {
               return (
                 <div key={banner.id} className="outline-none h-full">
-                  <CampaignBannerSlide banner={banner} />
+                  <CampaignBannerSlide banner={banner} fit="container" />
                 </div>
               );
             }

@@ -13,9 +13,10 @@ import type { BannerFit } from "./BannerTextLayer";
  * (sem texto: só a imagem, ou o nome sobre o laranja quando não há capa). Nada é substituído nem simplificado.
  *
  * A caixa é a dos banners comuns (2:1 → 3:1 → 3,5:1, `object-cover`, posição `center right`).
- *  - `fit="viewport"` (Home): medidas por tamanho de TELA, como os banners comuns.
- *  - `fit="container"` (Campanhas): a página é mais estreita que a Home; em tablet/computador as medidas do texto seguem a
- *    largura do próprio banner (ver `BannerTextLayer`). No celular é idêntico à Home.
+ *  - `fit="container"` (Home e Campanhas): em tablet/computador as medidas do texto seguem a largura do PRÓPRIO banner (ver
+ *    `BannerTextLayer`). A Home usa este modo porque, com o menu lateral aberto, o banner é mais estreito que a tela e as medidas
+ *    por tela cortavam o texto. No celular é igual nos dois.
+ *  - `fit="viewport"`: medidas por tamanho de TELA, como os banners comuns (sem uso hoje; fica para quem precisar).
  *  - `linkSlide={false}`: o slide inteiro NÃO é link (usado na própria página da campanha, para não "abrir a si mesma").
  *  - `showButton={false}`: o banner aparece SEM o botão (o texto, título e descrição, continua). Usado na área de Campanhas
  *    (lista e página da campanha), onde o botão repetiria a ação que o cartão e a página já oferecem; o botão fica só na Home.
